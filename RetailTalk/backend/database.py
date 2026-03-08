@@ -1,0 +1,111 @@
+"""
+Database connection helpers for Supabase.
+Uses psycopg (v3) for direct PostgreSQL/pgvector queries (search),
+and supabase-py for standard CRUD operations.
+"""
+
+import psycopg
+from psycopg.rows import dict_row
+import numpy as np
+from supabase import create_client, Client
+from config import SUPABASE_URL, SUPABASE_KEY, DATABASE_URL
+
+# --- Supabase Client (for CRUD operations) ---
+
+_supabase_client: Client = None
+
+
+def get_supabase() -> Client:
+    """Get or create the Supabase client for standard CRUD operations."""
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
+
+
+# --- Direct PostgreSQL connection (for pgvector queries) ---
+
+def get_db_connection():
+    """Create a new psycopg3 connection for pgvector queries."""
+    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    return conn
+
+
+def close_db_pool():
+    """Placeholder for shutdown compatibility."""
+    pass
+
+
+# --- Helper: embedding <-> database conversion ---
+
+def embedding_to_pgvector(embedding: np.ndarray) -> str:
+    """Convert a numpy embedding to pgvector string format: '[0.1,0.2,...]'"""
+    return "[" + ",".join(f"{x:.8f}" for x in embedding.tolist()) + "]"
+
+
+def pgvector_to_embedding(pgvector_str: str) -> np.ndarray:
+    """Convert a pgvector string back to numpy array."""
+    values = pgvector_str.strip("[]").split(",")
+    return np.array([float(v) for v in values], dtype=np.float32)
+
+
+# --- pgvector similarity search ---
+
+def search_similar_products(query_embedding: np.ndarray, top_k: int = 50):
+    """
+    Find the top_k most similar products to the query embedding
+    using pgvector cosine similarity search.
+    Returns list of dicts with product info + embedding.
+    """
+    conn = get_db_connection()
+    embedding_str = embedding_to_pgvector(query_embedding)
+    
+    query = """
+        SELECT 
+            id, seller_id, title, description, price, images,
+            embedding::text as embedding_text,
+            1 - (embedding <=> %s::vector) as similarity
+        FROM products
+        WHERE is_active = true AND embedding IS NOT NULL
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (embedding_str, embedding_str, top_k))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    
+    results = []
+    for row in rows:
+        results.append({
+            "id": str(row["id"]),
+            "seller_id": str(row["seller_id"]),
+            "title": row["title"],
+            "description": row["description"],
+            "price": float(row["price"]),
+            "images": row["images"] or [],
+            "embedding": pgvector_to_embedding(row["embedding_text"]),
+            "similarity": float(row["similarity"]),
+        })
+    
+    return results
+
+
+def store_product_embedding(product_id: str, embedding: np.ndarray):
+    """Store/update the BERT embedding for a product."""
+    conn = get_db_connection()
+    embedding_str = embedding_to_pgvector(embedding)
+    
+    query = """
+        UPDATE products SET embedding = %s::vector WHERE id = %s
+    """
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (embedding_str, product_id))
+        conn.commit()
+    finally:
+        conn.close()

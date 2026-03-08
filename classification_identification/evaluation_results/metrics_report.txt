@@ -1,0 +1,17 @@
+Accuracy: 0.7000
+Macro F1: 0.6943
+Micro F1: 0.7000
+Weighted F1: 0.6966
+Cohen's Kappa: 0.5775
+MCC: 0.5796
+
+              precision    recall  f1-score   support
+
+           C       0.75      0.75      0.75         4
+           E       0.67      0.75      0.71         8
+           I       0.75      0.75      0.75         4
+           S       0.67      0.50      0.57         4
+
+    accuracy                           0.70        20
+   macro avg       0.71      0.69      0.69        20
+weighted avg       0.70      0.70      0.70        20

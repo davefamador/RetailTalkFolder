@@ -1,0 +1,81 @@
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ========================
+# Virtual Environment
+# ========================
+venv/
+.venv/
+env/
+
+# ========================
+# Models & Checkpoints (large binary files)
+# ========================
+ranking/model/
+ranking/model_checkpoints/
+checkpoints/
+classification_identification/quick_train/models/
+classification_identification/text_representations/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+
+# ========================
+# Datasets (large data files)
+# ========================
+shopping_queries_dataset/
+*.parquet
+*.npy
+*.xlsx
+
+# ========================
+# Prompt files
+# ========================
+synthetic_data_prompt.md
+synthetic_slot_prompt.md
+dataset_building_guide.md.resolved
+intent_classification_architecture.md.resolved
+
+# ========================
+# Next.js
+# ========================
+.next/
+out/
+node_modules/
+
+# ========================
+# IDE & OS
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+Thumbs.db
+.DS_Store
+~$*
+
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.local
+.env.*.local
+
+# ========================
+# Misc
+# ========================
+*.log
+tmp_*.py

@@ -1,0 +1,10 @@
+torch==2.8.0
+transformers==4.11.0
+sentence-transformers==2.1.0
+scikit-learn==1.5.0
+pandas==1.1.5
+datasets==1.13.3
+aicrowd-cli==0.1.15
+numpy==1.26.4
+nltk==3.9.2
+pyarrow==6.0.1
