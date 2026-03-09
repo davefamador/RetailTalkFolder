@@ -11,50 +11,38 @@ RetailTalk is a hybrid product search engine that combines traditional keyword m
 When a user submits a search query, RetailTalk processes it through two parallel lanes and merges the results:
 
 ```
-                          ┌──────────────────┐
-                          │   User Query     │
-                          └────────┬─────────┘
-                                   │
-                    ┌──────────────┴──────────────┐
-                    ▼                              ▼
-          ┌─────────────────┐           ┌──────────────────────┐
-          │  LANE 1: Keyword │           │  LANE 2: ESCI Model  │
-          │    (20% slots)   │           │    (80% slots)        │
-          └────────┬────────┘           └──────────┬───────────┘
-                   │                               │
-      ┌────────────▼────────────┐     ┌────────────▼────────────┐
-      │ ILIKE text search       │     │ 1. BERT Embedding       │
-      │ on title & description  │     │    (query → 768-d vec)  │
-      └────────────┬────────────┘     └────────────┬────────────┘
-                   │                               │
-      ┌────────────▼────────────┐     ┌────────────▼────────────┐
-      │ ESCI Classifier         │     │ 2. pgvector Similarity  │
-      │ (label + probabilities) │     │    (cosine, top-50)     │
-      └────────────┬────────────┘     └────────────┬────────────┘
-                   │                               │
-                   │                  ┌────────────▼────────────┐
-                   │                  │ 3. CrossEncoder Ranker  │
-                   │                  │    (pairwise re-rank)   │
-                   │                  └────────────┬────────────┘
-                   │                               │
-                   │                  ┌────────────▼────────────┐
-                   │                  │ 4. ESCI Classifier      │
-                   │                  │    (E / S / C / I)      │
-                   │                  └────────────┬────────────┘
-                   │                               │
-                   │                  ┌────────────▼────────────┐
-                   │                  │ 5. Score Blending       │
-                   │                  │    50% Ranker           │
-                   │                  │    30% Classifier       │
-                   │                  │    20% Similarity       │
-                   │                  └────────────┬────────────┘
-                   │                               │
-                   └───────────┬───────────────────┘
-                               ▼
-                    ┌──────────────────────┐
-                    │  Merge & Deduplicate  │
-                    │  → Final Results     │
-                    └──────────────────────┘
+                          User Query: "I want an affordable dress"
+                                    |
+                    ================|================
+                    |               |               |
+            [Intent Class.]   [Slot/Entity     [BERT Embedding
+             (NEW model)       Extraction]       (existing)]
+                    |          (NEW model)         |
+                    v               |              v
+              intent:purchase       v         768-dim vector
+                            {                      |
+                             category: "dress"     |
+                             price: "affordable"   |
+                            }                      |
+                    ================|===============|
+                                   |               |
+                            [Query Rewriting]      |
+                            "dress" + filters      |
+                                   |               |
+                    ===============|================
+                    |              |               |
+            [Supabase Filter] [pgvector      [CrossEncoder
+             price <= budget   Similarity]    Ranker]
+                    |              |               |
+                    ===============|================
+                                   |
+                           [ESCI Classifier]
+                            E / S / C / I
+                                   |
+                           [Score Blending]
+                           0.5*R + 0.3*C + 0.2*S
+                                   |
+                           Final Ranked Results
 ```
 
 ### Pipeline Stages (Model Lane)
@@ -81,7 +69,7 @@ When a user submits a search query, RetailTalk processes it through two parallel
 ## Tech Stack
 
 ### Backend
-- **Python 3.10+** — Core language
+- **Python 3.9+** — Core language
 - **FastAPI** — REST API framework
 - **PyTorch** — ML model inference (Classifier + Ranker)
 - **Hugging Face Transformers** — BERT embeddings and CrossEncoder
