@@ -69,7 +69,14 @@ export default function RootLayout({ children }) {
                                 )}
 
                                 {user && user.role === 'buyer' && (
-                                    <a href="/transactions">Transactions</a>
+                                    <>
+                                        <a href="/cart">🛒 Cart</a>
+                                        <a href="/transactions">Transactions</a>
+                                    </>
+                                )}
+
+                                {user && user.role === 'delivery' && (
+                                    <a href="/delivery" style={{ color: 'var(--accent-secondary)' }}>🚚 Delivery</a>
                                 )}
 
                                 {admin && (
@@ -100,9 +107,17 @@ export default function RootLayout({ children }) {
                                             PHP {parseFloat(balance).toFixed(2)}
                                         </a>
                                     )}
-                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        {user.full_name} ({user.role})
-                                    </span>
+                                    <a href="/profile" style={{
+                                        color: 'var(--text-secondary)', fontSize: '0.85rem',
+                                        textDecoration: 'none', padding: '4px 12px', borderRadius: 8,
+                                        border: '1px solid var(--border-color)', transition: 'all 0.2s',
+                                        fontWeight: 500,
+                                    }}
+                                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(108,99,255,0.1)'; e.currentTarget.style.color = 'var(--accent-primary)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                                    >
+                                        👤 {user.full_name}
+                                    </a>
                                     <button onClick={handleLogout} className="btn btn-outline btn-sm">
                                         Logout
                                     </button>

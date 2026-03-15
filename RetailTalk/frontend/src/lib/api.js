@@ -62,8 +62,16 @@ async function apiFetch(path, options = {}) {
     }
 
     if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: 'Unknown error' }));
-        throw new Error(error.detail || `API error ${res.status}`);
+        let detail = `API error ${res.status}`;
+        try {
+            const error = await res.json();
+            detail = error.detail || detail;
+        } catch {
+            // Response body was empty or not JSON
+            const text = await res.text().catch(() => '');
+            if (text) detail = text;
+        }
+        throw new Error(detail);
     }
 
     return res.json();
@@ -194,6 +202,10 @@ export async function getSellerInsights() {
     return apiFetch('/insights/seller');
 }
 
+export async function getBuyerRecommendations() {
+    return apiFetch('/insights/buyer/recommendations');
+}
+
 // --- Transactions ---
 export async function buyProduct(productId, quantity = 1) {
     return apiFetch('/transactions/buy', {
@@ -298,6 +310,124 @@ export async function adminGetProducts(search = '') {
 
 export async function adminUpdateProduct(productId, data) {
     return apiFetch(`/admin/products/${productId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function adminGetUserDetail(userId) {
+    return apiFetch(`/admin/users/${userId}/detail`);
+}
+
+export async function adminApproveOrder(transactionId) {
+    return apiFetch(`/admin/transactions/${transactionId}/status`, { method: 'PUT' });
+}
+
+export async function adminRegisterDelivery(fullName, email, password, contactNumber) {
+    return apiFetch('/admin/delivery/register', {
+        method: 'POST',
+        body: JSON.stringify({ full_name: fullName, email, password, contact_number: contactNumber }),
+    });
+}
+
+// --- Contacts ---
+export async function getMyContact() {
+    return apiFetch('/contacts/me');
+}
+
+export async function setMyContact(contactNumber) {
+    return apiFetch('/contacts/me', {
+        method: 'PUT',
+        body: JSON.stringify({ contact_number: contactNumber }),
+    });
+}
+
+// --- Cart ---
+export async function getCart() {
+    return apiFetch('/cart/');
+}
+
+export async function addToCart(productId, quantity = 1) {
+    return apiFetch('/cart/add', {
+        method: 'POST',
+        body: JSON.stringify({ product_id: productId, quantity }),
+    });
+}
+
+export async function updateCartItem(productId, quantity) {
+    return apiFetch('/cart/update', {
+        method: 'PUT',
+        body: JSON.stringify({ product_id: productId, quantity }),
+    });
+}
+
+export async function removeFromCart(productId) {
+    return apiFetch(`/cart/remove/${productId}`, { method: 'DELETE' });
+}
+
+export async function clearCart() {
+    return apiFetch('/cart/clear', { method: 'DELETE' });
+}
+
+export async function checkoutCart() {
+    return apiFetch('/cart/checkout', { method: 'POST' });
+}
+
+// --- Delivery ---
+export async function getAvailableOrders() {
+    return apiFetch('/delivery/available');
+}
+
+export async function getActiveDeliveries() {
+    return apiFetch('/delivery/active');
+}
+
+export async function pickOrder(transactionId) {
+    return apiFetch(`/delivery/pick/${transactionId}`, { method: 'POST' });
+}
+
+export async function updateDeliveryStatus(transactionId, status) {
+    return apiFetch(`/delivery/status/${transactionId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+    });
+}
+
+export async function getDeliveryEarnings() {
+    return apiFetch('/delivery/earnings');
+}
+
+export async function getDeliveryHistory() {
+    return apiFetch('/delivery/history');
+}
+
+export async function deliveryWithdraw(amount) {
+    return apiFetch('/delivery/withdraw', {
+        method: 'POST',
+        body: JSON.stringify({ amount }),
+    });
+}
+
+// --- Pending Products (Admin) ---
+export async function adminGetPendingProducts() {
+    return apiFetch('/admin/pending-products');
+}
+
+export async function adminApproveProduct(productId) {
+    return apiFetch(`/admin/products/${productId}/approve`, { method: 'PUT' });
+}
+
+export async function adminUnapproveProduct(productId) {
+    return apiFetch(`/admin/products/${productId}/unapprove`, { method: 'PUT' });
+}
+
+// --- Profile ---
+export async function getProfile() {
+    return apiFetch('/auth/profile');
+}
+
+export async function updateProfile(data) {
+    return apiFetch('/auth/profile', {
         method: 'PUT',
         body: JSON.stringify(data),
     });

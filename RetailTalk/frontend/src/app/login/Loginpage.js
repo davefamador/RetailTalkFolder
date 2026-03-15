@@ -14,8 +14,13 @@ export default function LoginPage() {
         setLoading(true);
         setError('');
         try {
-            await login(email, password);
-            window.location.href = '/';
+            const data = await login(email, password);
+            const user = data.user || {};
+            if (user.role === 'delivery') {
+                window.location.href = '/delivery';
+            } else {
+                window.location.href = '/';
+            }
         } catch (err) {
             setError(err.message);
         } finally {

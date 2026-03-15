@@ -41,7 +41,13 @@ class TransactionResponse(BaseModel):
     quantity: int = 1
     seller_amount: float
     admin_commission: float
+    delivery_fee: float = 0
     status: str
+    delivery_user_id: str = ""
+    delivery_user_name: str = ""
+    delivery_user_contact: str = ""
+    seller_name: str = ""
+    product_images: list = []
     created_at: str
 
 
@@ -86,7 +92,7 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
         raise HTTPException(status_code=403, detail="Only buyers can purchase products")
 
     # 2. Get product
-    product_result = sb.table("products").select("*").eq("id", req.product_id).eq("is_active", True).execute()
+    product_result = sb.table("products").select("*").eq("id", req.product_id).eq("is_active", True).eq("status", "approved").execute()
     if not product_result.data:
         raise HTTPException(status_code=404, detail="Product not found or not available")
 
@@ -164,7 +170,7 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
         "amount": total_price,
         "seller_amount": seller_amount,
         "admin_commission": admin_commission,
-        "status": "completed",
+        "status": "ondeliver",
     }).execute()
 
     if not txn_result.data:
@@ -181,7 +187,9 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
         quantity=int(txn.get("quantity", 1)),
         seller_amount=float(txn.get("seller_amount", 0)),
         admin_commission=float(txn.get("admin_commission", 0)),
+        delivery_fee=float(txn.get("delivery_fee", 0)),
         status=txn["status"],
+        delivery_user_id=txn.get("delivery_user_id") or "",
         created_at=txn["created_at"],
     )
 
@@ -192,8 +200,8 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
     sb = get_supabase()
     user_id = current_user["sub"]
 
-    bought = sb.table("product_transactions").select("*, products(title)").eq("buyer_id", user_id).order("created_at", desc=True).execute()
-    sold = sb.table("product_transactions").select("*, products(title)").eq("seller_id", user_id).order("created_at", desc=True).execute()
+    bought = sb.table("product_transactions").select("*, products(title, images)").eq("buyer_id", user_id).order("created_at", desc=True).execute()
+    sold = sb.table("product_transactions").select("*, products(title, images)").eq("seller_id", user_id).order("created_at", desc=True).execute()
 
     all_txns = (bought.data or []) + (sold.data or [])
     seen = set()
@@ -205,6 +213,23 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
 
     unique_txns.sort(key=lambda t: t["created_at"], reverse=True)
 
+    # Get delivery user info
+    delivery_ids = set(t.get("delivery_user_id") for t in unique_txns if t.get("delivery_user_id"))
+    delivery_names = {}
+    delivery_contacts = {}
+    if delivery_ids:
+        d_users = sb.table("users").select("id, full_name").in_("id", list(delivery_ids)).execute()
+        delivery_names = {u["id"]: u["full_name"] for u in (d_users.data or [])}
+        d_contacts = sb.table("user_contacts").select("user_id, contact_number").in_("user_id", list(delivery_ids)).execute()
+        delivery_contacts = {c["user_id"]: c["contact_number"] for c in (d_contacts.data or [])}
+
+    # Get seller names
+    seller_ids = set(t.get("seller_id") for t in unique_txns if t.get("seller_id"))
+    seller_names = {}
+    if seller_ids:
+        s_users = sb.table("users").select("id, full_name").in_("id", list(seller_ids)).execute()
+        seller_names = {u["id"]: u["full_name"] for u in (s_users.data or [])}
+
     return [
         TransactionResponse(
             id=t["id"],
@@ -212,11 +237,17 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
             seller_id=t["seller_id"],
             product_id=t["product_id"],
             product_title=t.get("products", {}).get("title", "") if t.get("products") else "",
+            product_images=t.get("products", {}).get("images", []) if t.get("products") else [],
             amount=float(t["amount"]),
             quantity=int(t.get("quantity", 1)),
             seller_amount=float(t.get("seller_amount", 0)),
             admin_commission=float(t.get("admin_commission", 0)),
+            delivery_fee=float(t.get("delivery_fee", 0)),
             status=t["status"],
+            delivery_user_id=t.get("delivery_user_id") or "",
+            delivery_user_name=delivery_names.get(t.get("delivery_user_id", ""), ""),
+            delivery_user_contact=delivery_contacts.get(t.get("delivery_user_id", ""), ""),
+            seller_name=seller_names.get(t.get("seller_id", ""), ""),
             created_at=t["created_at"],
         )
         for t in unique_txns

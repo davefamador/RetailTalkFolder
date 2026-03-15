@@ -48,6 +48,7 @@ class ProductResponse(BaseModel):
     images: list[str] = []
     tracking_number: Optional[str] = None
     is_active: bool
+    status: str = "pending"
     created_at: str
     seller_name: Optional[str] = None
 
@@ -64,6 +65,7 @@ def build_product_response(p, seller_name=""):
         images=p.get("images") or [],
         tracking_number=p.get("tracking_number"),
         is_active=p["is_active"],
+        status=p.get("status", "pending"),
         created_at=p["created_at"],
         seller_name=seller_name,
     )
@@ -176,6 +178,7 @@ async def list_products(limit: int = 50, offset: int = 0):
         sb.table("products")
         .select("*, users!products_seller_id_fkey(full_name)")
         .eq("is_active", True)
+        .eq("status", "approved")
         .gt("stock", 0)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)

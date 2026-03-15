@@ -21,7 +21,7 @@ async def log_prompt(req: PromptRequest, current_user: dict = Depends(get_curren
     sb = get_supabase()
     sb.table("user_prompts").insert({
         "user_id": current_user["sub"],
-        "prompt": req.prompt
+        "prompt_text": req.prompt
     }).execute()
     return {"status": "ok"}
 
@@ -37,8 +37,8 @@ async def get_seller_insights(current_user: dict = Depends(get_current_user)):
     sb = get_supabase()
     
     # Fetch all prompts globally (to see market trends)
-    prompts_resp = sb.table("user_prompts").select("prompt").execute()
-    prompts = [p["prompt"] for p in prompts_resp.data] if prompts_resp.data else []
+    prompts_resp = sb.table("user_prompts").select("prompt_text").execute()
+    prompts = [p["prompt_text"] for p in prompts_resp.data] if prompts_resp.data else []
 
     # 1. Zero-Result / Market Gap Analytics (Simulated via frequency/trends)
     # Since we can't truly know if they were zero-result at the time of query, 
@@ -102,29 +102,74 @@ async def get_seller_insights(current_user: dict = Depends(get_current_user)):
 
 @router.get("/buyer/recommendations")
 async def get_buyer_recommendations(current_user: dict = Depends(get_current_user)):
-    """Dynamic Recommendations based on the buyer's past prompts."""
+    """Dynamic Recommendations based on the buyer's past search history."""
     sb = get_supabase()
-    
+
     # 1. Fetch user's recent prompts
-    prompts_resp = sb.table("user_prompts").select("prompt").eq("user_id", current_user["sub"]).order("created_at", desc=True).limit(5).execute()
-    
+    prompts_resp = (
+        sb.table("user_prompts")
+        .select("prompt_text")
+        .eq("user_id", current_user["sub"])
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+
     if not prompts_resp.data:
-        return {"recommendations": [], "based_on": "popular"}
-        
-    recent_prompts = [p["prompt"] for p in prompts_resp.data]
-    
-    # Use the most recent prompt to find some similar logic
-    latest_query = recent_prompts[0]
-    
-    # Find active products matching that query via ILIKE (since BERT might be disabled)
-    search_term = f"%{latest_query}%"
-    recs_resp = sb.table("products").select("*, users!products_seller_id_fkey(full_name)").or_(
-        f"title.ilike.{search_term},description.ilike.{search_term}"
-    ).eq("is_active", True).gt("stock", 0).limit(4).execute()
-    
+        # Fallback: return popular/recent products for new users
+        fallback_resp = (
+            sb.table("products")
+            .select("*, users!products_seller_id_fkey(full_name)")
+            .eq("is_active", True)
+            .gt("stock", 0)
+            .order("created_at", desc=True)
+            .limit(6)
+            .execute()
+        )
+        products = fallback_resp.data if fallback_resp.data else []
+        # Attach seller_name for frontend
+        for p in products:
+            user_info = p.pop("users", None)
+            p["seller_name"] = user_info["full_name"] if user_info else "Seller"
+        return {"recommendations": products, "based_on": "popular"}
+
+    # 2. Deduplicate and take the 3 most recent unique search queries
+    seen = set()
+    unique_prompts = []
+    for p in prompts_resp.data:
+        text = p["prompt_text"].strip().lower()
+        if text not in seen:
+            seen.add(text)
+            unique_prompts.append(p["prompt_text"].strip())
+        if len(unique_prompts) >= 3:
+            break
+
+    # 3. Build OR filter across all unique queries
+    or_parts = []
+    for q in unique_prompts:
+        safe_q = q.replace("%", "").replace("_", "")
+        or_parts.append(f"title.ilike.%{safe_q}%")
+        or_parts.append(f"description.ilike.%{safe_q}%")
+    or_filter = ",".join(or_parts)
+
+    recs_resp = (
+        sb.table("products")
+        .select("*, users!products_seller_id_fkey(full_name)")
+        .or_(or_filter)
+        .eq("is_active", True)
+        .gt("stock", 0)
+        .limit(6)
+        .execute()
+    )
+
     products = recs_resp.data if recs_resp.data else []
-    
+
+    # Attach seller_name for frontend
+    for p in products:
+        user_info = p.pop("users", None)
+        p["seller_name"] = user_info["full_name"] if user_info else "Seller"
+
     return {
         "recommendations": products,
-        "based_on": latest_query
+        "based_on": unique_prompts[0] if unique_prompts else "popular",
     }

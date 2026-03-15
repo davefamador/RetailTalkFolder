@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin')),
+    role TEXT NOT NULL DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin', 'delivery')),
     is_banned BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -22,7 +22,13 @@ CREATE TABLE IF NOT EXISTS user_balances (
     balance DECIMAL(12,2) NOT NULL DEFAULT 0
 );
 
--- 3. Products
+-- 3. User Contacts (phone numbers for buyers and delivery users)
+CREATE TABLE IF NOT EXISTS user_contacts (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    contact_number TEXT NOT NULL
+);
+
+-- 4. Products
 CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     seller_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -33,11 +39,22 @@ CREATE TABLE IF NOT EXISTS products (
     images TEXT[] DEFAULT '{}',
     embedding vector(768),
     is_active BOOLEAN DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'unapproved')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     tracking_number TEXT DEFAULT NULL
 );
 
--- 4. Product Transactions (purchases)
+-- 5. Cart Items (buyer shopping cart)
+CREATE TABLE IF NOT EXISTS cart_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    buyer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    quantity INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(buyer_id, product_id)
+);
+
+-- 6. Product Transactions (purchases)
 CREATE TABLE IF NOT EXISTS product_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     buyer_id UUID NOT NULL REFERENCES users(id),
@@ -47,11 +64,22 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     amount DECIMAL(12,2) NOT NULL,
     seller_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     admin_commission DECIMAL(12,2) NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'cancelled', 'refunded')),
+    delivery_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
+    delivery_user_id UUID REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'ondeliver' CHECK (status IN ('ondeliver', 'delivered', 'undelivered', 'cancelled')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Stored Value Facility (deposit/withdrawal history)
+-- 7. Delivery Earnings (delivery user income per delivery)
+CREATE TABLE IF NOT EXISTS delivery_earnings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    delivery_user_id UUID NOT NULL REFERENCES users(id),
+    transaction_id UUID NOT NULL REFERENCES product_transactions(id),
+    amount DECIMAL(12,2) NOT NULL DEFAULT 90.00,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Stored Value Facility (deposit/withdrawal history)
 CREATE TABLE IF NOT EXISTS stored_value (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -60,7 +88,7 @@ CREATE TABLE IF NOT EXISTS stored_value (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. User Prompts (for search AI Insights & dynamically collected queries)
+-- 9. User Prompts (for search AI Insights & dynamically collected queries)
 CREATE TABLE IF NOT EXISTS user_prompts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,
@@ -79,3 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_products_embedding ON products
 CREATE INDEX IF NOT EXISTS idx_product_transactions_buyer ON product_transactions(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_product_transactions_seller ON product_transactions(seller_id);
 CREATE INDEX IF NOT EXISTS idx_product_transactions_product ON product_transactions(product_id);
+CREATE INDEX IF NOT EXISTS idx_product_transactions_status ON product_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_product_transactions_delivery ON product_transactions(delivery_user_id);
+CREATE INDEX IF NOT EXISTS idx_cart_items_buyer ON cart_items(buyer_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_earnings_user ON delivery_earnings(delivery_user_id);

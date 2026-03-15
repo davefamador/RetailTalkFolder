@@ -16,10 +16,120 @@ export default function SearchPage() {
     const [purchased, setPurchased] = useState(false);
     const [purchaseError, setPurchaseError] = useState('');
 
+    // Voice-to-text state
+    const [isListening, setIsListening] = useState(false);
+    const [voiceSupported, setVoiceSupported] = useState(true);
+    const [voiceError, setVoiceError] = useState('');
+
     // Load user on mount
     useEffect(() => {
         setUser(getStoredUser());
+        // Check if any voice input is possible (Speech API or MediaRecorder)
+        const hasSpeechAPI = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+        const hasMediaRecorder = !!(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
+        setVoiceSupported(hasSpeechAPI || hasMediaRecorder);
     }, []);
+
+    const handleVoiceSearch = async () => {
+        if (isListening) return;
+        setVoiceError('');
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        // --- Path 1: Native Speech Recognition API (Chrome, Edge, Safari, Opera) ---
+        if (SpeechRecognition) {
+            try {
+                const recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+                recognition.continuous = false;
+                recognition.maxAlternatives = 1;
+
+                recognition.onstart = () => setIsListening(true);
+                recognition.onend = () => setIsListening(false);
+                recognition.onerror = (event) => {
+                    setIsListening(false);
+                    if (event.error === 'not-allowed') {
+                        setVoiceError('Microphone access denied. Please allow microphone in browser settings.');
+                    } else if (event.error === 'no-speech') {
+                        setVoiceError('No speech detected. Please try again.');
+                    } else {
+                        setVoiceError('Voice recognition error. Please try again.');
+                    }
+                };
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    setQuery(transcript);
+                    setTimeout(() => {
+                        document.getElementById('search-form')?.requestSubmit();
+                    }, 200);
+                };
+
+                recognition.start();
+            } catch (err) {
+                setVoiceError('Could not start voice recognition.');
+            }
+            return;
+        }
+
+        // --- Path 2: MediaRecorder fallback (Firefox and any other browser) ---
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setIsListening(true);
+
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            const audioChunks = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                stream.getTracks().forEach(track => track.stop());
+                setIsListening(false);
+
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.webm');
+
+                try {
+                    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+                    const res = await fetch(`${API_URL}/search/transcribe`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const data = await res.json();
+                    if (data.transcript) {
+                        setQuery(data.transcript);
+                        setTimeout(() => {
+                            document.getElementById('search-form')?.requestSubmit();
+                        }, 200);
+                    } else {
+                        setVoiceError(data.error || 'Could not transcribe audio.');
+                    }
+                } catch (err) {
+                    setVoiceError('Failed to transcribe audio. Check backend connection.');
+                }
+            };
+
+            mediaRecorder.start();
+
+            // Auto-stop after 5 seconds
+            setTimeout(() => {
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }, 5000);
+        } catch (err) {
+            setIsListening(false);
+            if (err.name === 'NotAllowedError') {
+                setVoiceError('Microphone access denied. Allow it in browser settings.');
+            } else {
+                setVoiceError('Microphone not available.');
+            }
+        }
+    };
 
     const handleSearch = async (e) => {
         e.preventDefault();
@@ -81,16 +191,69 @@ export default function SearchPage() {
             </div>
 
             {/* Search Bar */}
-            <form onSubmit={handleSearch} className="search-container" style={{ marginBottom: 32 }}>
+            <form id="search-form" onSubmit={handleSearch} className="search-container" style={{ marginBottom: 32, position: 'relative' }}>
                 <input
                     type="text"
                     className="search-input"
                     placeholder="Search for products... (e.g. wireless headphones)"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    style={{ paddingLeft: 16 }}
+                    style={{ paddingLeft: 16, paddingRight: 52 }}
                 />
+                <button
+                    type="button"
+                    onClick={handleVoiceSearch}
+                    title={isListening ? 'Listening...' : 'Voice search'}
+                    style={{
+                        position: 'absolute',
+                        right: 10,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        width: 38,
+                        height: 38,
+                        borderRadius: '50%',
+                        border: 'none',
+                        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.08)',
+                        color: isListening ? '#ef4444' : 'var(--text-muted)',
+                        cursor: voiceSupported ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '1.1rem',
+                        transition: 'all 0.2s ease',
+                        animation: isListening ? 'voicePulse 1.2s ease-in-out infinite' : 'none',
+                        opacity: voiceSupported ? 1 : 0.4,
+                    }}
+                    onMouseEnter={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
+                    onMouseLeave={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                >
+                    🎤
+                </button>
             </form>
+
+            {/* Voice feedback messages */}
+            {isListening && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+                    padding: '10px 16px', borderRadius: 10,
+                    background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)',
+                    color: '#ef4444', fontSize: '0.85rem', fontWeight: 600,
+                    animation: 'voicePulse 1.2s ease-in-out infinite',
+                }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', animation: 'blink 1s infinite' }}></span>
+                    Listening... Speak now
+                </div>
+            )}
+
+            {voiceError && (
+                <div style={{
+                    marginBottom: 16, padding: '10px 16px', borderRadius: 10,
+                    background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.25)',
+                    color: '#fbbf24', fontSize: '0.85rem',
+                }}>
+                    ⚠️ {voiceError}
+                </div>
+            )}
 
             {error && <div className="alert alert-error">{error}</div>}
 
@@ -288,6 +451,18 @@ export default function SearchPage() {
                     </div>
                 </div>
             )}
+
+            {/* Voice pulse animation */}
+            <style jsx>{`
+                @keyframes voicePulse {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+                    50% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+                }
+                @keyframes blink {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.3; }
+                }
+            `}</style>
         </div>
     );
 }

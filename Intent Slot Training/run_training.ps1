@@ -80,7 +80,7 @@ function Train-SlotExtractor {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
     
-    $slotData = Join-Path $datasetDir "slotannotationdataset.xlsx"
+    $slotData = Join-Path $datasetDir "slotannotationdataset_cleaned.xlsx"
     if (-not (Test-Path $slotData)) {
         Write-Host "  ERROR: Dataset not found: $slotData" -ForegroundColor Red
         return $false

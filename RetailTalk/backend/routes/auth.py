@@ -80,8 +80,8 @@ get_current_user = verify_token
 async def register(req: RegisterRequest):
     """Register a new user account. Role must be 'buyer' or 'seller'."""
     # Validate role
-    if req.role not in ("buyer", "seller"):
-        raise HTTPException(status_code=400, detail="Role must be 'buyer' or 'seller'")
+    if req.role not in ("buyer", "seller", "delivery"):
+        raise HTTPException(status_code=400, detail="Role must be 'buyer', 'seller', or 'delivery'")
 
     sb = get_supabase()
 
@@ -265,3 +265,63 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         is_banned=user.get("is_banned", False),
         created_at=user["created_at"],
     )
+
+
+@router.get("/profile")
+async def get_profile(current_user: dict = Depends(get_current_user)):
+    """Get full user profile including balance and contact info."""
+    sb = get_supabase()
+    user = sb.table("users").select("*").eq("id", current_user["sub"]).execute()
+    if not user.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    u = user.data[0]
+
+    # Get balance
+    bal = sb.table("user_balances").select("balance").eq("user_id", current_user["sub"]).execute()
+    balance = float(bal.data[0]["balance"]) if bal.data else 0.0
+
+    # Get contact
+    contact = sb.table("user_contacts").select("contact_number").eq("user_id", current_user["sub"]).execute()
+    contact_number = contact.data[0]["contact_number"] if contact.data else ""
+
+    return {
+        "id": u["id"],
+        "email": u["email"],
+        "full_name": u["full_name"],
+        "role": u["role"],
+        "balance": balance,
+        "contact_number": contact_number,
+        "created_at": u["created_at"],
+    }
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str = None
+    email: str = None
+    contact_number: str = None
+
+
+@router.put("/profile")
+async def update_profile(req: ProfileUpdateRequest, current_user: dict = Depends(get_current_user)):
+    """Update the current user's profile."""
+    sb = get_supabase()
+    user_id = current_user["sub"]
+
+    updates = {}
+    if req.full_name:
+        updates["full_name"] = req.full_name
+    if req.email:
+        updates["email"] = req.email
+
+    if updates:
+        sb.table("users").update(updates).eq("id", user_id).execute()
+
+    if req.contact_number is not None:
+        existing = sb.table("user_contacts").select("user_id").eq("user_id", user_id).execute()
+        if existing.data:
+            sb.table("user_contacts").update({"contact_number": req.contact_number}).eq("user_id", user_id).execute()
+        else:
+            sb.table("user_contacts").insert({"user_id": user_id, "contact_number": req.contact_number}).execute()
+
+    return {"message": "Profile updated successfully"}

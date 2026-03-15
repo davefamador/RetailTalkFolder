@@ -5,10 +5,10 @@ import { getMyProducts, getTransactionHistory, getStoredUser } from '../../../li
 
 /**
  * SellerReportspage.js — Seller Insights & Reports Dashboard
- * 
- * Two sections:
- * 1. Financials — GMV, Net Revenue, AOV, Revenue Trend
- * 2. Operations/Logistics — Stock Levels, Top-Selling, Tracking, Fulfillment, Incoming Orders
+ *
+ * Financials: GMV, Net Revenue, AOV, Revenue Trend (daily/weekly/monthly line chart)
+ *             + Comparison cards (today vs yesterday, this week vs last, this month vs last)
+ * Operations: Stock Levels, Top-Selling, Tracking, Fulfillment, Incoming Orders
  */
 
 export default function SellerReportsPage() {
@@ -16,29 +16,21 @@ export default function SellerReportsPage() {
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('financials');
+    const [trendPeriod, setTrendPeriod] = useState('daily');
 
     useEffect(() => {
         const stored = getStoredUser();
-        if (!stored) {
-            window.location.href = '/login';
-            return;
-        }
+        if (!stored) { window.location.href = '/login'; return; }
         loadData();
     }, []);
 
     const loadData = async () => {
         try {
-            const [prods, txns] = await Promise.all([
-                getMyProducts(),
-                getTransactionHistory(),
-            ]);
+            const [prods, txns] = await Promise.all([getMyProducts(), getTransactionHistory()]);
             setProducts(prods);
             setTransactions(txns);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err) { console.error(err); }
+        finally { setLoading(false); }
     };
 
     // ── Compute Financial Metrics ──────────────────────────
@@ -49,14 +41,52 @@ export default function SellerReportsPage() {
     const aov = mySellerTxns.length > 0 ? gmv / mySellerTxns.length : 0;
     const totalOrders = mySellerTxns.length;
 
-    // ── Revenue by Day (for mini chart) ──────────────────────
-    const revenueByDay = {};
-    mySellerTxns.forEach(t => {
-        const day = new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
-        revenueByDay[day] = (revenueByDay[day] || 0) + t.seller_amount;
-    });
-    const revenueDays = Object.entries(revenueByDay).slice(-7);
-    const maxDayRevenue = Math.max(...revenueDays.map(([, v]) => v), 1);
+    // ── Revenue by Period ──────────────────────────────────
+    const getRevenueSeries = (period) => {
+        const data = {};
+        mySellerTxns.forEach(t => {
+            const d = new Date(t.created_at);
+            let key;
+            if (period === 'daily') {
+                key = d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+            } else if (period === 'weekly') {
+                const oneJan = new Date(d.getFullYear(), 0, 1);
+                const week = Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7);
+                key = `W${week}`;
+            } else {
+                key = d.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' });
+            }
+            data[key] = (data[key] || 0) + t.seller_amount;
+        });
+        const maxEntries = period === 'daily' ? 14 : period === 'weekly' ? 8 : 6;
+        return Object.entries(data).slice(-maxEntries);
+    };
+
+    const revenueSeries = getRevenueSeries(trendPeriod);
+    const maxRev = Math.max(...revenueSeries.map(([, v]) => v), 1);
+
+    // ── Comparison metrics ──────────────────────────────────
+    const now = new Date();
+    const todayStr = now.toDateString();
+    const yesterdayStr = new Date(now.getTime() - 86400000).toDateString();
+
+    const todaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === todayStr).reduce((s, t) => s + t.seller_amount, 0);
+    const yesterdaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === yesterdayStr).reduce((s, t) => s + t.seller_amount, 0);
+
+    const getWeekNumber = (d) => {
+        const oneJan = new Date(d.getFullYear(), 0, 1);
+        return Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7);
+    };
+    const thisWeek = getWeekNumber(now);
+    const lastWeek = thisWeek - 1;
+    const thisWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === thisWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+    const lastWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === lastWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+
+    const thisMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+
+    const pctChange = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : (((curr - prev) / prev) * 100);
 
     // ── Product Stock Insights ──────────────────────────────
     const lowStockProducts = products.filter(p => p.stock > 0 && p.stock <= 5);
@@ -67,16 +97,13 @@ export default function SellerReportsPage() {
     // ── Top-Selling Products ────────────────────────────────
     const productSalesMap = {};
     mySellerTxns.forEach(t => {
-        if (!productSalesMap[t.product_id]) {
-            productSalesMap[t.product_id] = { title: t.product_title, count: 0, revenue: 0 };
-        }
+        if (!productSalesMap[t.product_id]) productSalesMap[t.product_id] = { title: t.product_title, count: 0, revenue: 0 };
         productSalesMap[t.product_id].count += 1;
         productSalesMap[t.product_id].revenue += t.amount;
     });
     const topSellingProducts = Object.entries(productSalesMap)
         .map(([id, data]) => ({ id, ...data }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
+        .sort((a, b) => b.count - a.count).slice(0, 5);
 
     if (loading) {
         return (
@@ -90,8 +117,8 @@ export default function SellerReportsPage() {
     }
 
     const tabs = [
-        { key: 'financials', label: '💰 Financials', icon: '📊' },
-        { key: 'operations', label: '📦 Operations', icon: '🚚' },
+        { key: 'financials', label: '💰 Financials' },
+        { key: 'operations', label: '📦 Operations' },
     ];
 
     return (
@@ -108,85 +135,103 @@ export default function SellerReportsPage() {
                 border: '1px solid var(--border-color)',
             }}>
                 {tabs.map(tab => (
-                    <button
-                        key={tab.key}
-                        onClick={() => setActiveTab(tab.key)}
-                        style={{
-                            flex: 1, minWidth: 120, padding: '12px 16px',
-                            borderRadius: 8, border: 'none', cursor: 'pointer',
-                            fontWeight: 600, fontSize: '0.9rem', transition: 'all 0.2s',
-                            background: activeTab === tab.key ? 'var(--accent-primary)' : 'transparent',
-                            color: activeTab === tab.key ? '#fff' : 'var(--text-secondary)',
-                        }}
-                    >
+                    <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
+                        flex: 1, minWidth: 120, padding: '12px 16px',
+                        borderRadius: 8, border: 'none', cursor: 'pointer',
+                        fontWeight: 600, fontSize: '0.9rem', transition: 'all 0.2s',
+                        background: activeTab === tab.key ? 'var(--accent-primary)' : 'transparent',
+                        color: activeTab === tab.key ? '#fff' : 'var(--text-secondary)',
+                    }}>
                         {tab.label}
                     </button>
                 ))}
             </div>
 
-            {/* ═══════════════════════════════════════════════════════ */}
-            {/* SECTION 1: FINANCIALS                                 */}
-            {/* ═══════════════════════════════════════════════════════ */}
+            {/* ═══ FINANCIALS ═══ */}
             {activeTab === 'financials' && (
                 <div>
-                    {/* Metric Cards Row */}
+                    {/* Metric Cards */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-                        <MetricCard
-                            label="Gross Merchandise Value"
-                            value={`PHP ${gmv.toFixed(2)}`}
-                            subtitle="Total sales value including commissions"
-                            color="#10b981"
-                            icon="💎"
-                        />
-                        <MetricCard
-                            label="Net Revenue (90%)"
-                            value={`PHP ${netRevenue.toFixed(2)}`}
-                            subtitle="Your earnings after 10% platform commission"
-                            color="#6366f1"
-                            icon="💵"
-                        />
-                        <MetricCard
-                            label="Average Order Value"
-                            value={`PHP ${aov.toFixed(2)}`}
-                            subtitle={`Across ${totalOrders} order${totalOrders !== 1 ? 's' : ''}`}
-                            color="#f59e0b"
-                            icon="📊"
-                        />
-                        <MetricCard
-                            label="Platform Commission"
-                            value={`PHP ${totalCommission.toFixed(2)}`}
-                            subtitle="10% of GMV retained by RetailTalk"
-                            color="#ef4444"
-                            icon="🏦"
-                        />
+                        <MetricCard label="Gross Merchandise Value" value={`₱${gmv.toFixed(2)}`} subtitle="Total sales including commissions" color="#10b981" icon="💎" />
+                        <MetricCard label="Net Revenue (90%)" value={`₱${netRevenue.toFixed(2)}`} subtitle="Your earnings after 10% commission" color="#6366f1" icon="💵" />
+                        <MetricCard label="Average Order Value" value={`₱${aov.toFixed(2)}`} subtitle={`Across ${totalOrders} order${totalOrders !== 1 ? 's' : ''}`} color="#f59e0b" icon="📊" />
+                        <MetricCard label="Platform Commission" value={`₱${totalCommission.toFixed(2)}`} subtitle="10% of GMV retained by RetailTalk" color="#ef4444" icon="🏦" />
                     </div>
 
-                    {/* Revenue Trend Mini Bar Chart */}
+                    {/* Comparison Cards: Today vs Yesterday, Week vs Last Week, Month vs Last Month */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                        <ComparisonCard label="Today vs Yesterday" current={todaySales} previous={yesterdaySales} pctChange={pctChange(todaySales, yesterdaySales)} />
+                        <ComparisonCard label="This Week vs Last Week" current={thisWeekSales} previous={lastWeekSales} pctChange={pctChange(thisWeekSales, lastWeekSales)} />
+                        <ComparisonCard label="This Month vs Last Month" current={thisMonthSales} previous={lastMonthSales} pctChange={pctChange(thisMonthSales, lastMonthSales)} />
+                    </div>
+
+                    {/* Revenue Trend — Line Chart */}
                     <div className="card" style={{ marginBottom: 24 }}>
-                        <h3 style={{ marginBottom: 16 }}>📈 Revenue Trend (Last 7 Days)</h3>
-                        {revenueDays.length === 0 ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h3 style={{ margin: 0 }}>📈 Revenue Trend</h3>
+                            <div style={{ display: 'flex', gap: 4, background: 'var(--bg-secondary)', borderRadius: 8, padding: 3 }}>
+                                {['daily', 'weekly', 'monthly'].map(p => (
+                                    <button key={p} onClick={() => setTrendPeriod(p)} style={{
+                                        padding: '5px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                                        fontSize: '0.75rem', fontWeight: 600, transition: 'all 0.2s',
+                                        background: trendPeriod === p ? 'var(--accent-primary)' : 'transparent',
+                                        color: trendPeriod === p ? '#fff' : 'var(--text-muted)',
+                                        textTransform: 'capitalize',
+                                    }}>{p}</button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {revenueSeries.length === 0 ? (
                             <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No revenue data yet</p>
                         ) : (
-                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: 160, padding: '0 8px' }}>
-                                {revenueDays.map(([day, value]) => (
-                                    <div key={day} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                                            PHP {value.toFixed(0)}
-                                        </span>
-                                        <div style={{
-                                            width: '100%', maxWidth: 48, borderRadius: '6px 6px 0 0',
-                                            height: `${Math.max((value / maxDayRevenue) * 120, 8)}px`,
-                                            background: 'linear-gradient(180deg, #6366f1, #8b5cf6)',
-                                            transition: 'height 0.5s ease',
-                                        }} />
-                                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{day}</span>
-                                    </div>
-                                ))}
+                            <div style={{ position: 'relative', height: 200, padding: '0 4px' }}>
+                                {/* SVG Line Chart */}
+                                <svg viewBox={`0 0 ${revenueSeries.length * 60} 180`} style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
+                                    {/* Grid lines */}
+                                    {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+                                        <line key={frac} x1="0" y1={20 + (1 - frac) * 140} x2={revenueSeries.length * 60} y2={20 + (1 - frac) * 140}
+                                            stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                                    ))}
+                                    {/* Area fill */}
+                                    <polygon
+                                        points={[
+                                            ...revenueSeries.map(([, v], i) => `${i * 60 + 30},${20 + (1 - v / maxRev) * 140}`),
+                                            `${(revenueSeries.length - 1) * 60 + 30},160`,
+                                            `30,160`,
+                                        ].join(' ')}
+                                        fill="url(#areaGrad)" opacity="0.3"
+                                    />
+                                    {/* Line */}
+                                    <polyline
+                                        points={revenueSeries.map(([, v], i) => `${i * 60 + 30},${20 + (1 - v / maxRev) * 140}`).join(' ')}
+                                        fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+                                    />
+                                    {/* Dots */}
+                                    {revenueSeries.map(([, v], i) => (
+                                        <circle key={i} cx={i * 60 + 30} cy={20 + (1 - v / maxRev) * 140} r="4" fill="#6366f1" stroke="#1a1a2e" strokeWidth="2" />
+                                    ))}
+                                    <defs>
+                                        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#6366f1" />
+                                            <stop offset="100%" stopColor="transparent" />
+                                        </linearGradient>
+                                    </defs>
+                                </svg>
+                                {/* X-axis labels */}
+                                <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 4 }}>
+                                    {revenueSeries.map(([label, value]) => (
+                                        <div key={label} style={{ textAlign: 'center', flex: 1 }}>
+                                            <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{label}</p>
+                                            <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', fontWeight: 600 }}>₱{value.toFixed(0)}</p>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
 
-                    {/* Transaction Breakdown Table */}
+                    {/* Recent Sales Table */}
                     <div className="card">
                         <h3 style={{ marginBottom: 16 }}>🧾 Recent Sales</h3>
                         {mySellerTxns.length === 0 ? (
@@ -207,9 +252,9 @@ export default function SellerReportsPage() {
                                         {mySellerTxns.slice(0, 10).map(t => (
                                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={tdStyle}>{t.product_title || 'Unknown'}</td>
-                                                <td style={tdStyle}>PHP {t.amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>PHP {t.seller_amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#ef4444' }}>PHP {t.admin_commission.toFixed(2)}</td>
+                                                <td style={tdStyle}>₱{t.amount.toFixed(2)}</td>
+                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>₱{t.seller_amount.toFixed(2)}</td>
+                                                <td style={{ ...tdStyle, color: '#ef4444' }}>₱{t.admin_commission.toFixed(2)}</td>
                                                 <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
                                                     {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
                                                 </td>
@@ -223,9 +268,7 @@ export default function SellerReportsPage() {
                 </div>
             )}
 
-            {/* ═══════════════════════════════════════════════════════ */}
-            {/* SECTION 2: OPERATIONS / LOGISTICS                     */}
-            {/* ═══════════════════════════════════════════════════════ */}
+            {/* ═══ OPERATIONS ═══ */}
             {activeTab === 'operations' && (
                 <div>
                     {/* Stock Overview Cards */}
@@ -253,15 +296,10 @@ export default function SellerReportsPage() {
                                                 fontSize: '0.8rem', fontWeight: 700,
                                                 background: i === 0 ? '#f59e0b' : i === 1 ? '#94a3b8' : i === 2 ? '#cd7f32' : 'var(--border-color)',
                                                 color: i < 3 ? '#fff' : 'var(--text-secondary)',
-                                            }}>
-                                                {i + 1}
-                                            </span>
+                                            }}>{i + 1}</span>
                                             <div style={{ flex: 1 }}>
                                                 <p style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9rem' }}>{prod.title || 'Untitled'}</p>
-                                                <div style={{
-                                                    height: 6, borderRadius: 3, background: 'var(--border-color)',
-                                                    overflow: 'hidden',
-                                                }}>
+                                                <div style={{ height: 6, borderRadius: 3, background: 'var(--border-color)', overflow: 'hidden' }}>
                                                     <div style={{
                                                         height: '100%', borderRadius: 3,
                                                         width: `${(prod.count / maxCount) * 100}%`,
@@ -272,7 +310,7 @@ export default function SellerReportsPage() {
                                             </div>
                                             <div style={{ textAlign: 'right', minWidth: 80 }}>
                                                 <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>{prod.count} sold</p>
-                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>PHP {prod.revenue.toFixed(0)}</p>
+                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>₱{prod.revenue.toFixed(0)}</p>
                                             </div>
                                         </div>
                                     );
@@ -285,17 +323,11 @@ export default function SellerReportsPage() {
                     <div className="card" style={{ marginBottom: 24 }}>
                         <h3 style={{ marginBottom: 16 }}>🚚 Tracking Number Status</h3>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                            <div style={{
-                                padding: 16, borderRadius: 8, textAlign: 'center',
-                                background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)',
-                            }}>
+                            <div style={{ padding: 16, borderRadius: 8, textAlign: 'center', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
                                 <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981' }}>{productsWithTracking.length}</p>
                                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>With Tracking</p>
                             </div>
-                            <div style={{
-                                padding: 16, borderRadius: 8, textAlign: 'center',
-                                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
-                            }}>
+                            <div style={{ padding: 16, borderRadius: 8, textAlign: 'center', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
                                 <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ef4444' }}>{products.length - productsWithTracking.length}</p>
                                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Without Tracking</p>
                             </div>
@@ -322,7 +354,7 @@ export default function SellerReportsPage() {
                         </div>
                     )}
 
-                    {/* Incoming Orders from Buyers */}
+                    {/* Incoming Orders */}
                     <div className="card" style={{ marginTop: 24 }}>
                         <h3 style={{ marginBottom: 16 }}>🛒 Incoming Orders</h3>
                         {mySellerTxns.length === 0 ? (
@@ -345,17 +377,15 @@ export default function SellerReportsPage() {
                                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={tdStyle}>{t.product_title || 'Unknown'}</td>
                                                 <td style={tdStyle}>{t.quantity || 1}</td>
-                                                <td style={tdStyle}>PHP {t.amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>PHP {t.seller_amount.toFixed(2)}</td>
+                                                <td style={tdStyle}>₱{t.amount.toFixed(2)}</td>
+                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>₱{t.seller_amount.toFixed(2)}</td>
                                                 <td style={tdStyle}>
                                                     <span style={{
                                                         padding: '2px 8px', borderRadius: 10, fontSize: '0.75rem',
-                                                        background: t.status === 'completed' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                                                        color: t.status === 'completed' ? '#10b981' : '#ef4444',
+                                                        background: t.status === 'delivered' ? 'rgba(16,185,129,0.15)' : 'rgba(251,191,36,0.15)',
+                                                        color: t.status === 'delivered' ? '#10b981' : '#fbbf24',
                                                         fontWeight: 600,
-                                                    }}>
-                                                        {t.status}
-                                                    </span>
+                                                    }}>{t.status}</span>
                                                 </td>
                                                 <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
                                                     {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -369,22 +399,17 @@ export default function SellerReportsPage() {
                     </div>
                 </div>
             )}
-
         </div>
     );
 }
 
 
-// ─── Reusable Metric Card Component ──────────────────────────────────
+// ─── Reusable Components ──────────────────────────────────────────────
+
 function MetricCard({ label, value, subtitle, color, icon }) {
     return (
         <div className="card" style={{ padding: '20px 16px', position: 'relative', overflow: 'hidden' }}>
-            <div style={{
-                position: 'absolute', top: -8, right: -8,
-                fontSize: '3rem', opacity: 0.08,
-            }}>
-                {icon}
-            </div>
+            <div style={{ position: 'absolute', top: -8, right: -8, fontSize: '3rem', opacity: 0.08 }}>{icon}</div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: 6 }}>{label}</p>
             <p style={{ fontSize: '1.5rem', fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</p>
             {subtitle && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>{subtitle}</p>}
@@ -392,6 +417,31 @@ function MetricCard({ label, value, subtitle, color, icon }) {
     );
 }
 
-// Table styles
+function ComparisonCard({ label, current, previous, pctChange }) {
+    const isUp = pctChange >= 0;
+    const diff = current - previous;
+    return (
+        <div className="card" style={{ padding: '18px 16px' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: 8 }}>{label}</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: '1.3rem', fontWeight: 700 }}>₱{current.toFixed(0)}</span>
+                <span style={{
+                    fontSize: '0.8rem', fontWeight: 700,
+                    color: isUp ? '#10b981' : '#ef4444',
+                    display: 'flex', alignItems: 'center', gap: 2,
+                }}>
+                    {isUp ? '↑' : '↓'} {Math.abs(pctChange).toFixed(1)}%
+                </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                <span>Previous: ₱{previous.toFixed(0)}</span>
+                <span style={{ color: isUp ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                    {isUp ? '+' : ''}₱{diff.toFixed(0)}
+                </span>
+            </div>
+        </div>
+    );
+}
+
 const thStyle = { padding: '10px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 };
 const tdStyle = { padding: '10px 12px' };

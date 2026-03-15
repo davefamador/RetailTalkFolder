@@ -379,10 +379,21 @@ export default function SellPage() {
                                     </span>
                                 </td>
                                 <td>
-                                    <span className={`label ${p.is_active ? 'label-exact' : ''}`}
-                                        style={!p.is_active ? { background: 'rgba(255,71,87,0.15)', color: 'var(--accent-danger)' } : {}}>
-                                        {!p.is_active ? 'Deleted' : (p.stock || 0) > 0 ? 'Active' : 'Out of Stock'}
-                                    </span>
+                                    {!p.is_active ? (
+                                        <span className="label" style={{ background: 'rgba(255,71,87,0.15)', color: 'var(--accent-danger)' }}>
+                                            Deleted
+                                        </span>
+                                    ) : (
+                                        <span className="label" style={
+                                            p.status === 'approved'
+                                                ? { background: 'rgba(16,185,129,0.15)', color: '#10b981' }
+                                                : p.status === 'unapproved'
+                                                    ? { background: 'rgba(239,68,68,0.15)', color: '#ef4444' }
+                                                    : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }
+                                        }>
+                                            {p.status === 'approved' ? 'Approved' : p.status === 'unapproved' ? 'Unapproved' : 'Pending'}
+                                        </span>
+                                    )}
                                 </td>
                                 <td>
                                     <div style={{ display: 'flex', gap: 6 }}>

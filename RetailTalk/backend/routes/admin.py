@@ -451,3 +451,282 @@ async def admin_update_product(
         is_active=p["is_active"],
         created_at=p["created_at"],
     )
+
+
+# --- User Detail (Clickable Panel) ---
+
+@router.get("/users/{user_id}/detail")
+async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
+    """Get full user detail for admin slide panel: report, history, transactions."""
+    sb = get_supabase()
+
+    # 1. User info
+    user_resp = sb.table("users").select("*, user_balances(balance), user_contacts(contact_number)").eq("id", user_id).execute()
+    if not user_resp.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    u = user_resp.data[0]
+    bal = 0.0
+    if u.get("user_balances"):
+        if isinstance(u["user_balances"], list) and len(u["user_balances"]) > 0:
+            bal = float(u["user_balances"][0].get("balance", 0))
+        elif isinstance(u["user_balances"], dict):
+            bal = float(u["user_balances"].get("balance", 0))
+
+    contact = ""
+    if u.get("user_contacts"):
+        if isinstance(u["user_contacts"], list) and len(u["user_contacts"]) > 0:
+            contact = u["user_contacts"][0].get("contact_number", "")
+        elif isinstance(u["user_contacts"], dict):
+            contact = u["user_contacts"].get("contact_number", "")
+
+    # 2. Transactions
+    bought = sb.table("product_transactions").select("*, products(title)").eq("buyer_id", user_id).order("created_at", desc=True).limit(50).execute()
+    sold = sb.table("product_transactions").select("*, products(title)").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
+    delivered = sb.table("product_transactions").select("*, products(title)").eq("delivery_user_id", user_id).order("created_at", desc=True).limit(50).execute()
+
+    # Merge and deduplicate
+    all_txns = (bought.data or []) + (sold.data or []) + (delivered.data or [])
+    seen = set()
+    transactions = []
+    for t in all_txns:
+        if t["id"] not in seen:
+            seen.add(t["id"])
+            transactions.append({
+                "id": t["id"],
+                "product_title": (t.get("products") or {}).get("title", ""),
+                "amount": float(t["amount"]),
+                "quantity": int(t.get("quantity", 1)),
+                "status": t["status"],
+                "role_in_txn": "buyer" if t["buyer_id"] == user_id else ("seller" if t["seller_id"] == user_id else "delivery"),
+                "created_at": t["created_at"],
+            })
+    transactions.sort(key=lambda x: x["created_at"], reverse=True)
+
+    # 3. Report: daily/weekly/monthly breakdown
+    daily_data = {}
+    monthly_data = {}
+    for t in transactions:
+        try:
+            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+            day_key = dt.strftime("%Y-%m-%d")
+            month_key = dt.strftime("%Y-%m")
+        except Exception:
+            day_key = t["created_at"][:10]
+            month_key = t["created_at"][:7]
+
+        if day_key not in daily_data:
+            daily_data[day_key] = {"amount": 0, "count": 0}
+        daily_data[day_key]["amount"] += t["amount"]
+        daily_data[day_key]["count"] += 1
+
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {"amount": 0, "count": 0}
+        monthly_data[month_key]["amount"] += t["amount"]
+        monthly_data[month_key]["count"] += 1
+
+    daily = sorted(
+        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in daily_data.items()],
+        key=lambda x: x["date"], reverse=True
+    )[:30]
+
+    monthly = sorted(
+        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in monthly_data.items()],
+        key=lambda x: x["date"], reverse=True
+    )[:12]
+
+    # 4. SVF history
+    svf = sb.table("stored_value").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
+
+    # 5. Seller products (if user is a seller)
+    seller_products = []
+    if u["role"] == "seller":
+        prods = sb.table("products").select("id, title, price, stock, images, is_active, created_at").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
+        seller_products = [
+            {
+                "id": p["id"],
+                "title": p["title"],
+                "price": float(p["price"]),
+                "stock": int(p.get("stock", 0)),
+                "image_url": (p.get("images") or [""])[0] if p.get("images") else "",
+                "is_active": p["is_active"],
+                "created_at": p["created_at"],
+            }
+            for p in (prods.data or [])
+        ]
+
+    return {
+        "user": {
+            "id": u["id"],
+            "email": u["email"],
+            "full_name": u["full_name"],
+            "role": u["role"],
+            "is_banned": u.get("is_banned", False),
+            "balance": bal,
+            "contact_number": contact,
+            "created_at": u["created_at"],
+        },
+        "report": {
+            "total_transactions": len(transactions),
+            "total_amount": round(sum(t["amount"] for t in transactions), 2),
+            "daily": daily,
+            "monthly": monthly,
+        },
+        "transactions": transactions[:50],
+        "seller_products": seller_products,
+        "svf_history": [
+            {
+                "id": s["id"],
+                "type": s["transaction_type"],
+                "amount": float(s["amount"]),
+                "created_at": s["created_at"],
+            }
+            for s in (svf.data or [])
+        ],
+    }
+
+
+# --- Admin: Product approval (pending / approved / unapproved) ---
+
+@router.get("/pending-products")
+async def admin_get_pending_products(admin: dict = Depends(require_admin)):
+    """Get all products with status 'pending', with seller info."""
+    sb = get_supabase()
+    prods = sb.table("products").select("*").eq("status", "pending").order("created_at", desc=True).execute()
+
+    results = []
+    for p in (prods.data or []):
+        seller = sb.table("users").select("full_name, email").eq("id", p["seller_id"]).execute()
+        seller_info = seller.data[0] if seller.data else {}
+
+        results.append({
+            "id": p["id"],
+            "title": p["title"],
+            "description": p.get("description", ""),
+            "price": float(p["price"]),
+            "stock": p["stock"],
+            "images": p.get("images", []),
+            "seller_id": p["seller_id"],
+            "seller_name": seller_info.get("full_name", "Unknown"),
+            "seller_email": seller_info.get("email", ""),
+            "status": p["status"],
+            "created_at": p["created_at"],
+        })
+
+    return results
+
+
+@router.put("/products/{product_id}/approve")
+async def admin_approve_product(
+    product_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Approve a product (pending → approved) so it can be listed and sold."""
+    sb = get_supabase()
+
+    prod = sb.table("products").select("status").eq("id", product_id).execute()
+    if not prod.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if prod.data[0]["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Can only approve products with status 'pending'. Current: {prod.data[0]['status']}")
+
+    sb.table("products").update({"status": "approved"}).eq("id", product_id).execute()
+    return {"message": "Product approved"}
+
+
+@router.put("/products/{product_id}/unapprove")
+async def admin_unapprove_product(
+    product_id: str,
+    admin: dict = Depends(require_admin),
+):
+    """Unapprove a product (pending → unapproved)."""
+    sb = get_supabase()
+
+    prod = sb.table("products").select("status").eq("id", product_id).execute()
+    if not prod.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if prod.data[0]["status"] != "pending":
+        raise HTTPException(status_code=400, detail=f"Can only unapprove products with status 'pending'. Current: {prod.data[0]['status']}")
+
+    sb.table("products").update({"status": "unapproved"}).eq("id", product_id).execute()
+    return {"message": "Product unapproved"}
+
+
+# --- Delivery User Registration ---
+
+class DeliveryRegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    contact_number: str
+
+
+@router.post("/delivery/register")
+async def admin_register_delivery(
+    req: DeliveryRegisterRequest,
+    admin: dict = Depends(require_admin),
+):
+    """Admin-only: register a new delivery user with unique name, email, and contact."""
+    import bcrypt
+    import traceback
+
+    try:
+        sb = get_supabase()
+
+        # Check unique email
+        existing_email = sb.table("users").select("id").eq("email", req.email).execute()
+        if existing_email.data:
+            raise HTTPException(status_code=400, detail="Email already registered")
+
+        # Check unique full_name
+        existing_name = sb.table("users").select("id").eq("full_name", req.full_name).execute()
+        if existing_name.data:
+            raise HTTPException(status_code=400, detail="Full name already taken")
+
+        # Check unique contact_number
+        existing_contact = sb.table("user_contacts").select("user_id").eq("contact_number", req.contact_number).execute()
+        if existing_contact.data:
+            raise HTTPException(status_code=400, detail="Contact number already registered")
+
+        # Hash password
+        password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+        # Create user with delivery role
+        result = sb.table("users").insert({
+            "email": req.email,
+            "password_hash": password_hash,
+            "full_name": req.full_name,
+            "role": "delivery",
+            "is_banned": False,
+        }).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to create delivery user")
+
+        user = result.data[0]
+
+        # Create balance
+        sb.table("user_balances").insert({"user_id": user["id"], "balance": 0.00}).execute()
+
+        # Create contact
+        sb.table("user_contacts").insert({"user_id": user["id"], "contact_number": req.contact_number}).execute()
+
+        return {
+            "message": "Delivery user registered successfully",
+            "user": {
+                "id": user["id"],
+                "full_name": user["full_name"],
+                "email": user["email"],
+                "role": "delivery",
+                "contact_number": req.contact_number,
+            },
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"[DeliveryRegister] ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")

@@ -12,10 +12,12 @@ Now enhanced with Query Rewriting:
 Both lanes run ESCI classification so every card shows E/S/C/I probabilities.
 """
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 import traceback
+import tempfile
+import os
 import numpy as np
 
 from models.bert_service import bert_service
@@ -145,7 +147,7 @@ async def search_products(
             print(f"[Search] ML models not loaded. Performing text search for: {search_text}")
             sb = get_supabase()
 
-            qb = sb.table("products").select("*").eq("is_active", True)
+            qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
             qb = _apply_keyword_filters(qb, filters, search_text)
             response = qb.limit(max_results).execute()
 
@@ -191,7 +193,7 @@ async def search_products(
         # ---------------------------------------------------------------
 
         sb = get_supabase()
-        kw_qb = sb.table("products").select("*").eq("is_active", True)
+        kw_qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
         kw_qb = _apply_keyword_filters(kw_qb, filters, search_text)
         kw_response = kw_qb.limit(KEYWORD_SLOTS).execute()
 
@@ -409,3 +411,55 @@ async def search_products(
         print(f"[Search] ERROR during search for '{q}': {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+# --- Voice Transcription Endpoint (for browsers without Web Speech API) ---
+
+@router.post("/transcribe")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """
+    Accept an audio file (webm from MediaRecorder) and return transcribed text.
+    Uses SpeechRecognition + pydub for cross-browser voice search support.
+    """
+    tmp_webm = None
+    tmp_wav = None
+    try:
+        import speech_recognition as sr
+        from pydub import AudioSegment
+
+        # Save uploaded audio to temp file
+        tmp_webm = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+        content = await audio.read()
+        tmp_webm.write(content)
+        tmp_webm.close()
+
+        # Convert webm → wav
+        tmp_wav_path = tmp_webm.name.replace(".webm", ".wav")
+        audio_segment = AudioSegment.from_file(tmp_webm.name, format="webm")
+        audio_segment.export(tmp_wav_path, format="wav")
+        tmp_wav = tmp_wav_path
+
+        # Transcribe using Google Speech Recognition (free, no API key needed)
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(tmp_wav) as source:
+            audio_data = recognizer.record(source)
+
+        transcript = recognizer.recognize_google(audio_data)
+        return {"transcript": transcript}
+
+    except ImportError:
+        return {"error": "Speech recognition libraries not installed. Run: pip install SpeechRecognition pydub"}
+    except sr.UnknownValueError:
+        return {"error": "Could not understand audio. Please speak clearly and try again."}
+    except sr.RequestError as e:
+        return {"error": f"Speech recognition service error: {str(e)}"}
+    except Exception as e:
+        print(f"[Transcribe] Error: {e}")
+        traceback.print_exc()
+        return {"error": f"Transcription failed: {str(e)}"}
+    finally:
+        # Cleanup temp files
+        if tmp_webm and os.path.exists(tmp_webm.name):
+            os.unlink(tmp_webm.name)
+        if tmp_wav and os.path.exists(tmp_wav):
+            os.unlink(tmp_wav)
