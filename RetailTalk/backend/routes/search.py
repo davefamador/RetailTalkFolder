@@ -4,6 +4,11 @@ Hybrid search engine combining:
   • Keyword matching (20% of display slots — 10 products, NO irrelevant filter)
   • ESCI model pipeline (80% of display slots — 40 products, WITH irrelevant filter)
 
+Now enhanced with Query Rewriting:
+  • Intent Classification → detects query intent (single_search, filtered_search, etc.)
+  • Slot Extraction → extracts entities (PRODUCT, BRAND, COLOR, PRICE_MAX, etc.)
+  • Query Rewriter → produces clean search_text + structured filters
+
 Both lanes run ESCI classification so every card shows E/S/C/I probabilities.
 """
 
@@ -16,7 +21,8 @@ import numpy as np
 from models.bert_service import bert_service
 from models.classifier import classifier_service, LABEL_PRIORITY
 from models.ranker import ranker_service
-from database import search_similar_products, get_supabase
+from models.query_rewriter import query_rewriter
+from database import search_similar_products, search_similar_products_filtered, get_supabase
 from config import (
     SEARCH_TOP_K_CANDIDATES,
     SEARCH_MAX_RESULTS,
@@ -54,6 +60,11 @@ class SearchResponse(BaseModel):
     total_results: int
     results: list[SearchResultItem]
     message: str = ""
+    # Query Rewriting metadata
+    rewritten_query: str = ""        # what BERT/keyword actually searched for
+    detected_intents: list[str] = [] # e.g., ["single_search", "filtered_search"]
+    extracted_slots: dict = {}       # e.g., {"BRAND": "Nike", "PRICE_MAX": "3000"}
+    applied_filters: dict = {}       # e.g., {"brand": "Nike", "price_max": 3000}
 
 
 # --- Helper: extract first image URL ---
@@ -68,6 +79,30 @@ def _first_image(images_field) -> str:
     return ""
 
 
+# --- Helper: build keyword filter query ---
+
+def _apply_keyword_filters(query_builder, filters: dict, search_text: str):
+    """
+    Apply filters and search text to a Supabase query builder.
+    Returns the modified query builder.
+    """
+    # Text search on title/description using rewritten search text
+    query_builder = query_builder.or_(
+        f"title.ilike.%{search_text}%,description.ilike.%{search_text}%"
+    )
+
+    # Price filters
+    if "price_max" in filters:
+        query_builder = query_builder.lte("price", filters["price_max"])
+    if "price_min" in filters:
+        query_builder = query_builder.gte("price", filters["price_min"])
+
+    # Brand filter (already in search_text for keyword matching,
+    # but applying as extra filter catches description-only matches)
+
+    return query_builder
+
+
 # --- Route ---
 
 @router.get("/", response_model=SearchResponse)
@@ -78,15 +113,12 @@ async def search_products(
     include_substitutes: bool = Query(default=True, description="Include Substitute results"),
 ):
     """
-    🔍 Hybrid Product Search — two lanes:
+    🔍 Hybrid Product Search — two lanes, now with Query Rewriting:
 
-    If ML models are loaded:
-      Lane 1 (Keyword — 20%): ILIKE text match → ESCI classification (no irrelevant filter)
-      Lane 2 (Model  — 80%): BERT embedding + pgvector + CrossEncoder + ESCI classifier
-                              (filters out irrelevant_prob > 13%)
-
-    If ML models are PAUSED (e.g. not trained yet):
-      Fallback: Simple text search (ILike) only
+    1. Query Rewriting: Intent classification + slot extraction →
+       rewritten search text + structured filters
+    2. Lane 1 (Keyword — 20%): ILIKE text match with filters → ESCI classification
+    3. Lane 2 (Model  — 80%): BERT embedding + pgvector (filtered) + CrossEncoder + ESCI
     """
 
     # --- Hybrid display allocation ---
@@ -95,15 +127,27 @@ async def search_products(
     MODEL_SLOTS   = DISPLAY_LIMIT - KEYWORD_SLOTS  # 8 slots
 
     try:
+        # ================================================================
+        #  STEP 0 — QUERY REWRITING
+        #  Run intent classification + slot extraction + rewrite
+        # ================================================================
+        rewritten = query_rewriter.process(q)
+        search_text = rewritten.search_text
+        filters = rewritten.filters
+
+        print(f"[Search] Query: '{q}'")
+        if rewritten.is_rewritten:
+            print(f"[Search] Rewritten: '{search_text}' | Filters: {filters}")
+
         # Check if ML models are loaded
         if not bert_service._loaded:
             # --- Fallback: Simple Text Search (no ML) ---
-            print(f"[Search] ML models not loaded. Performing text search for: {q}")
+            print(f"[Search] ML models not loaded. Performing text search for: {search_text}")
             sb = get_supabase()
 
-            response = sb.table("products").select("*").or_(
-                f"title.ilike.%{q}%,description.ilike.%{q}%"
-            ).eq("is_active", True).limit(max_results).execute()
+            qb = sb.table("products").select("*").eq("is_active", True)
+            qb = _apply_keyword_filters(qb, filters, search_text)
+            response = qb.limit(max_results).execute()
 
             results = []
             for p in response.data:
@@ -122,26 +166,34 @@ async def search_products(
                     search_source="keyword",
                 ))
 
-            return SearchResponse(query=q, total_results=len(results), results=results)
+            return SearchResponse(
+                query=q,
+                total_results=len(results),
+                results=results,
+                rewritten_query=search_text,
+                detected_intents=rewritten.intents,
+                extracted_slots=rewritten.slots,
+                applied_filters=filters,
+            )
 
 
         # ================================================================
         #  ML LOADED — HYBRID SEARCH
         # ================================================================
 
-        # Step 1: Compute BERT embedding for the search query
-        query_embedding = bert_service.compute_embedding(q)
+        # Step 1: Compute BERT embedding for the REWRITTEN search text
+        query_embedding = bert_service.compute_embedding(search_text)
 
         # ---------------------------------------------------------------
         #  LANE 1 — KEYWORD MATCHING (20%, 10 slots)
-        #  ILIKE search on title/description. NO irrelevant filter.
+        #  ILIKE search on title/description with rewritten text + filters.
         #  Still runs ESCI classifier for display probabilities.
         # ---------------------------------------------------------------
 
         sb = get_supabase()
-        kw_response = sb.table("products").select("*").or_(
-            f"title.ilike.%{q}%,description.ilike.%{q}%"
-        ).eq("is_active", True).limit(KEYWORD_SLOTS).execute()
+        kw_qb = sb.table("products").select("*").eq("is_active", True)
+        kw_qb = _apply_keyword_filters(kw_qb, filters, search_text)
+        kw_response = kw_qb.limit(KEYWORD_SLOTS).execute()
 
         keyword_results: list[SearchResultItem] = []
         keyword_ids: set[str] = set()   # track IDs for deduplication
@@ -195,15 +247,26 @@ async def search_products(
 
         # ---------------------------------------------------------------
         #  LANE 2 — ESCI MODEL (80%, 40 slots)
-        #  BERT embedding + pgvector + CrossEncoder + Classifier
+        #  BERT embedding + pgvector (with filters) + CrossEncoder + Classifier
         #  Filters out irrelevant_prob > 13%
         # ---------------------------------------------------------------
 
         # Step 2: Find candidate products via pgvector similarity
-        raw_candidates = search_similar_products(
-            query_embedding,
-            top_k=SEARCH_TOP_K_CANDIDATES,
-        )
+        # Use filtered search if we have structured filters from query rewriting
+        if filters:
+            raw_candidates = search_similar_products_filtered(
+                query_embedding,
+                top_k=SEARCH_TOP_K_CANDIDATES,
+                price_min=filters.get("price_min"),
+                price_max=filters.get("price_max"),
+                brand=filters.get("brand"),
+                color=filters.get("color"),
+            )
+        else:
+            raw_candidates = search_similar_products(
+                query_embedding,
+                top_k=SEARCH_TOP_K_CANDIDATES,
+            )
 
         # Safety Net: cosine similarity threshold
         MIN_SIMILARITY_THRESHOLD = 0.40
@@ -334,6 +397,10 @@ async def search_products(
             total_results=len(results),
             results=results,
             message="No Products related to your Query" if len(results) == 0 else "",
+            rewritten_query=search_text,
+            detected_intents=rewritten.intents,
+            extracted_slots=rewritten.slots,
+            applied_filters=filters,
         )
 
     except HTTPException:

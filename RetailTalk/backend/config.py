@@ -25,6 +25,8 @@ JWT_EXPIRATION_HOURS = 24
 BERT_MODEL_NAME = os.getenv("BERT_MODEL_NAME", "bert-base-multilingual-uncased")
 CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "trained_model/pytorch_model.bin")
 RANKER_MODEL_PATH = os.getenv("RANKER_MODEL_PATH", "trained_model/ranker")
+INTENT_MODEL_PATH = os.getenv("INTENT_MODEL_PATH", "trained_model/intent_classifier")
+SLOT_MODEL_PATH = os.getenv("SLOT_MODEL_PATH", "trained_model/slot_extractor")
 BERT_MAX_LENGTH = 256
 BERT_EMBEDDING_DIM = 768
 

@@ -23,6 +23,9 @@ async def lifespan(app: FastAPI):
     from models.bert_service import bert_service
     from models.classifier import classifier_service
     from models.ranker import ranker_service
+    from models.intent_service import intent_service
+    from models.slot_service import slot_service
+    from models.query_rewriter import query_rewriter
 
     print("[ML] Loading BERT model...")
     bert_service.load()
@@ -30,6 +33,14 @@ async def lifespan(app: FastAPI):
     classifier_service.load()
     print("[ML] Loading ranker model (optional)...")
     ranker_service.load()
+    print("[ML] Loading intent classifier (optional)...")
+    intent_service.load()
+    print("[ML] Loading slot extractor (optional)...")
+    slot_service.load()
+
+    # Initialize query rewriter with loaded services
+    query_rewriter.init(intent_service, slot_service)
+    print("[ML] Query rewriter initialized")
 
     print(f"[OK] {APP_NAME} backend ready!")
 
@@ -77,6 +88,8 @@ async def root():
     from models.bert_service import bert_service
     from models.classifier import classifier_service
     from models.ranker import ranker_service
+    from models.intent_service import intent_service
+    from models.slot_service import slot_service
     return {
         "app": APP_NAME,
         "status": "running",
@@ -84,5 +97,8 @@ async def root():
             "bert": "loaded" if bert_service._loaded else "not loaded",
             "classifier": "loaded" if classifier_service._loaded else "not loaded",
             "ranker": "loaded" if ranker_service._loaded else "not loaded",
+            "intent": "loaded" if intent_service._loaded else "not loaded",
+            "slot": "loaded" if slot_service._loaded else "not loaded",
         },
     }
+

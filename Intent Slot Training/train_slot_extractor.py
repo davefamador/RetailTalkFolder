@@ -469,24 +469,29 @@ def evaluate_slot_model(model, val_loader, device, id2tag, tag2id, save_dir):
 # ============================================================
 
 def train_model(model, train_loader, val_loader, device, epochs, lr,
-                id2tag, tag2id, save_dir):
-    """Training loop with validation."""
+                id2tag, tag2id, save_dir,
+                start_epoch=0, optimizer=None, scheduler=None, best_f1=0.0, training_history=None):
+    """Training loop with validation and checkpoint support."""
     
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+    
+    if optimizer is None:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     
     total_steps = len(train_loader) * epochs
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=int(total_steps * 0.1),
-        num_training_steps=total_steps
-    )
+    if scheduler is None:
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=int(total_steps * 0.1),
+            num_training_steps=total_steps
+        )
     
-    best_f1 = 0.0
+    if training_history is None:
+        training_history = []
+    
     entity_tag_names = sorted(set(tag for tag in id2tag.values() if tag != 'O'))
-    training_history = []
     
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         # --- Train ---
         model.train()
         total_loss = 0
@@ -542,6 +547,17 @@ def train_model(model, train_loader, val_loader, device, epochs, lr,
                 'best_f1': best_f1,
             }, os.path.join(save_dir, 'model.pt'))
             print(f"  ★ New best model saved (Micro F1={best_f1:.4f})")
+        
+        # Save training checkpoint (for resuming)
+        torch.save({
+            'epoch': epoch + 1,  # next epoch to run
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'best_f1': best_f1,
+            'training_history': training_history,
+        }, os.path.join(save_dir, 'checkpoint.pt'))
+        print(f"  💾 Checkpoint saved (epoch {epoch+1}/{epochs})")
         print()
     
     # Save training history
@@ -558,7 +574,7 @@ def train_model(model, train_loader, val_loader, device, epochs, lr,
 def main():
     parser = argparse.ArgumentParser(description='Train Slot Extractor (NER)')
     parser.add_argument('--data', type=str,
-                        default='shopping_queries_dataset/slotannotationdataset.xlsx')
+                        default='shopping_queries_dataset/slotannotationdataset_cleaned.xlsx')
     parser.add_argument('--bert_model', type=str,
                         default='bert-base-multilingual-uncased')
     parser.add_argument('--max_length', type=int, default=64)
@@ -567,6 +583,8 @@ def main():
     parser.add_argument('--lr', type=float, default=3e-5)
     parser.add_argument('--test_size', type=float, default=0.15)
     parser.add_argument('--save_dir', type=str, default='models/slot_extractor')
+    parser.add_argument('--resume', action='store_true',
+                        help='Resume training from the last saved checkpoint')
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -615,14 +633,48 @@ def main():
     print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print()
     
+    # Checkpoint resume support
+    start_epoch = 0
+    resume_best_f1 = 0.0
+    resume_optimizer = None
+    resume_scheduler = None
+    resume_history = None
+    
+    checkpoint_path = os.path.join(args.save_dir, 'checkpoint.pt')
+    if args.resume and os.path.exists(checkpoint_path):
+        print(f"  ⏩ Resuming from checkpoint: {checkpoint_path}")
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt['model_state_dict'])
+        start_epoch = ckpt['epoch']
+        resume_best_f1 = ckpt['best_f1']
+        resume_history = ckpt.get('training_history', [])
+        
+        # Rebuild optimizer & scheduler then load their states
+        total_steps = len(train_loader) * args.epochs
+        resume_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+        resume_scheduler = get_linear_schedule_with_warmup(
+            resume_optimizer,
+            num_warmup_steps=int(total_steps * 0.1),
+            num_training_steps=total_steps
+        )
+        resume_optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        resume_scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+        
+        print(f"  ⏩ Resuming from epoch {start_epoch + 1}/{args.epochs} (best F1 so far: {resume_best_f1:.4f})")
+    elif args.resume:
+        print(f"  ⚠ No checkpoint found at {checkpoint_path}, starting from scratch.")
+    
     start = time.time()
     best_f1 = train_model(model, train_loader, val_loader, device,
-                           args.epochs, args.lr, id2tag, tag2id, args.save_dir)
+                           args.epochs, args.lr, id2tag, tag2id, args.save_dir,
+                           start_epoch=start_epoch, optimizer=resume_optimizer,
+                           scheduler=resume_scheduler, best_f1=resume_best_f1,
+                           training_history=resume_history)
     elapsed = time.time() - start
     
     # 5. Final Evaluation — load best model and run comprehensive metrics
     print("\n[5/5] Running comprehensive evaluation on best model...")
-    checkpoint = torch.load(os.path.join(args.save_dir, 'model.pt'), map_location=device)
+    checkpoint = torch.load(os.path.join(args.save_dir, 'model.pt'), map_location=device, weights_only=False)
     model.load_state_dict(checkpoint['model_state_dict'])
     
     eval_results = evaluate_slot_model(model, val_loader, device, id2tag, tag2id, args.save_dir)

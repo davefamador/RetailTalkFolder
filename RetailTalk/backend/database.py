@@ -94,6 +94,80 @@ def search_similar_products(query_embedding: np.ndarray, top_k: int = 50):
     return results
 
 
+def search_similar_products_filtered(
+    query_embedding: np.ndarray,
+    top_k: int = 50,
+    price_min: float = None,
+    price_max: float = None,
+    brand: str = None,
+    color: str = None,
+):
+    """
+    Find the top_k most similar products with optional structured filters.
+    Extends search_similar_products with WHERE clauses from query rewriting.
+    """
+    conn = get_db_connection()
+    embedding_str = embedding_to_pgvector(query_embedding)
+    
+    # Build dynamic WHERE clause
+    conditions = ["is_active = true", "embedding IS NOT NULL"]
+    params = [embedding_str, embedding_str]
+    
+    if price_min is not None:
+        conditions.append(f"price >= %s")
+        params.append(price_min)
+    
+    if price_max is not None:
+        conditions.append(f"price <= %s")
+        params.append(price_max)
+    
+    if brand:
+        conditions.append(f"(title ILIKE %s OR description ILIKE %s)")
+        params.append(f"%{brand}%")
+        params.append(f"%{brand}%")
+    
+    if color:
+        conditions.append(f"(title ILIKE %s OR description ILIKE %s)")
+        params.append(f"%{color}%")
+        params.append(f"%{color}%")
+    
+    where_clause = " AND ".join(conditions)
+    params.append(top_k)
+    
+    query = f"""
+        SELECT 
+            id, seller_id, title, description, price, images,
+            embedding::text as embedding_text,
+            1 - (embedding <=> %s::vector) as similarity
+        FROM products
+        WHERE {where_clause}
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    
+    results = []
+    for row in rows:
+        results.append({
+            "id": str(row["id"]),
+            "seller_id": str(row["seller_id"]),
+            "title": row["title"],
+            "description": row["description"],
+            "price": float(row["price"]),
+            "images": row["images"] or [],
+            "embedding": pgvector_to_embedding(row["embedding_text"]),
+            "similarity": float(row["similarity"]),
+        })
+    
+    return results
+
+
 def store_product_embedding(product_id: str, embedding: np.ndarray):
     """Store/update the BERT embedding for a product."""
     conn = get_db_connection()
