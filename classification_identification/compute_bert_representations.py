@@ -148,18 +148,16 @@ def main():
     df_examples_products = df_examples_products[df_examples_products[col_large_version] == 1]
     df_examples_products = df_examples_products[df_examples_products[col_split] == args.split]
 
-    """ 3. Encode products (title + description for richer context) """
-    df_products = df_examples_products[[col_product_id, col_product_title, col_product_description]].copy()
+    """ 3. Encode products (title only) """
+    df_products = df_examples_products[[col_product_id, col_product_title]].copy()
     df_products = df_products.drop_duplicates(subset=[col_product_id])
     df_products[col_product_title] = df_products[col_product_title].fillna('')
-    df_products[col_product_description] = df_products[col_product_description].fillna('')
-    df_products[col_product_text] = df_products[col_product_title] + " " + df_products[col_product_description]
-    print(f"Encoding products with title + description (avg text length: {df_products[col_product_text].str.len().mean():.0f} chars)")
+    print(f"Encoding products with title only (avg text length: {df_products[col_product_title].str.len().mean():.0f} chars)")
     compute_bert_representations(
         df_products,
         args.output_product_catalogue_path_file, 
         col_product_id, 
-        col_product_text, 
+        col_product_title, 
         tokenizer, 
         model, 
         max_length=args.bert_max_length, 

@@ -18,7 +18,7 @@ class QueryProductClassifier(nn.Module):
     Must stay in sync with classification_identification/query_product/classifier_model.py
     """
 
-    def __init__(self, size_pretrained=768, dense_hidden_dim=126, num_dense_layers=1, num_labels=4, dropout_rate=0.1):
+    def __init__(self, size_pretrained=768, dense_hidden_dim=256, num_dense_layers=2, num_labels=4, dropout_rate=0.1):
         super(QueryProductClassifier, self).__init__()
         self.num_labels = 1 if num_labels <= 2 else num_labels
         self.size_pretrained = size_pretrained * 2  # query + product concatenated
@@ -27,6 +27,9 @@ class QueryProductClassifier(nn.Module):
         self.dropout_embedding = nn.Dropout(dropout_rate)
         for _ in range(num_dense_layers):
             fc_layers.append(nn.Linear(prev_dim, dense_hidden_dim, bias=True))
+            fc_layers.append(nn.BatchNorm1d(dense_hidden_dim))
+            fc_layers.append(nn.ReLU())
+            fc_layers.append(nn.Dropout(dropout_rate))
             prev_dim = dense_hidden_dim
         fc_layers.append(nn.Linear(prev_dim, self.num_labels))
         self.fc = nn.Sequential(*fc_layers)

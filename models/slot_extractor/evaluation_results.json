@@ -1,0 +1,232 @@
+{
+  "token_level": {
+    "accuracy": 0.9389,
+    "bleu_score": 0.8819,
+    "micro_precision": 0.9264,
+    "micro_recall": 0.9385,
+    "micro_f1": 0.9324,
+    "macro_precision": 0.8037,
+    "macro_recall": 0.8294,
+    "macro_f1": 0.8134,
+    "weighted_f1": 0.9329
+  },
+  "entity_level": {
+    "precision": 0.9193,
+    "recall": 0.9363,
+    "f1": 0.9277,
+    "total_true_entities": 2481,
+    "total_pred_entities": 2527,
+    "correct_entities": 2323,
+    "per_entity_type": {
+      "BRAND": {
+        "precision": 0.7573,
+        "recall": 0.7959,
+        "f1": 0.7761,
+        "support": 98
+      },
+      "COLOR": {
+        "precision": 0.9677,
+        "recall": 0.8824,
+        "f1": 0.9231,
+        "support": 34
+      },
+      "CONN": {
+        "precision": 0.9669,
+        "recall": 0.9932,
+        "f1": 0.9799,
+        "support": 294
+      },
+      "MATERIAL": {
+        "precision": 0.8462,
+        "recall": 0.8462,
+        "f1": 0.8462,
+        "support": 26
+      },
+      "PRICE_MAX": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 310
+      },
+      "PRICE_MIN": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 1
+      },
+      "PRICE_MOD": {
+        "precision": 0.9947,
+        "recall": 0.9894,
+        "f1": 0.992,
+        "support": 377
+      },
+      "PRODUCT1": {
+        "precision": 0.8913,
+        "recall": 0.8992,
+        "f1": 0.8952,
+        "support": 784
+      },
+      "PRODUCT2": {
+        "precision": 0.9386,
+        "recall": 0.9291,
+        "f1": 0.9338,
+        "support": 296
+      },
+      "RATING_MIN": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 32
+      },
+      "RATING_MOD": {
+        "precision": 0.7704,
+        "recall": 0.8882,
+        "f1": 0.8251,
+        "support": 170
+      },
+      "SIZE": {
+        "precision": 0.806,
+        "recall": 0.9153,
+        "f1": 0.8571,
+        "support": 59
+      }
+    }
+  },
+  "per_tag": {
+    "B-BRAND": {
+      "precision": 0.86,
+      "recall": 0.8776,
+      "f1": 0.8687,
+      "accuracy": 0.9953,
+      "support": 98
+    },
+    "B-COLOR": {
+      "precision": 0.9677,
+      "recall": 0.8824,
+      "f1": 0.9231,
+      "accuracy": 0.9991,
+      "support": 34
+    },
+    "B-CONN": {
+      "precision": 0.9669,
+      "recall": 0.9932,
+      "f1": 0.9799,
+      "accuracy": 0.9978,
+      "support": 294
+    },
+    "B-MATERIAL": {
+      "precision": 0.8462,
+      "recall": 0.8462,
+      "f1": 0.8462,
+      "accuracy": 0.9985,
+      "support": 26
+    },
+    "B-PRICE_MAX": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "support": 310
+    },
+    "B-PRICE_MIN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "support": 1
+    },
+    "B-PRICE_MOD": {
+      "precision": 0.9947,
+      "recall": 0.9894,
+      "f1": 0.992,
+      "accuracy": 0.9989,
+      "support": 377
+    },
+    "B-PRODUCT1": {
+      "precision": 0.9183,
+      "recall": 0.9194,
+      "f1": 0.9188,
+      "accuracy": 0.9769,
+      "support": 782
+    },
+    "B-PRODUCT2": {
+      "precision": 0.976,
+      "recall": 0.9628,
+      "f1": 0.9694,
+      "accuracy": 0.9967,
+      "support": 296
+    },
+    "B-RATING_MIN": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "support": 32
+    },
+    "B-RATING_MOD": {
+      "precision": 0.7806,
+      "recall": 0.9,
+      "f1": 0.8361,
+      "accuracy": 0.9891,
+      "support": 170
+    },
+    "B-SIZE": {
+      "precision": 0.8209,
+      "recall": 0.9322,
+      "f1": 0.873,
+      "accuracy": 0.9971,
+      "support": 59
+    },
+    "I-BRAND": {
+      "precision": 0.6538,
+      "recall": 0.5862,
+      "f1": 0.6182,
+      "accuracy": 0.9962,
+      "support": 29
+    },
+    "I-PRICE_MOD": {
+      "precision": 0.9375,
+      "recall": 0.9677,
+      "f1": 0.9524,
+      "accuracy": 0.9995,
+      "support": 31
+    },
+    "I-PRODUCT1": {
+      "precision": 0.8658,
+      "recall": 0.8852,
+      "f1": 0.8753,
+      "accuracy": 0.9836,
+      "support": 357
+    },
+    "I-PRODUCT2": {
+      "precision": 0.9266,
+      "recall": 0.9018,
+      "f1": 0.914,
+      "accuracy": 0.9965,
+      "support": 112
+    },
+    "I-RATING_MOD": {
+      "precision": 0.9593,
+      "recall": 0.944,
+      "f1": 0.9516,
+      "accuracy": 0.9978,
+      "support": 125
+    },
+    "I-SIZE": {
+      "precision": 0.6,
+      "recall": 1.0,
+      "f1": 0.75,
+      "accuracy": 0.9993,
+      "support": 6
+    },
+    "O": {
+      "precision": 0.9562,
+      "recall": 0.9395,
+      "f1": 0.9478,
+      "accuracy": 0.9557,
+      "support": 2347
+    }
+  },
+  "total_tokens_evaluated": 5486,
+  "total_sequences_evaluated": 807
+}

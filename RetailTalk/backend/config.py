@@ -25,15 +25,16 @@ JWT_EXPIRATION_HOURS = 24
 BERT_MODEL_NAME = os.getenv("BERT_MODEL_NAME", "bert-base-multilingual-uncased")
 CLASSIFIER_MODEL_PATH = os.getenv("CLASSIFIER_MODEL_PATH", "trained_model/pytorch_model.bin")
 RANKER_MODEL_PATH = os.getenv("RANKER_MODEL_PATH", "trained_model/ranker")
-INTENT_MODEL_PATH = os.getenv("INTENT_MODEL_PATH", "trained_model/intent_classifier")
-SLOT_MODEL_PATH = os.getenv("SLOT_MODEL_PATH", "trained_model/slot_extractor")
+# Intent and Slot models are in the training folders (separate from backend)
+INTENT_MODEL_PATH = os.getenv("INTENT_MODEL_PATH", "../../Intent Slot Training/models/intent_classifier")
+SLOT_MODEL_PATH = os.getenv("SLOT_MODEL_PATH", "../../models/slot_extractor")
 BERT_MAX_LENGTH = 256
 BERT_EMBEDDING_DIM = 768
 
 # Score blending weights (must sum to 1.0)
-RANKER_WEIGHT = float(os.getenv("RANKER_WEIGHT", "0.5"))
-CLASSIFIER_WEIGHT = float(os.getenv("CLASSIFIER_WEIGHT", "0.3"))
-SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "0.2"))
+RANKER_WEIGHT = float(os.getenv("RANKER_WEIGHT", "0.4"))
+CLASSIFIER_WEIGHT = float(os.getenv("CLASSIFIER_WEIGHT", "0.25"))
+SIMILARITY_WEIGHT = float(os.getenv("SIMILARITY_WEIGHT", "0.35"))
 
 # Search
 SEARCH_TOP_K_CANDIDATES = 50  # pgvector returns top 50 candidates

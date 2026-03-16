@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(python:*)",
+      "Bash(powershell:*)",
+      "Bash(dir /s /a \"C:\\Moi\\Thesis\\Code\\RetailTalkFolder\\ranking\")",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*clean*)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*ESCI*)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*esci*)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*shopping*clean*)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*cleaned*)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*.parquet)",
+      "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/classification_identification/custom_esci/\"*.parquet)",
+      "Bash(find /c/Moi/Thesis/Code/RetailTalkFolder -name *.bin -o -name *.pt)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -8,6 +8,7 @@ from torch.nn.utils import clip_grad_norm_
 from sklearn.metrics import accuracy_score, f1_score
 import os
 import pathlib
+import time
 
 def set_seed(random_seed=42):
     random.seed(random_seed)
@@ -94,7 +95,9 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
         input_metric['average'] = 'macro'
     
     """ Step 3: experiments """
-    
+    global_step = 0
+    step_start_time = time.time()
+
     for idx_epoch in range(0, num_train_epochs):
         
         """ Step 3.1: Training """
@@ -120,6 +123,7 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
             clip_grad_norm_(model.parameters(), max_grad_norm) # clipping gradient for avoiding exploding gradients
             optimizer.step()
             scheduler.step()
+            global_step += 1
             expected_predictions = labels.detach().cpu().numpy()
 
             input_metric['y_true'] = expected_predictions
@@ -129,7 +133,11 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
 
             if idx_train_batch % validation_steps == 0:
                 model.eval()
-                print(f"Training - Epoch {idx_epoch+1}/{num_train_epochs}, Batch: {idx_train_batch+1}/{num_training_batches}, Loss: {loss:.3f} Metric:{training_metric:.3f}")
+                elapsed = time.time() - step_start_time
+                s_per_it = elapsed / global_step if global_step > 0 else 0
+                eta_seconds = s_per_it * (total_training_steps - global_step)
+                eta_min = eta_seconds / 60
+                print(f"Training - Epoch {idx_epoch+1}/{num_train_epochs}, Step: {global_step}/{total_training_steps}, Batch: {idx_train_batch+1}/{num_training_batches}, Loss: {loss:.3f}, Metric: {training_metric:.3f}, {s_per_it:.2f}s/it, ETA: {eta_min:.1f}min")
                 """ Step 3.2: evaluating """
                 for (idx_validation_batch, validation_batch) in enumerate(validation_dataloader):
                     # 0: query_embedding, 1: product_embedding, 2: labels
@@ -153,7 +161,7 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
                     validation_loss[idx_validation_batch] = loss
                 current_validation_metric = np.mean(validation_metric)
 
-                print(f"Validation - Epoch {idx_epoch+1}/{num_train_epochs}, Batch: {idx_train_batch+1}/{num_training_batches}, Loss: {np.mean(validation_loss):.3f}, Metric:{np.mean(validation_metric):.3f}")
+                print(f"Validation - Epoch {idx_epoch+1}/{num_train_epochs}, Step: {global_step}/{total_training_steps}, Loss: {np.mean(validation_loss):.3f}, Metric: {np.mean(validation_metric):.3f}")
                 
                 if current_validation_metric > best_metric_value:
                     best_metric_value = current_validation_metric

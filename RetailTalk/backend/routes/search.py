@@ -1,15 +1,45 @@
 """
 Search route — the CORE of the thesis.
-Hybrid search engine combining:
-  • Keyword matching (20% of display slots — 10 products, NO irrelevant filter)
-  • ESCI model pipeline (80% of display slots — 40 products, WITH irrelevant filter)
 
-Now enhanced with Query Rewriting:
-  • Intent Classification → detects query intent (single_search, filtered_search, etc.)
-  • Slot Extraction → extracts entities (PRODUCT, BRAND, COLOR, PRICE_MAX, etc.)
-  • Query Rewriter → produces clean search_text + structured filters
+Architecture (from README.md):
+                      User Query: "I want an affordable dress"
+                                |
+                ================|================
+                |               |               |
+        [Intent Class.]   [Slot/Entity     [BERT Embedding]
+                |          Extraction]          |
+                v               |              v
+          intent:purchase       v         768-dim vector
+                        {                      |
+                         category: "dress"     |
+                         price: "affordable"   |
+                        }                      |
+                ================|===============|
+                               |               |
+                        [Query Rewriting]      |
+                        "dress" + filters      |
+                               |               |
+                ===============|================
+                |              |               |
+        [Supabase Filter] [pgvector      [CrossEncoder
+         price <= budget   Similarity]    Ranker]
+                |              |               |
+                ===============|================
+                               |
+                       [ESCI Classifier]
+                        E / S / C / I
+                               |
+                       [Score Blending]
+                       0.5*R + 0.3*C + 0.2*S
+                               |
+                       Final Ranked Results
 
-Both lanes run ESCI classification so every card shows E/S/C/I probabilities.
+Pipeline Stages:
+1. BERT Embedding: Query → 768-dimensional vector
+2. pgvector Similarity: Top-50 candidates via cosine similarity
+3. CrossEncoder Re-Ranking: Pairwise relevance scoring
+4. ESCI Classifier: E/S/C/I classification with softmax probabilities
+5. Score Blending: 0.5×Ranker + 0.3×Classifier + 0.2×Similarity
 """
 
 from fastapi import APIRouter, Query, HTTPException, UploadFile, File
@@ -36,7 +66,9 @@ from config import (
 router = APIRouter(prefix="/search", tags=["Search"])
 
 
-# --- Response Models ---
+# =============================================================================
+#  Response Models
+# =============================================================================
 
 class SearchResultItem(BaseModel):
     id: str
@@ -45,16 +77,17 @@ class SearchResultItem(BaseModel):
     price: float
     image_url: str
     seller_id: str
+    # Scoring components
     similarity: float = 0.0          # pgvector cosine similarity (0-1)
     ranker_score: float = 0.0        # CrossEncoder relevance score (0-1, normalized)
+    relevance_score: float = 0.0     # Final blended score: 0.5*R + 0.3*C + 0.2*S
+    # ESCI classification
     relevance_label: str = "Exact"   # E/S/C/I classification
-    relevance_confidence: float = 1.0  # classifier confidence
-    relevance_score: float = 1.0     # final combined score for ranking
-    exact_prob: float = 0.0          # ESCI softmax probability for Exact
-    substitute_prob: float = 0.0     # ESCI softmax probability for Substitute
-    complement_prob: float = 0.0     # ESCI softmax probability for Complement
-    irrelevant_prob: float = 0.0     # ESCI softmax probability for Irrelevant
-    search_source: str = "model"     # "keyword" or "model" — which lane produced this result
+    relevance_confidence: float = 1.0
+    exact_prob: float = 0.0
+    substitute_prob: float = 0.0
+    complement_prob: float = 0.0
+    irrelevant_prob: float = 0.0
 
 
 class SearchResponse(BaseModel):
@@ -62,14 +95,16 @@ class SearchResponse(BaseModel):
     total_results: int
     results: list[SearchResultItem]
     message: str = ""
-    # Query Rewriting metadata
-    rewritten_query: str = ""        # what BERT/keyword actually searched for
-    detected_intents: list[str] = [] # e.g., ["single_search", "filtered_search"]
-    extracted_slots: dict = {}       # e.g., {"BRAND": "Nike", "PRICE_MAX": "3000"}
-    applied_filters: dict = {}       # e.g., {"brand": "Nike", "price_max": 3000}
+    # Query Rewriting metadata (from Intent + Slot extraction)
+    rewritten_query: str = ""
+    detected_intents: list[str] = []
+    extracted_slots: dict = {}
+    applied_filters: dict = {}
 
 
-# --- Helper: extract first image URL ---
+# =============================================================================
+#  Helper Functions
+# =============================================================================
 
 def _first_image(images_field) -> str:
     """Extract the first image URL from a product's images field."""
@@ -81,180 +116,98 @@ def _first_image(images_field) -> str:
     return ""
 
 
-# --- Helper: build keyword filter query ---
+def _compute_blended_score(
+    ranker_score: float,
+    classifier_priority: float,
+    similarity: float,
+    w_ranker: float = RANKER_WEIGHT,
+    w_classifier: float = CLASSIFIER_WEIGHT,
+    w_similarity: float = SIMILARITY_WEIGHT,
+) -> float:
+    """
+    Score Blending formula from README:
+    relevance_score = 0.4×R + 0.25×C + 0.35×S
 
-def _apply_keyword_filters(query_builder, filters: dict, search_text: str):
+    Where:
+    - R = Ranker score (CrossEncoder, normalized 0-1)
+    - C = Classifier priority (E=1.0, S=0.67, C=0.33, I=0.0)
+    - S = Similarity (pgvector cosine similarity, 0-1)
     """
-    Apply filters and search text to a Supabase query builder.
-    Returns the modified query builder.
-    """
-    # Text search on title/description using rewritten search text
-    query_builder = query_builder.or_(
-        f"title.ilike.%{search_text}%,description.ilike.%{search_text}%"
+    return (
+        w_ranker * ranker_score +
+        w_classifier * classifier_priority +
+        w_similarity * similarity
     )
 
-    # Price filters
-    if "price_max" in filters:
-        query_builder = query_builder.lte("price", filters["price_max"])
-    if "price_min" in filters:
-        query_builder = query_builder.gte("price", filters["price_min"])
 
-    # Brand filter (already in search_text for keyword matching,
-    # but applying as extra filter catches description-only matches)
-
-    return query_builder
+def _label_to_priority_weight(label: str) -> float:
+    """
+    Convert ESCI label to priority weight for score blending.
+    E=1.0, S=0.67, C=0.33, I=0.0
+    """
+    priority = LABEL_PRIORITY.get(label, 3)  # Default to Irrelevant (3)
+    return (3 - priority) / 3
 
 
-# --- Route ---
+# =============================================================================
+#  Main Search Route
+# =============================================================================
 
 @router.get("/", response_model=SearchResponse)
 async def search_products(
     q: str = Query(..., min_length=1, max_length=500, description="Search query text"),
-    max_results: int = Query(default=SEARCH_MAX_RESULTS, ge=1, le=100, description="Maximum results to return"),
+    max_results: int = Query(default=SEARCH_MAX_RESULTS, ge=1, le=100),
     include_complements: bool = Query(default=True, description="Include Complement results"),
     include_substitutes: bool = Query(default=True, description="Include Substitute results"),
 ):
     """
-    🔍 Hybrid Product Search — two lanes, now with Query Rewriting:
+    Product Search following the README architecture:
 
-    1. Query Rewriting: Intent classification + slot extraction →
-       rewritten search text + structured filters
-    2. Lane 1 (Keyword — 20%): ILIKE text match with filters → ESCI classification
-    3. Lane 2 (Model  — 80%): BERT embedding + pgvector (filtered) + CrossEncoder + ESCI
+    Stage 1: Intent Classification + Slot Extraction + BERT Embedding (parallel)
+    Stage 2: Query Rewriting (combines intent + slots → clean search text + filters)
+    Stage 3: Supabase Filter + pgvector Similarity + CrossEncoder Ranker (parallel)
+    Stage 4: ESCI Classifier (E/S/C/I with softmax probabilities)
+    Stage 5: Score Blending (0.5×R + 0.3×C + 0.2×S)
+    Stage 6: Final Ranked Results
     """
 
-    # --- Hybrid display allocation ---
-    DISPLAY_LIMIT = 15
-    KEYWORD_SLOTS = 5  # 1 slot
-    MODEL_SLOTS   = DISPLAY_LIMIT - KEYWORD_SLOTS  # 8 slots
-
     try:
-        # ================================================================
-        #  STEP 0 — QUERY REWRITING
-        #  Run intent classification + slot extraction + rewrite
-        # ================================================================
+        # =================================================================
+        #  STAGE 1 & 2: Intent + Slot + Query Rewriting
+        #  The query_rewriter internally runs:
+        #    - Intent Classification (single_search, multi_search, filtered_search, free_form)
+        #    - Slot Extraction (PRODUCT, BRAND, COLOR, PRICE_MAX, etc.)
+        #    - Query Rewriting (produces clean search_text + structured filters)
+        # =================================================================
         rewritten = query_rewriter.process(q)
         search_text = rewritten.search_text
         filters = rewritten.filters
 
-        print(f"[Search] Query: '{q}'")
+        print(f"[Search] Original query: '{q}'")
+        print(f"[Search] Intents: {rewritten.intents}")
+        print(f"[Search] Slots: {rewritten.slots}")
         if rewritten.is_rewritten:
-            print(f"[Search] Rewritten: '{search_text}' | Filters: {filters}")
+            print(f"[Search] Rewritten to: '{search_text}' | Filters: {filters}")
 
-        # Check if ML models are loaded
+        # =================================================================
+        #  Check if ML models are loaded
+        # =================================================================
         if not bert_service._loaded:
-            # --- Fallback: Simple Text Search (no ML) ---
-            print(f"[Search] ML models not loaded. Performing text search for: {search_text}")
-            sb = get_supabase()
+            # Fallback: Simple text search without ML
+            print(f"[Search] ML models not loaded. Performing text-only search.")
+            return await _fallback_text_search(q, search_text, filters, max_results, rewritten)
 
-            qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
-            qb = _apply_keyword_filters(qb, filters, search_text)
-            response = qb.limit(max_results).execute()
-
-            results = []
-            for p in response.data:
-                results.append(SearchResultItem(
-                    id=p["id"],
-                    title=p["title"],
-                    description=p["description"] or "",
-                    price=p["price"],
-                    image_url=_first_image(p.get("images")),
-                    seller_id=p["seller_id"],
-                    similarity=1.0,
-                    ranker_score=0.0,
-                    relevance_label="Exact",
-                    relevance_confidence=1.0,
-                    relevance_score=1.0,
-                    search_source="keyword",
-                ))
-
-            return SearchResponse(
-                query=q,
-                total_results=len(results),
-                results=results,
-                rewritten_query=search_text,
-                detected_intents=rewritten.intents,
-                extracted_slots=rewritten.slots,
-                applied_filters=filters,
-            )
-
-
-        # ================================================================
-        #  ML LOADED — HYBRID SEARCH
-        # ================================================================
-
-        # Step 1: Compute BERT embedding for the REWRITTEN search text
+        # =================================================================
+        #  STAGE 1 (continued): BERT Embedding
+        #  Encode the rewritten search text into a 768-dimensional vector
+        # =================================================================
         query_embedding = bert_service.compute_embedding(search_text)
 
-        # ---------------------------------------------------------------
-        #  LANE 1 — KEYWORD MATCHING (20%, 10 slots)
-        #  ILIKE search on title/description with rewritten text + filters.
-        #  Still runs ESCI classifier for display probabilities.
-        # ---------------------------------------------------------------
-
-        sb = get_supabase()
-        kw_qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
-        kw_qb = _apply_keyword_filters(kw_qb, filters, search_text)
-        kw_response = kw_qb.limit(KEYWORD_SLOTS).execute()
-
-        keyword_results: list[SearchResultItem] = []
-        keyword_ids: set[str] = set()   # track IDs for deduplication
-
-        for p in kw_response.data:
-            pid = str(p["id"])
-            keyword_ids.add(pid)
-
-            # Default ESCI values (used if product has no embedding)
-            esci = {"label": "Exact", "confidence": 1.0,
-                    "exact_prob": 0.0, "substitute_prob": 0.0,
-                    "complement_prob": 0.0, "irrelevant_prob": 0.0}
-
-            # If the product has an embedding, run the classifier
-            if p.get("embedding"):
-                try:
-                    from database import pgvector_to_embedding
-                    prod_emb = pgvector_to_embedding(p["embedding"])
-                    cls_batch = classifier_service.classify_batch(
-                        query_embedding, np.array([prod_emb])
-                    )
-                    if cls_batch:
-                        esci = cls_batch[0]
-                except Exception:
-                    pass  # keep defaults if classification fails
-
-            # Filter: if E score < 70%, do not display (same rule as model lane)
-            if esci["exact_prob"] < 0.700:
-                continue
-
-            keyword_results.append(SearchResultItem(
-                id=pid,
-                title=p["title"],
-                description=p["description"] or "",
-                price=p["price"],
-                image_url=_first_image(p.get("images")),
-                seller_id=p["seller_id"],
-                similarity=1.0,
-                ranker_score=0.0,
-                relevance_label=esci["label"],
-                relevance_confidence=esci["confidence"],
-                relevance_score=1.0,
-                exact_prob=esci["exact_prob"],
-                substitute_prob=esci["substitute_prob"],
-                complement_prob=esci["complement_prob"],
-                irrelevant_prob=esci["irrelevant_prob"],
-                search_source="keyword",
-            ))
-
-        print(f"[Search] Keyword lane: {len(keyword_results)} results")
-
-        # ---------------------------------------------------------------
-        #  LANE 2 — ESCI MODEL (80%, 40 slots)
-        #  BERT embedding + pgvector (with filters) + CrossEncoder + Classifier
-        #  Filters out irrelevant_prob > 13%
-        # ---------------------------------------------------------------
-
-        # Step 2: Find candidate products via pgvector similarity
-        # Use filtered search if we have structured filters from query rewriting
+        # =================================================================
+        #  STAGE 3: pgvector Similarity + Supabase Filters
+        #  Find top-K candidate products using cosine similarity
+        #  Apply structured filters from query rewriting
+        # =================================================================
         if filters:
             raw_candidates = search_similar_products_filtered(
                 query_embedding,
@@ -270,135 +223,149 @@ async def search_products(
                 top_k=SEARCH_TOP_K_CANDIDATES,
             )
 
-        # Safety Net: cosine similarity threshold
+        # Apply minimum similarity threshold
         MIN_SIMILARITY_THRESHOLD = 0.40
         candidates = [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
 
-        # Step 3: Re-rank candidates with CrossEncoder
-        if candidates:
-            product_titles = [c["title"] for c in candidates]
-            raw_ranker_scores = ranker_service.rank(q, product_titles)
-            normalized_ranker_scores = ranker_service.normalize_scores(raw_ranker_scores)
-        else:
-            normalized_ranker_scores = []
+        print(f"[Search] pgvector candidates: {len(candidates)} (threshold: {MIN_SIMILARITY_THRESHOLD})")
 
-        # Step 4: Classify each candidate (E/S/C/I)
-        if candidates:
-            product_embeddings = np.array([c["embedding"] for c in candidates])
+        if not candidates:
+            return SearchResponse(
+                query=q,
+                total_results=0,
+                results=[],
+                message="No products found matching your query.",
+                rewritten_query=search_text,
+                detected_intents=rewritten.intents,
+                extracted_slots=rewritten.slots,
+                applied_filters=filters,
+            )
+
+        # =================================================================
+        #  STAGE 3 (continued): CrossEncoder Re-Ranking
+        #  Score each (query, product_title) pair for pairwise relevance
+        # =================================================================
+        product_titles = [c["title"] for c in candidates]
+
+        if ranker_service._loaded:
+            raw_ranker_scores = ranker_service.rank(q, product_titles)
+            ranker_scores = ranker_service.normalize_scores(raw_ranker_scores)
+        else:
+            # Fallback: use similarity as ranker score
+            ranker_scores = [c["similarity"] for c in candidates]
+
+        # =================================================================
+        #  STAGE 4: ESCI Classifier
+        #  Classify each (query, product) pair into E/S/C/I
+        #  Filter out products with irrelevant_prob > 10% or exact_prob < 80%
+        # =================================================================
+        product_embeddings = np.array([c["embedding"] for c in candidates])
+
+        if classifier_service._loaded:
             classifications = classifier_service.classify_batch(query_embedding, product_embeddings)
         else:
-            classifications = []
+            # Fallback: assume all are "Exact" with high confidence
+            classifications = [
+                {"label": "Exact", "confidence": 1.0, "class_id": 0,
+                 "exact_prob": 1.0, "substitute_prob": 0.0,
+                 "complement_prob": 0.0, "irrelevant_prob": 0.0}
+                for _ in candidates
+            ]
+
+        # =================================================================
+        #  STAGE 5: Score Blending
+        #  relevance_score = 0.4×R + 0.25×C + 0.35×S
+        #  Where: R=ranker, C=classifier_priority, S=similarity
+        # =================================================================
 
         # Determine effective weights (adjust if ranker not loaded)
         if ranker_service._loaded:
-            w_ranker = RANKER_WEIGHT
-            w_classifier = CLASSIFIER_WEIGHT
-            w_similarity = SIMILARITY_WEIGHT
+            w_ranker = RANKER_WEIGHT       # 0.5
+            w_classifier = CLASSIFIER_WEIGHT  # 0.3
+            w_similarity = SIMILARITY_WEIGHT  # 0.2
         else:
+            # Redistribute ranker weight to classifier and similarity
             w_ranker = 0.0
-            total_remaining = CLASSIFIER_WEIGHT + SIMILARITY_WEIGHT
-            w_classifier = CLASSIFIER_WEIGHT / total_remaining if total_remaining > 0 else 0.5
-            w_similarity = SIMILARITY_WEIGHT / total_remaining if total_remaining > 0 else 0.5
+            total = CLASSIFIER_WEIGHT + SIMILARITY_WEIGHT
+            w_classifier = CLASSIFIER_WEIGHT / total if total > 0 else 0.6
+            w_similarity = SIMILARITY_WEIGHT / total if total > 0 else 0.4
 
-        # Build scored model results grouped by ESCI label
-        exact_results = []
-        substitute_results = []
-        complement_results = []
+        # Build scored results, applying ESCI filters
+        scored_results: list[SearchResultItem] = []
 
         for idx, (candidate, classification) in enumerate(zip(candidates, classifications)):
-            # Skip products already in the keyword lane (dedup)
-            if str(candidate["id"]) in keyword_ids:
-                continue
-
             label = classification["label"]
+            exact_prob = classification.get("exact_prob", 0.0)
+            irrelevant_prob = classification.get("irrelevant_prob", 0.0)
 
-            # Model lane: filter out Irrelevant label, irrelevant_prob > 13%, OR E score < 70%
-            if (label == "Irrelevant"
-                    or classification["irrelevant_prob"] > 0.13
-                    or classification["exact_prob"] < 0.70):
+            # ESCI Filtering:
+            # - Filter out products with irrelevant_prob > 10%
+            # - Filter out products with exact_prob < 80%
+            if irrelevant_prob > 0.10:
+                continue
+            if exact_prob < 0.80:
                 continue
 
-            # Priority weight: E=1.0, S=0.67, C=0.33
-            priority_weight = (3 - LABEL_PRIORITY[label]) / 3
+            # Skip Irrelevant label entirely
+            if label == "Irrelevant":
+                continue
 
-            ranker_score = float(normalized_ranker_scores[idx])
-            relevance_score = (
-                (w_ranker * ranker_score)
-                + (w_classifier * priority_weight)
-                + (w_similarity * candidate["similarity"])
+            # Skip Substitutes/Complements if user requested
+            if label == "Substitute" and not include_substitutes:
+                continue
+            if label == "Complement" and not include_complements:
+                continue
+
+            # Calculate priority weight for classifier component
+            classifier_priority = _label_to_priority_weight(label)
+
+            # Calculate blended relevance score
+            ranker_score = float(ranker_scores[idx])
+            similarity = float(candidate["similarity"])
+
+            relevance_score = _compute_blended_score(
+                ranker_score=ranker_score,
+                classifier_priority=classifier_priority,
+                similarity=similarity,
+                w_ranker=w_ranker,
+                w_classifier=w_classifier,
+                w_similarity=w_similarity,
             )
 
-            item = SearchResultItem(
-                id=candidate["id"],
+            scored_results.append(SearchResultItem(
+                id=str(candidate["id"]),
                 title=candidate["title"],
-                description=candidate["description"] or "",
-                price=candidate["price"],
+                description=candidate.get("description") or "",
+                price=float(candidate["price"]),
                 image_url=_first_image(candidate.get("images")),
-                seller_id=candidate["seller_id"],
-                similarity=round(candidate["similarity"], 4),
+                seller_id=str(candidate["seller_id"]),
+                # Scoring components
+                similarity=round(similarity, 4),
                 ranker_score=round(ranker_score, 4),
-                relevance_label=label,
-                relevance_confidence=classification["confidence"],
                 relevance_score=round(relevance_score, 4),
-                exact_prob=classification["exact_prob"],
-                substitute_prob=classification["substitute_prob"],
-                complement_prob=classification["complement_prob"],
-                irrelevant_prob=classification["irrelevant_prob"],
-                search_source="model",
-            )
+                # ESCI classification
+                relevance_label=label,
+                relevance_confidence=round(classification["confidence"], 4),
+                exact_prob=round(exact_prob, 4),
+                substitute_prob=round(classification.get("substitute_prob", 0.0), 4),
+                complement_prob=round(classification.get("complement_prob", 0.0), 4),
+                irrelevant_prob=round(irrelevant_prob, 4),
+            ))
 
-            if label == "Exact":
-                exact_results.append(item)
-            elif label == "Substitute":
-                substitute_results.append(item)
-            elif label == "Complement":
-                complement_results.append(item)
+        # =================================================================
+        #  STAGE 6: Final Ranked Results
+        #  Sort by relevance_score (highest first), limit to max_results
+        # =================================================================
+        scored_results.sort(key=lambda r: r.relevance_score, reverse=True)
+        final_results = scored_results[:max_results]
 
-        # Sort each category by blended relevance_score (highest first)
-        exact_results.sort(key=lambda r: r.relevance_score, reverse=True)
-        substitute_results.sort(key=lambda r: r.relevance_score, reverse=True)
-        complement_results.sort(key=lambda r: r.relevance_score, reverse=True)
-
-        # Model lane allocation: 40 slots → 60% E / 30% S / 10% C
-        EXACT_RATIO = 0.60
-        SUBSTITUTE_RATIO = 0.30
-        COMPLEMENT_RATIO = 0.10
-
-        exact_slots = int(MODEL_SLOTS * EXACT_RATIO)            # 24
-        substitute_slots = int(MODEL_SLOTS * SUBSTITUTE_RATIO)   # 12
-        complement_slots = int(MODEL_SLOTS * COMPLEMENT_RATIO)   # 4
-
-        # Take what we can from Exact
-        taken_exact = exact_results[:exact_slots]
-        leftover = exact_slots - len(taken_exact)
-
-        # Cascade leftover Exact slots → Substitute
-        substitute_slots += leftover
-        taken_substitute = substitute_results[:substitute_slots] if include_substitutes else []
-        leftover = substitute_slots - len(taken_substitute)
-
-        # Cascade leftover Substitute slots → Complement
-        complement_slots += leftover
-        taken_complement = complement_results[:complement_slots] if include_complements else []
-
-        model_results = taken_exact + taken_substitute + taken_complement
-        print(f"[Search] Model lane: {len(model_results)} results")
-
-        # ---------------------------------------------------------------
-        #  MERGE: Keyword results first, then model results (deduplicated)
-        # ---------------------------------------------------------------
-        seen_ids: set[str] = set()
-        results: list[SearchResultItem] = []
-        for item in keyword_results + model_results:
-            if item.id not in seen_ids:
-                seen_ids.add(item.id)
-                results.append(item)
+        print(f"[Search] Final results: {len(final_results)} (after ESCI filtering)")
 
         return SearchResponse(
             query=q,
-            total_results=len(results),
-            results=results,
-            message="No Products related to your Query" if len(results) == 0 else "",
+            total_results=len(final_results),
+            results=final_results,
+            message="" if final_results else "No products found matching your query.",
             rewritten_query=search_text,
             detected_intents=rewritten.intents,
             extracted_slots=rewritten.slots,
@@ -406,14 +373,75 @@ async def search_products(
         )
 
     except HTTPException:
-        raise  # Re-raise FastAPI HTTP exceptions as-is
+        raise
     except Exception as e:
-        print(f"[Search] ERROR during search for '{q}': {e}")
+        print(f"[Search] ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
-# --- Voice Transcription Endpoint (for browsers without Web Speech API) ---
+# =============================================================================
+#  Fallback: Text-only search when ML models are not loaded
+# =============================================================================
+
+async def _fallback_text_search(
+    original_query: str,
+    search_text: str,
+    filters: dict,
+    max_results: int,
+    rewritten,
+) -> SearchResponse:
+    """Simple ILIKE text search fallback when ML models are not available."""
+    sb = get_supabase()
+
+    qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
+
+    # Apply text search
+    qb = qb.or_(f"title.ilike.%{search_text}%,description.ilike.%{search_text}%")
+
+    # Apply price filters
+    if "price_max" in filters:
+        qb = qb.lte("price", filters["price_max"])
+    if "price_min" in filters:
+        qb = qb.gte("price", filters["price_min"])
+
+    response = qb.limit(max_results).execute()
+
+    results = []
+    for p in response.data:
+        results.append(SearchResultItem(
+            id=str(p["id"]),
+            title=p["title"],
+            description=p.get("description") or "",
+            price=float(p["price"]),
+            image_url=_first_image(p.get("images")),
+            seller_id=str(p["seller_id"]),
+            similarity=1.0,
+            ranker_score=0.0,
+            relevance_score=1.0,
+            relevance_label="Exact",
+            relevance_confidence=1.0,
+            exact_prob=1.0,
+            substitute_prob=0.0,
+            complement_prob=0.0,
+            irrelevant_prob=0.0,
+        ))
+
+    return SearchResponse(
+        query=original_query,
+        total_results=len(results),
+        results=results,
+        message="" if results else "No products found.",
+        rewritten_query=search_text,
+        detected_intents=rewritten.intents,
+        extracted_slots=rewritten.slots,
+        applied_filters=filters,
+    )
+
+
+# =============================================================================
+#  Voice Transcription Endpoint
+# =============================================================================
 
 @router.post("/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
@@ -439,7 +467,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
         audio_segment.export(tmp_wav_path, format="wav")
         tmp_wav = tmp_wav_path
 
-        # Transcribe using Google Speech Recognition (free, no API key needed)
+        # Transcribe using Google Speech Recognition
         recognizer = sr.Recognizer()
         with sr.AudioFile(tmp_wav) as source:
             audio_data = recognizer.record(source)
@@ -449,16 +477,10 @@ async def transcribe_audio(audio: UploadFile = File(...)):
 
     except ImportError:
         return {"error": "Speech recognition libraries not installed. Run: pip install SpeechRecognition pydub"}
-    except sr.UnknownValueError:
-        return {"error": "Could not understand audio. Please speak clearly and try again."}
-    except sr.RequestError as e:
-        return {"error": f"Speech recognition service error: {str(e)}"}
     except Exception as e:
         print(f"[Transcribe] Error: {e}")
-        traceback.print_exc()
         return {"error": f"Transcription failed: {str(e)}"}
     finally:
-        # Cleanup temp files
         if tmp_webm and os.path.exists(tmp_webm.name):
             os.unlink(tmp_webm.name)
         if tmp_wav and os.path.exists(tmp_wav):
