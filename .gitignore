@@ -37,7 +37,7 @@ classification_identification/text_representations/
 # ========================
 # Datasets (large data files)
 # ========================
-shopping_queries_dataset/
+
 *.parquet
 *.npy
 *.xlsx
