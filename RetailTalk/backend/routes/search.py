@@ -223,11 +223,16 @@ async def search_products(
                 top_k=SEARCH_TOP_K_CANDIDATES,
             )
 
+        print(f"[Search] pgvector raw candidates: {len(raw_candidates)}")
+        if raw_candidates:
+            top_sims = sorted([c["similarity"] for c in raw_candidates], reverse=True)[:5]
+            print(f"[Search] Top similarities: {[round(s, 4) for s in top_sims]}")
+
         # Apply minimum similarity threshold
-        MIN_SIMILARITY_THRESHOLD = 0.40
+        MIN_SIMILARITY_THRESHOLD = 0.20
         candidates = [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
 
-        print(f"[Search] pgvector candidates: {len(candidates)} (threshold: {MIN_SIMILARITY_THRESHOLD})")
+        print(f"[Search] After threshold ({MIN_SIMILARITY_THRESHOLD}): {len(candidates)} candidates")
 
         if not candidates:
             return SearchResponse(
@@ -250,6 +255,9 @@ async def search_products(
         if ranker_service._loaded:
             raw_ranker_scores = ranker_service.rank(q, product_titles)
             ranker_scores = ranker_service.normalize_scores(raw_ranker_scores)
+            # Log top ranker scores with titles for debugging
+            scored_pairs = sorted(zip(ranker_scores, product_titles), reverse=True)[:5]
+            print(f"[Search] Top ranker scores: {[(round(s, 4), t[:40]) for s, t in scored_pairs]}")
         else:
             # Fallback: use similarity as ranker score
             ranker_scores = [c["similarity"] for c in candidates]
@@ -279,35 +287,35 @@ async def search_products(
         # =================================================================
 
         # Determine effective weights (adjust if ranker not loaded)
+        # NOTE: Classifier weight is reduced because the current ESCI model
+        # outputs near-uniform probabilities (~25% per class). The ranker
+        # (CrossEncoder) and pgvector similarity are far more reliable.
         if ranker_service._loaded:
-            w_ranker = RANKER_WEIGHT       # 0.5
-            w_classifier = CLASSIFIER_WEIGHT  # 0.3
-            w_similarity = SIMILARITY_WEIGHT  # 0.2
+            w_ranker = 0.55
+            w_classifier = 0.05
+            w_similarity = 0.40
         else:
-            # Redistribute ranker weight to classifier and similarity
+            # No ranker — rely on similarity only
             w_ranker = 0.0
-            total = CLASSIFIER_WEIGHT + SIMILARITY_WEIGHT
-            w_classifier = CLASSIFIER_WEIGHT / total if total > 0 else 0.6
-            w_similarity = SIMILARITY_WEIGHT / total if total > 0 else 0.4
+            w_classifier = 0.05
+            w_similarity = 0.95
 
-        # Build scored results, applying ESCI filters
+        # Build scored results, filtering by ranker score
         scored_results: list[SearchResultItem] = []
+        MIN_RANKER_SCORE = 0.30  # Filter products the ranker considers clearly irrelevant
 
         for idx, (candidate, classification) in enumerate(zip(candidates, classifications)):
             label = classification["label"]
             exact_prob = classification.get("exact_prob", 0.0)
             irrelevant_prob = classification.get("irrelevant_prob", 0.0)
 
-            # ESCI Filtering:
-            # - Filter out products with irrelevant_prob > 10%
-            # - Filter out products with exact_prob < 80%
-            if irrelevant_prob > 0.10:
-                continue
-            if exact_prob < 0.80:
-                continue
+            # Calculate blended relevance score
+            ranker_score = float(ranker_scores[idx])
+            similarity = float(candidate["similarity"])
 
-            # Skip Irrelevant label entirely
-            if label == "Irrelevant":
+            # Filter by ranker score — the CrossEncoder sees actual text pairs
+            # so it can distinguish "dress" vs "Canned Goods" reliably
+            if ranker_service._loaded and ranker_score < MIN_RANKER_SCORE:
                 continue
 
             # Skip Substitutes/Complements if user requested
@@ -318,10 +326,6 @@ async def search_products(
 
             # Calculate priority weight for classifier component
             classifier_priority = _label_to_priority_weight(label)
-
-            # Calculate blended relevance score
-            ranker_score = float(ranker_scores[idx])
-            similarity = float(candidate["similarity"])
 
             relevance_score = _compute_blended_score(
                 ranker_score=ranker_score,
@@ -359,7 +363,7 @@ async def search_products(
         scored_results.sort(key=lambda r: r.relevance_score, reverse=True)
         final_results = scored_results[:max_results]
 
-        print(f"[Search] Final results: {len(final_results)} (after ESCI filtering)")
+        print(f"[Search] Final results: {len(final_results)} (after ranker filtering)")
 
         return SearchResponse(
             query=q,

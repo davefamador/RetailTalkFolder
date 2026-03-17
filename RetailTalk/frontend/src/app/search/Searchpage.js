@@ -301,6 +301,13 @@ export default function SearchPage() {
                                             <span className={getLabelClass(product.relevance_label)}>
                                                 {product.relevance_label}
                                             </span>
+                                            <span style={{
+                                                fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4,
+                                                background: 'rgba(255, 255, 255, 0.08)',
+                                                color: 'var(--text-secondary)', fontWeight: 600,
+                                            }}>
+                                                Score: {(product.relevance_score * 100).toFixed(1)}%
+                                            </span>
                                         </div>
                                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                                             <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(76, 175, 80, 0.15)', color: '#4caf50' }}>

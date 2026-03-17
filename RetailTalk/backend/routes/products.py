@@ -170,6 +170,42 @@ async def create_product(req: CreateProductRequest, current_user: dict = Depends
     return build_product_response(product)
 
 
+@router.post("/backfill-embeddings")
+async def backfill_embeddings():
+    """
+    Compute and store BERT embeddings for all products that are missing them.
+    Use this after adding products directly to the database.
+    """
+    if not bert_service._loaded:
+        raise HTTPException(status_code=503, detail="BERT model not loaded. Cannot compute embeddings.")
+
+    sb = get_supabase()
+    # Fetch all products without embeddings
+    result = sb.table("products").select("id, title").is_("embedding", "null").execute()
+
+    if not result.data:
+        return {"message": "All products already have embeddings.", "updated": 0}
+
+    updated = 0
+    errors = []
+    for p in result.data:
+        try:
+            embedding = bert_service.compute_embedding(p["title"])
+            store_product_embedding(p["id"], embedding)
+            updated += 1
+            print(f"[Backfill] Embedded: {p['id']} — {p['title']}")
+        except Exception as e:
+            errors.append({"id": p["id"], "title": p["title"], "error": str(e)})
+            print(f"[Backfill] Failed: {p['id']} — {e}")
+
+    return {
+        "message": f"Backfill complete. {updated}/{len(result.data)} products updated.",
+        "updated": updated,
+        "total": len(result.data),
+        "errors": errors,
+    }
+
+
 @router.get("/", response_model=list[ProductResponse])
 async def list_products(limit: int = 50, offset: int = 0):
     """List all active products with stock > 0 (public, no auth required)."""

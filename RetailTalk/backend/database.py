@@ -111,31 +111,35 @@ def search_similar_products_filtered(
     
     # Build dynamic WHERE clause
     conditions = ["is_active = true", "embedding IS NOT NULL"]
-    params = [embedding_str, embedding_str]
-    
+    filter_params = []
+
     if price_min is not None:
-        conditions.append(f"price >= %s")
-        params.append(price_min)
-    
+        conditions.append(f"price > %s")
+        filter_params.append(price_min)
+
     if price_max is not None:
-        conditions.append(f"price <= %s")
-        params.append(price_max)
-    
+        conditions.append(f"price < %s")
+        filter_params.append(price_max)
+
     if brand:
         conditions.append(f"(title ILIKE %s OR description ILIKE %s)")
-        params.append(f"%{brand}%")
-        params.append(f"%{brand}%")
-    
+        filter_params.append(f"%{brand}%")
+        filter_params.append(f"%{brand}%")
+
     if color:
         conditions.append(f"(title ILIKE %s OR description ILIKE %s)")
-        params.append(f"%{color}%")
-        params.append(f"%{color}%")
-    
+        filter_params.append(f"%{color}%")
+        filter_params.append(f"%{color}%")
+
     where_clause = " AND ".join(conditions)
-    params.append(top_k)
-    
+
+    # Params must match SQL placeholder order:
+    # 1) embedding for SELECT similarity, 2) filter params for WHERE,
+    # 3) embedding for ORDER BY, 4) top_k for LIMIT
+    params = [embedding_str] + filter_params + [embedding_str, top_k]
+
     query = f"""
-        SELECT 
+        SELECT
             id, seller_id, title, description, price, images,
             embedding::text as embedding_text,
             1 - (embedding <=> %s::vector) as similarity
@@ -144,7 +148,7 @@ def search_similar_products_filtered(
         ORDER BY embedding <=> %s::vector
         LIMIT %s
     """
-    
+
     try:
         with conn.cursor() as cur:
             cur.execute(query, tuple(params))

@@ -115,7 +115,7 @@ def main():
         args.model_path,
         num_labels=1,
         max_length=512,
-        default_activation_function=torch.nn.Identity(),
+        activation_fn=torch.nn.Identity(),
         device=device,
     )
 

@@ -53,6 +53,38 @@ def _parse_price(value: str) -> Optional[float]:
         return None
 
 
+def _detect_price_direction(query: str) -> Optional[str]:
+    """
+    Detect whether the user's price intent is a minimum or maximum
+    based on modifier words in the raw query.
+
+    Returns "min", "max", or None if ambiguous.
+    """
+    q = query.lower()
+    # Patterns that indicate a MINIMUM price ("more than X", "above X", etc.)
+    min_patterns = [
+        r"\bmore\s+than\b", r"\babove\b", r"\bover\b", r"\bat\s+least\b",
+        r"\bhigher\s+than\b", r"\bstarting\b", r"\bfrom\b",
+        r"\bexpensive\b", r"\bpricey\b",
+        # Filipino
+        r"\bhigit\s+sa\b", r"\bmula\s+sa\b",
+    ]
+    # Patterns that indicate a MAXIMUM price ("less than X", "under X", etc.)
+    max_patterns = [
+        r"\bless\s+than\b", r"\bunder\b", r"\bbelow\b", r"\bat\s+most\b",
+        r"\bcheaper\s+than\b", r"\bbudget\b", r"\bcheap\b", r"\baffordable\b",
+        # Filipino
+        r"\bmura\b", r"\bmababa\b",
+    ]
+    for pat in min_patterns:
+        if re.search(pat, q):
+            return "min"
+    for pat in max_patterns:
+        if re.search(pat, q):
+            return "max"
+    return None
+
+
 def rewrite(query: str, intents: list[str], slots: dict) -> RewrittenQuery:
     """
     Rewrite a user query based on detected intents and extracted slots.
@@ -82,6 +114,22 @@ def rewrite(query: str, intents: list[str], slots: dict) -> RewrittenQuery:
     # (e.g., "pano magluto ng adobo" — not a product search)
     if "free_form" in intents and len(intents) == 1 and not slots:
         return result
+
+    # --- Correct price slot direction ---
+    # The NER model may tag the price value as PRICE_MAX when the user
+    # actually means "more than X" (a minimum), or vice versa.
+    # Use modifier words in the raw query to fix this.
+    direction = _detect_price_direction(query)
+
+    has_min = "PRICE_MIN" in slots
+    has_max = "PRICE_MAX" in slots
+
+    if direction == "min" and has_max and not has_min:
+        # NER said PRICE_MAX but user said "more than" → swap to PRICE_MIN
+        slots["PRICE_MIN"] = slots.pop("PRICE_MAX")
+    elif direction == "max" and has_min and not has_max:
+        # NER said PRICE_MIN but user said "under" → swap to PRICE_MAX
+        slots["PRICE_MAX"] = slots.pop("PRICE_MIN")
 
     # --- Build structured filters from slots ---
     filters = {}

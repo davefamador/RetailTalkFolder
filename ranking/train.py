@@ -269,7 +269,7 @@ def main():
         args.model_name,
         num_labels=1,
         max_length=512,
-        default_activation_function=torch.nn.Identity(),
+        activation_fn=torch.nn.Identity(),
         device=device,
     )
 
@@ -363,8 +363,8 @@ def main():
 
             model_predictions = model.model(**features, return_dict=True)
             logits = model_predictions.logits
-            if model.default_activation_function is not None:
-                logits = model.default_activation_function(logits)
+            if model.activation_fn is not None:
+                logits = model.activation_fn(logits)
             logits = logits.view(-1)
 
             loss = loss_fct(logits, labels)
