@@ -44,6 +44,81 @@ MODIFIER_WORDS = {
 }
 
 
+def split_sentences(query: str) -> list[str]:
+    """
+    Split a multi-sentence query into individual sentences.
+
+    Splits on . ? ! followed by whitespace (or end of string).
+    Does NOT split on decimal numbers (e.g., 3.5) or trailing punctuation.
+    """
+    # Split on sentence-ending punctuation followed by whitespace
+    # (?<!\d)\. prevents splitting on decimals like "3.5"
+    # [?!] always splits
+    parts = re.split(r'(?<!\d)\.(?=\s+[A-Za-z])|[?!](?:\s+|$)', query)
+    sentences = [s.strip().rstrip('.!?') for s in parts if s and s.strip()]
+    sentences = [s for s in sentences if s]
+    return sentences if sentences else [query.strip()]
+
+
+def _merge_rewritten_queries(
+    sub_queries: list[RewrittenQuery],
+    original_query: str,
+) -> RewrittenQuery:
+    """Merge multiple per-sentence RewrittenQuery results into one."""
+    if len(sub_queries) == 1:
+        return sub_queries[0]
+
+    # Union of all intents (deduplicated, preserving order)
+    merged_intents = list(dict.fromkeys(
+        intent for rq in sub_queries for intent in rq.intents
+    ))
+
+    # Merge slots: first-wins, but PRODUCT slots fill PRODUCT1 then PRODUCT2
+    merged_slots = {}
+    for rq in sub_queries:
+        for key, value in rq.slots.items():
+            if key in ("PRODUCT1", "PRODUCT2"):
+                if "PRODUCT1" not in merged_slots:
+                    merged_slots["PRODUCT1"] = value
+                elif "PRODUCT2" not in merged_slots:
+                    merged_slots["PRODUCT2"] = value
+            elif key not in merged_slots:
+                merged_slots[key] = value
+
+    # Merge filters: most restrictive for prices/rating, first-wins for others
+    merged_filters = {}
+    for rq in sub_queries:
+        for key, value in rq.filters.items():
+            if key not in merged_filters:
+                merged_filters[key] = value
+            elif key == "price_min":
+                merged_filters[key] = max(merged_filters[key], value)
+            elif key == "price_max":
+                merged_filters[key] = min(merged_filters[key], value)
+            elif key == "rating_min":
+                merged_filters[key] = max(merged_filters[key], value)
+
+    # Deduplicated search text (preserving order)
+    seen = set()
+    search_parts = []
+    for rq in sub_queries:
+        for word in rq.search_text.split():
+            lower = word.lower()
+            if lower not in seen:
+                seen.add(lower)
+                search_parts.append(word)
+    search_text = " ".join(search_parts)
+
+    return RewrittenQuery(
+        search_text=search_text,
+        filters=merged_filters,
+        original_query=original_query,
+        intents=merged_intents,
+        slots=merged_slots,
+        is_rewritten=any(rq.is_rewritten for rq in sub_queries),
+    )
+
+
 def _parse_price(value: str) -> Optional[float]:
     """Try to parse a numeric value from a price slot."""
     clean = re.sub(r"[^\d.]", "", value)
@@ -218,38 +293,61 @@ class QueryRewriterService:
 
     def process(self, query: str) -> RewrittenQuery:
         """
-        Full query rewriting pipeline:
-        1. Intent classification
-        2. Slot extraction
-        3. Query rewriting
+        Full query rewriting pipeline with multi-sentence support:
+        1. Split query into sentences
+        2. Process each sentence (intent + slot + rewrite)
+        3. Merge results into a single RewrittenQuery
 
         Returns RewrittenQuery with search_text, filters, intents, and slots.
         """
+        sentences = split_sentences(query)
+
+        if len(sentences) == 1:
+            # Single sentence: no splitting overhead
+            result = self._process_single(sentences[0])
+            result.original_query = query.strip()
+            self._log(query, result)
+            return result
+
+        # Multiple sentences: process each independently, then merge
+        sub_results = [self._process_single(s) for s in sentences]
+        merged = _merge_rewritten_queries(sub_results, original_query=query.strip())
+
+        if merged.is_rewritten:
+            print(f"[QueryRewriter] '{query}' -> '{merged.search_text}'")
+            print(f"[QueryRewriter]   Sentences: {sentences}")
+            print(f"[QueryRewriter]   Intents: {merged.intents}")
+            print(f"[QueryRewriter]   Slots:   {merged.slots}")
+            print(f"[QueryRewriter]   Filters: {merged.filters}")
+
+        return merged
+
+    def _process_single(self, sentence: str) -> RewrittenQuery:
+        """Process a single sentence through intent + slot + rewrite."""
         # Step 1: Classify intents
         intent_result = {"intents": [], "probabilities": {}}
         if self._intent_service and self._intent_service._loaded:
-            intent_result = self._intent_service.predict(query)
+            intent_result = self._intent_service.predict(sentence)
 
         # Step 2: Extract slots
         slot_result = {"slots": {}, "tagged_tokens": []}
         if self._slot_service and self._slot_service._loaded:
-            slot_result = self._slot_service.extract(query)
+            slot_result = self._slot_service.extract(sentence)
 
         # Step 3: Rewrite
-        rewritten = rewrite(
-            query=query,
+        return rewrite(
+            query=sentence,
             intents=intent_result["intents"],
             slots=slot_result["slots"],
         )
 
-        # Log for debugging
-        if rewritten.is_rewritten:
-            print(f"[QueryRewriter] '{query}' -> '{rewritten.search_text}'")
-            print(f"[QueryRewriter]   Intents: {rewritten.intents}")
-            print(f"[QueryRewriter]   Slots:   {rewritten.slots}")
-            print(f"[QueryRewriter]   Filters: {rewritten.filters}")
-
-        return rewritten
+    def _log(self, query: str, result: RewrittenQuery):
+        """Log rewriting details for debugging."""
+        if result.is_rewritten:
+            print(f"[QueryRewriter] '{query}' -> '{result.search_text}'")
+            print(f"[QueryRewriter]   Intents: {result.intents}")
+            print(f"[QueryRewriter]   Slots:   {result.slots}")
+            print(f"[QueryRewriter]   Filters: {result.filters}")
 
 
 # Global singleton

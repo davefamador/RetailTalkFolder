@@ -76,8 +76,8 @@ def compute_embeddings(texts, tokenizer, model, device, max_length=256, batch_si
 def main():
     parser = argparse.ArgumentParser(description="Build training arrays from a custom ESCI CSV.")
     parser.add_argument("--csv", type=str,
-                        default=os.path.join(os.path.dirname(__file__), "..", "..", "shopping_queries_dataset", "shoppingqueriesdataset_cleaned.xlsx"),
-                        help="Path to CSV or XLSX file with columns: query, product_title, label")
+                        default=os.path.join(os.path.dirname(__file__), "custom_esci_with_user_query.csv"),
+                        help="Path to CSV or XLSX file with columns: query, product_title, label (and optionally user_query)")
     parser.add_argument("--output_dir", type=str, default=".",
                         help="Directory to save the .npy output files")
     parser.add_argument("--model_name", type=str, default="bert-base-multilingual-uncased",
@@ -132,14 +132,30 @@ def main():
     model.eval()
     print(f"  Device: {device}")
 
+    # Check if user_query column exists for data doubling
+    has_user_query = "user_query" in df.columns
+    if has_user_query:
+        df["user_query"] = df["user_query"].str.strip()
+        valid_uq = df["user_query"].notna() & (df["user_query"] != "")
+        print(f"\n  user_query column found: {valid_uq.sum()}/{len(df)} rows have values")
+        print(f"  Training data will be DOUBLED (~{len(df) + valid_uq.sum()} total rows)")
+
     # 3. Compute embeddings
     print(f"\n[3/4] Computing BERT embeddings...")
 
-    print("  Queries:")
+    print("  Keyword queries:")
     query_embeddings = compute_embeddings(
         df["query"].tolist(), tokenizer, model, device,
         max_length=args.max_length, batch_size=args.batch_size
     )
+
+    if has_user_query:
+        user_queries_valid = df.loc[valid_uq, "user_query"].tolist()
+        print("  User queries (conversational):")
+        user_query_embeddings = compute_embeddings(
+            user_queries_valid, tokenizer, model, device,
+            max_length=args.max_length, batch_size=args.batch_size
+        )
 
     print("  Products:")
     product_embeddings = compute_embeddings(
@@ -149,15 +165,40 @@ def main():
 
     # 4. Build aligned arrays
     print(f"\n[4/4] Building training arrays...")
-    n = len(df)
-    array_queries = np.zeros((n, 768), dtype=np.float32)
-    array_products = np.zeros((n, 768), dtype=np.float32)
-    array_labels = np.zeros(n, dtype=np.int64)
+
+    # First: keyword query rows (original)
+    n_kw = len(df)
+    kw_queries = np.zeros((n_kw, 768), dtype=np.float32)
+    kw_products = np.zeros((n_kw, 768), dtype=np.float32)
+    kw_labels = np.zeros(n_kw, dtype=np.int64)
 
     for i, row in df.iterrows():
-        array_queries[i] = query_embeddings[row["query"]]
-        array_products[i] = product_embeddings[row["product_title"]]
-        array_labels[i] = LABEL_MAP[row["label"]]
+        kw_queries[i] = query_embeddings[row["query"]]
+        kw_products[i] = product_embeddings[row["product_title"]]
+        kw_labels[i] = LABEL_MAP[row["label"]]
+
+    if has_user_query:
+        # Second: user_query rows (conversational) — only where user_query exists
+        df_uq = df[valid_uq].reset_index(drop=True)
+        n_uq = len(df_uq)
+        uq_queries = np.zeros((n_uq, 768), dtype=np.float32)
+        uq_products = np.zeros((n_uq, 768), dtype=np.float32)
+        uq_labels = np.zeros(n_uq, dtype=np.int64)
+
+        for i, row in df_uq.iterrows():
+            uq_queries[i] = user_query_embeddings[row["user_query"]]
+            uq_products[i] = product_embeddings[row["product_title"]]
+            uq_labels[i] = LABEL_MAP[row["label"]]
+
+        # Stack both sets
+        array_queries = np.concatenate([kw_queries, uq_queries], axis=0)
+        array_products = np.concatenate([kw_products, uq_products], axis=0)
+        array_labels = np.concatenate([kw_labels, uq_labels], axis=0)
+        print(f"  Keyword rows: {n_kw}, User query rows: {n_uq}, Total: {len(array_labels)}")
+    else:
+        array_queries = kw_queries
+        array_products = kw_products
+        array_labels = kw_labels
 
     # Save
     os.makedirs(args.output_dir, exist_ok=True)

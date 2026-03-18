@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from transformers import BertModel, BertTokenizerFast
-from config import SLOT_MODEL_PATH, BERT_MODEL_NAME
+from config import SLOT_MODEL_PATH, BERT_MODEL_NAME, SLOT_MAX_LENGTH
 
 
 class SlotExtractor(nn.Module):
@@ -128,7 +128,7 @@ class SlotService:
             is_split_into_words=True,
             padding="max_length",
             truncation=True,
-            max_length=64,
+            max_length=SLOT_MAX_LENGTH,
             return_tensors="pt",
         )
 

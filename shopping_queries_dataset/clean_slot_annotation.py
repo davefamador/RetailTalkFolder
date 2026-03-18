@@ -118,7 +118,12 @@ print(f"  -> Dropped {dropped_dupes} duplicate rows")
 
 # -- 5. Save ---------------------------------------------------------------
 df = df[[tokens_col, labels_col]]
-df.to_excel(OUTPUT_FILE, index=False, engine='openpyxl')
+try:
+    df.to_excel(OUTPUT_FILE, index=False, engine='openpyxl')
+except PermissionError:
+    print(f"\n  ERROR: Cannot write to {OUTPUT_FILE}")
+    print("  -> Close the file in Excel and rerun this script.")
+    exit(1)
 
 print(f"\n-- Summary --")
 print(f"  Original rows:  {original_count}")

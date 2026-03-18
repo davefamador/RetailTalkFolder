@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from transformers import BertModel, BertTokenizer
-from config import INTENT_MODEL_PATH, BERT_MODEL_NAME
+from config import INTENT_MODEL_PATH, BERT_MODEL_NAME, INTENT_MAX_LENGTH
 
 
 class IntentClassifier(nn.Module):
@@ -120,7 +120,7 @@ class IntentService:
             query,
             padding="max_length",
             truncation=True,
-            max_length=128,
+            max_length=INTENT_MAX_LENGTH,
             return_tensors="pt",
         )
 

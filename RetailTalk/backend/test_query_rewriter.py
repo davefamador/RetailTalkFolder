@@ -12,7 +12,7 @@ import os
 # Add the backend directory to path so we can import from models/
 sys.path.insert(0, os.path.dirname(__file__))
 
-from models.query_rewriter import rewrite
+from models.query_rewriter import rewrite, split_sentences, _merge_rewritten_queries, RewrittenQuery
 
 
 def test_case(name, query, intents, slots, expected_search, expected_filters):
@@ -167,5 +167,152 @@ def main():
     return 0 if passed == total else 1
 
 
+def test_split_sentences():
+    """Test the split_sentences() function."""
+    print(f"\n{'=' * 60}")
+    print("  SENTENCE SPLITTING TESTS")
+    print(f"{'=' * 60}")
+
+    total = 0
+    passed = 0
+
+    cases = [
+        ("Single sentence, no punctuation",
+         "red Nike shoes under 3000",
+         ["red Nike shoes under 3000"]),
+        ("Two sentences with period",
+         "I want shoes. Show me bags.",
+         ["I want shoes", "Show me bags"]),
+        ("Two sentences with question mark",
+         "I want shoes? Do you have bags",
+         ["I want shoes", "Do you have bags"]),
+        ("Exclamation mark",
+         "Find red shoes! Also bags",
+         ["Find red shoes", "Also bags"]),
+        ("Decimal number NOT split",
+         "shoes rated 3.5 stars",
+         ["shoes rated 3.5 stars"]),
+        ("Trailing period only",
+         "I want shoes.",
+         ["I want shoes"]),
+        ("Three sentences",
+         "I want shoes. Show me bags. Also find hats.",
+         ["I want shoes", "Show me bags", "Also find hats"]),
+        ("Filipino text, no split",
+         "gusto ko ng sapatos at bag",
+         ["gusto ko ng sapatos at bag"]),
+    ]
+
+    for name, query, expected in cases:
+        total += 1
+        result = split_sentences(query)
+        if result == expected:
+            passed += 1
+            print(f"[PASS] {name}")
+        else:
+            print(f"[FAIL] {name}")
+            print(f"  got:      {result}")
+            print(f"  expected: {expected}")
+
+    print(f"\n  Results: {passed}/{total} passed")
+    return passed, total
+
+
+def test_merge_rewritten_queries():
+    """Test the _merge_rewritten_queries() function."""
+    print(f"\n{'=' * 60}")
+    print("  MERGE REWRITTEN QUERIES TESTS")
+    print(f"{'=' * 60}")
+
+    total = 0
+    passed = 0
+
+    # Test 1: Two products from two sentences
+    total += 1
+    rq1 = RewrittenQuery(search_text="shoes", filters={}, original_query="shoes",
+                         intents=["single_search"], slots={"PRODUCT1": "shoes"}, is_rewritten=True)
+    rq2 = RewrittenQuery(search_text="bags", filters={"price_max": 500.0}, original_query="bags under 500",
+                         intents=["filtered_search"], slots={"PRODUCT1": "bags", "PRICE_MAX": "500"}, is_rewritten=True)
+    merged = _merge_rewritten_queries([rq1, rq2], "I want shoes. Show me bags under 500.")
+    if (merged.slots.get("PRODUCT1") == "shoes"
+            and merged.slots.get("PRODUCT2") == "bags"
+            and merged.filters.get("price_max") == 500.0
+            and "single_search" in merged.intents
+            and "filtered_search" in merged.intents
+            and "shoes" in merged.search_text
+            and "bags" in merged.search_text):
+        passed += 1
+        print("[PASS] Two products + filter merge")
+    else:
+        print("[FAIL] Two products + filter merge")
+        print(f"  slots: {merged.slots}, filters: {merged.filters}, intents: {merged.intents}")
+
+    # Test 2: Conflicting price_max -> take minimum (most restrictive)
+    total += 1
+    rq1 = RewrittenQuery(search_text="shoes", filters={"price_max": 3000.0}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    rq2 = RewrittenQuery(search_text="bags", filters={"price_max": 500.0}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    merged = _merge_rewritten_queries([rq1, rq2], "query")
+    if merged.filters.get("price_max") == 500.0:
+        passed += 1
+        print("[PASS] Conflicting price_max -> takes minimum")
+    else:
+        print(f"[FAIL] Conflicting price_max -> got {merged.filters.get('price_max')}, expected 500.0")
+
+    # Test 3: Conflicting price_min -> take maximum (most restrictive)
+    total += 1
+    rq1 = RewrittenQuery(search_text="shoes", filters={"price_min": 100.0}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    rq2 = RewrittenQuery(search_text="bags", filters={"price_min": 500.0}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    merged = _merge_rewritten_queries([rq1, rq2], "query")
+    if merged.filters.get("price_min") == 500.0:
+        passed += 1
+        print("[PASS] Conflicting price_min -> takes maximum")
+    else:
+        print(f"[FAIL] Conflicting price_min -> got {merged.filters.get('price_min')}, expected 500.0")
+
+    # Test 4: Single sub-query returns unchanged
+    total += 1
+    rq1 = RewrittenQuery(search_text="shoes", filters={"brand": "Nike"}, original_query="Nike shoes",
+                         intents=["single_search"], slots={"PRODUCT1": "shoes", "BRAND": "Nike"}, is_rewritten=True)
+    merged = _merge_rewritten_queries([rq1], "Nike shoes")
+    if merged is rq1:
+        passed += 1
+        print("[PASS] Single sub-query returned unchanged")
+    else:
+        print("[FAIL] Single sub-query should return same object")
+
+    # Test 5: Deduplicated search text
+    total += 1
+    rq1 = RewrittenQuery(search_text="red shoes", filters={}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    rq2 = RewrittenQuery(search_text="red bags", filters={}, original_query="",
+                         intents=[], slots={}, is_rewritten=True)
+    merged = _merge_rewritten_queries([rq1, rq2], "query")
+    if merged.search_text == "red shoes bags":
+        passed += 1
+        print("[PASS] Deduplicated search text")
+    else:
+        print(f"[FAIL] Deduplicated search text -> got '{merged.search_text}', expected 'red shoes bags'")
+
+    print(f"\n  Results: {passed}/{total} passed")
+    return passed, total
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = main()
+
+    split_passed, split_total = test_split_sentences()
+    merge_passed, merge_total = test_merge_rewritten_queries()
+
+    all_passed = split_passed + merge_passed
+    all_total = split_total + merge_total
+    print(f"\n{'=' * 60}")
+    print(f"  NEW TESTS TOTAL: {all_passed}/{all_total} passed")
+    print(f"{'=' * 60}")
+
+    if all_passed < all_total:
+        exit_code = 1
+    sys.exit(exit_code)
