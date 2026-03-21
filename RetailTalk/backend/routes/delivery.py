@@ -36,11 +36,14 @@ class AvailableOrderResponse(BaseModel):
     product_id: str
     product_title: str
     product_price: float
+    product_images: list = []
     quantity: int
     amount: float
     delivery_fee: float
     buyer_name: str
+    buyer_contact: str = ""
     seller_name: str
+    delivery_address: str = ""
     status: str
     created_at: str
 
@@ -49,12 +52,14 @@ class DeliveryHistoryItem(BaseModel):
     transaction_id: str
     product_title: str
     product_price: float
+    product_images: list = []
     quantity: int
     delivery_fee: float
     status: str
     buyer_name: str
     buyer_contact: str
     seller_name: str
+    delivery_address: str = ""
     created_at: str
 
 
@@ -92,7 +97,7 @@ async def get_available_orders(delivery_user: dict = Depends(require_delivery)):
     sb = get_supabase()
 
     txns = sb.table("product_transactions").select(
-        "*, products(title, price)"
+        "*, products(title, price, images)"
     ).eq("status", "approved").is_("delivery_user_id", "null").order("created_at", desc=False).limit(50).execute()
 
     if not txns.data:
@@ -107,6 +112,11 @@ async def get_available_orders(delivery_user: dict = Depends(require_delivery)):
     users_result = sb.table("users").select("id, full_name").in_("id", list(user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
 
+    # Get buyer contacts
+    buyer_ids = list(set(t["buyer_id"] for t in txns.data))
+    contacts_result = sb.table("user_contacts").select("user_id, contact_number").in_("user_id", buyer_ids).execute()
+    buyer_contacts = {c["user_id"]: c["contact_number"] for c in (contacts_result.data or [])}
+
     results = []
     for t in txns.data:
         prod = t.get("products", {}) or {}
@@ -115,11 +125,14 @@ async def get_available_orders(delivery_user: dict = Depends(require_delivery)):
             product_id=t["product_id"],
             product_title=prod.get("title", ""),
             product_price=float(prod.get("price", 0)),
+            product_images=prod.get("images", []),
             quantity=int(t.get("quantity", 1)),
             amount=float(t["amount"]),
             delivery_fee=float(t.get("delivery_fee", DELIVERY_FEE)),
             buyer_name=user_names.get(t["buyer_id"], "Unknown"),
+            buyer_contact=buyer_contacts.get(t["buyer_id"], "N/A"),
             seller_name=user_names.get(t["seller_id"], "Unknown"),
+            delivery_address=t.get("delivery_address", ""),
             status=t["status"],
             created_at=t["created_at"],
         ))
@@ -133,7 +146,7 @@ async def get_active_deliveries(delivery_user: dict = Depends(require_delivery))
     user_id = delivery_user["sub"]
 
     txns = sb.table("product_transactions").select(
-        "*, products(title, price)"
+        "*, products(title, price, images)"
     ).eq("delivery_user_id", user_id).eq("status", "ondeliver").order("created_at", desc=False).execute()
 
     if not txns.data:
@@ -147,17 +160,25 @@ async def get_active_deliveries(delivery_user: dict = Depends(require_delivery))
     users_result = sb.table("users").select("id, full_name").in_("id", list(user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
 
+    # Get buyer contacts
+    buyer_ids = list(set(t["buyer_id"] for t in txns.data))
+    contacts_result = sb.table("user_contacts").select("user_id, contact_number").in_("user_id", buyer_ids).execute()
+    buyer_contacts = {c["user_id"]: c["contact_number"] for c in (contacts_result.data or [])}
+
     return [
         AvailableOrderResponse(
             transaction_id=t["id"],
             product_id=t["product_id"],
             product_title=(t.get("products") or {}).get("title", ""),
             product_price=float((t.get("products") or {}).get("price", 0)),
+            product_images=(t.get("products") or {}).get("images", []),
             quantity=int(t.get("quantity", 1)),
             amount=float(t["amount"]),
             delivery_fee=float(t.get("delivery_fee", DELIVERY_FEE)),
             buyer_name=user_names.get(t["buyer_id"], "Unknown"),
+            buyer_contact=buyer_contacts.get(t["buyer_id"], "N/A"),
             seller_name=user_names.get(t["seller_id"], "Unknown"),
+            delivery_address=t.get("delivery_address", ""),
             status=t["status"],
             created_at=t["created_at"],
         )
@@ -327,9 +348,9 @@ async def get_delivery_history(delivery_user: dict = Depends(require_delivery)):
     user_id = delivery_user["sub"]
 
     txns = sb.table("product_transactions").select(
-        "*, products(title, price)"
+        "*, products(title, price, images)"
     ).eq("delivery_user_id", user_id).in_(
-        "status", ["delivered", "undelivered"]
+        "status", ["delivered", "undelivered", "ondeliver"]
     ).order("created_at", desc=True).limit(100).execute()
 
     if not txns.data:
@@ -354,12 +375,14 @@ async def get_delivery_history(delivery_user: dict = Depends(require_delivery)):
             transaction_id=t["id"],
             product_title=(t.get("products") or {}).get("title", ""),
             product_price=float((t.get("products") or {}).get("price", 0)),
+            product_images=(t.get("products") or {}).get("images", []),
             quantity=int(t.get("quantity", 1)),
             delivery_fee=float(t.get("delivery_fee", DELIVERY_FEE)),
             status=t["status"],
             buyer_name=user_names.get(t["buyer_id"], "Unknown"),
             buyer_contact=user_contacts.get(t["buyer_id"], "N/A"),
             seller_name=user_names.get(t["seller_id"], "Unknown"),
+            delivery_address=t.get("delivery_address", ""),
             created_at=t["created_at"],
         )
         for t in txns.data

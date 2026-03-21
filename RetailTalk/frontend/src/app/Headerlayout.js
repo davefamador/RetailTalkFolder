@@ -2,6 +2,7 @@
 
 import './globals.css';
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { getStoredUser, logout, getBalance, getStoredAdmin, adminLogout } from '../lib/api';
 
 export default function RootLayout({ children }) {
@@ -9,6 +10,8 @@ export default function RootLayout({ children }) {
     const [admin, setAdmin] = useState(null);
     const [balance, setBalance] = useState(null);
     const [hydrated, setHydrated] = useState(false);
+    const pathname = usePathname();
+    const hideNav = pathname === '/sell' || pathname?.startsWith('/manager') || pathname === '/delivery' || pathname?.startsWith('/admin/dashboard');
 
     useEffect(() => {
         const storedUser = getStoredUser();
@@ -48,7 +51,7 @@ export default function RootLayout({ children }) {
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
             </head>
             <body>
-                <nav className="navbar">
+                {!hideNav && <nav className="navbar">
                     <a href="/" className="navbar-brand" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <img src="/logo.png" alt="RetailTalk Logo" style={{ height: '32px', width: '32px' }} />
                         RetailTalk
@@ -71,8 +74,13 @@ export default function RootLayout({ children }) {
                                 {user && user.role === 'buyer' && (
                                     <>
                                         <a href="/cart">🛒 Cart</a>
+                                        <a href="/orders">📦 Orders</a>
                                         <a href="/transactions">Transactions</a>
                                     </>
+                                )}
+
+                                {user && user.role === 'manager' && (
+                                    <a href="/manager/dashboard" style={{ color: 'var(--accent-warning)' }}>Manager Dashboard</a>
                                 )}
 
                                 {user && user.role === 'delivery' && (
@@ -130,7 +138,7 @@ export default function RootLayout({ children }) {
                             )
                         ) : null}
                     </div>
-                </nav>
+                </nav>}
                 {children}
             </body>
         </html>

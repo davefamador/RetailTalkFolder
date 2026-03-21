@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from config import APP_NAME, DEBUG
 from database import close_db_pool
-from routes import auth, products, search, transactions, admin, insights, contacts, cart, delivery
+from routes import auth, products, search, transactions, admin, insights, contacts, cart, delivery, manager, restock
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -83,6 +83,8 @@ app.include_router(insights.router)
 app.include_router(contacts.router)
 app.include_router(cart.router)
 app.include_router(delivery.router)
+app.include_router(manager.router)
+app.include_router(restock.router)
 
 
 @app.get("/", tags=["Health"])

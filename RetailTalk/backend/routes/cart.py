@@ -12,7 +12,7 @@ from routes.auth import get_current_user
 
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
-DELIVERY_FEE_PER_SELLER = 90.00
+DELIVERY_FEE_PER_DEPARTMENT = 90.00
 SELLER_SHARE = 0.90
 ADMIN_SHARE = 0.10
 
@@ -42,8 +42,8 @@ class CartItemResponse(BaseModel):
 
 class CartResponse(BaseModel):
     items: list[CartItemResponse]
-    sellers_count: int
-    delivery_fee_per_seller: float
+    departments_count: int
+    delivery_fee_per_department: float
     total_delivery_fee: float
     products_total: float
     grand_total: float
@@ -62,9 +62,11 @@ async def get_cart(current_user: dict = Depends(get_current_user)):
     ).eq("buyer_id", user_id).order("created_at", desc=False).execute()
 
     items = []
-    seller_ids = set()
+    department_ids = set()
+    independent_sellers = set()
     products_total = 0.0
     seller_name_cache = {}
+    seller_dept_cache = {}
 
     for c in (cart_data.data or []):
         prod = c.get("products")
@@ -75,14 +77,34 @@ async def get_cart(current_user: dict = Depends(get_current_user)):
         qty = int(c["quantity"])
         subtotal = price * qty
         products_total += subtotal
-        seller_ids.add(prod["seller_id"])
 
-        # Look up seller name (cached)
+        # Look up seller name and department (cached)
         sid = prod["seller_id"]
         if sid not in seller_name_cache:
-            seller_resp = sb.table("users").select("full_name").eq("id", sid).execute()
-            seller_name_cache[sid] = seller_resp.data[0]["full_name"] if seller_resp.data else "Seller"
+            seller_resp = sb.table("users").select("full_name, department_id").eq("id", sid).execute()
+            if seller_resp.data:
+                full_name = seller_resp.data[0]["full_name"]
+                dept_id_val = seller_resp.data[0].get("department_id")
+                seller_dept_cache[sid] = dept_id_val
+                if dept_id_val:
+                    dept_resp = sb.table("departments").select("name").eq("id", dept_id_val).execute()
+                    if dept_resp.data:
+                        seller_name_cache[sid] = dept_resp.data[0]["name"]
+                    else:
+                        seller_name_cache[sid] = full_name
+                else:
+                    seller_name_cache[sid] = full_name
+            else:
+                seller_name_cache[sid] = "Seller"
+                seller_dept_cache[sid] = None
         seller_name = seller_name_cache[sid]
+
+        # Track unique departments (independent sellers each count as one unit)
+        dept_id = seller_dept_cache.get(sid)
+        if dept_id:
+            department_ids.add(dept_id)
+        else:
+            independent_sellers.add(sid)
 
         images = prod.get("images") or []
 
@@ -99,13 +121,14 @@ async def get_cart(current_user: dict = Depends(get_current_user)):
             image_url=images[0] if images else "",
         ))
 
-    sellers_count = len(seller_ids)
-    total_delivery = sellers_count * DELIVERY_FEE_PER_SELLER
+    # Delivery fee per unique department (independent sellers each count as one unit)
+    delivery_units = len(department_ids) + len(independent_sellers)
+    total_delivery = delivery_units * DELIVERY_FEE_PER_DEPARTMENT
 
     return CartResponse(
         items=items,
-        sellers_count=sellers_count,
-        delivery_fee_per_seller=DELIVERY_FEE_PER_SELLER,
+        departments_count=delivery_units,
+        delivery_fee_per_department=DELIVERY_FEE_PER_DEPARTMENT,
         total_delivery_fee=total_delivery,
         products_total=round(products_total, 2),
         grand_total=round(products_total + total_delivery, 2),
@@ -182,16 +205,23 @@ async def clear_cart(current_user: dict = Depends(get_current_user)):
     return {"message": "Cart cleared"}
 
 
+class CheckoutRequest(BaseModel):
+    purchase_type: str = "delivery"  # 'walkin' or 'delivery'
+
+
 @router.post("/checkout")
-async def checkout_cart(current_user: dict = Depends(get_current_user)):
+async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: dict = Depends(get_current_user)):
     """
     Checkout all items in cart.
-    - ₱90 delivery fee per unique seller
+    - Delivery: ₱90 delivery fee per unique seller
+    - Walk-in: No delivery fee
     - Validates contact number exists
-    - Creates product_transactions with status='ongoing'
     """
     sb = get_supabase()
     user_id = current_user["sub"]
+
+    if req.purchase_type not in ("walkin", "delivery"):
+        raise HTTPException(status_code=400, detail="purchase_type must be 'walkin' or 'delivery'")
 
     # 1. Check user is buyer
     user_result = sb.table("users").select("role, is_banned").eq("id", user_id).execute()
@@ -199,13 +229,21 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
     if user_result.data[0].get("is_banned"):
         raise HTTPException(status_code=403, detail="Your account has been banned")
+    if user_result.data[0]["role"] == "admin":
+        raise HTTPException(status_code=403, detail="Admin accounts cannot purchase products")
     if user_result.data[0]["role"] != "buyer":
         raise HTTPException(status_code=403, detail="Only buyers can checkout")
 
-    # 2. Check contact number
-    contact = sb.table("user_contacts").select("contact_number").eq("user_id", user_id).execute()
+    # 2. Check contact number and delivery address
+    contact = sb.table("user_contacts").select("contact_number, delivery_address").eq("user_id", user_id).execute()
     if not contact.data:
         raise HTTPException(status_code=400, detail="Please add your contact number before placing an order")
+
+    delivery_address = ""
+    if req.purchase_type == "delivery":
+        delivery_address = (contact.data[0].get("delivery_address") or "").strip()
+        if not delivery_address:
+            raise HTTPException(status_code=400, detail="Please set your delivery address before placing a delivery order")
 
     # 3. Get cart items with product info
     cart_data = sb.table("cart_items").select(
@@ -217,8 +255,8 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
 
     # 4. Validate stock and calculate totals
     items = []
-    seller_ids = set()
     products_total = 0.0
+    seller_dept_cache = {}
 
     for c in cart_data.data:
         prod = c.get("products")
@@ -234,7 +272,17 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
         price = float(prod["price"])
         subtotal = price * c["quantity"]
         products_total += subtotal
-        seller_ids.add(prod["seller_id"])
+
+        # Look up seller's department (cached)
+        sid = prod["seller_id"]
+        if sid not in seller_dept_cache:
+            seller_info = sb.table("users").select("department_id").eq("id", sid).execute()
+            seller_dept_cache[sid] = seller_info.data[0].get("department_id") if seller_info.data else None
+
+        dept_id = seller_dept_cache[sid]
+        # Use department_id as delivery unit key, or seller_id for independent sellers
+        delivery_unit = dept_id if dept_id else f"ind_{sid}"
+
         items.append({
             "cart_id": c["id"],
             "product_id": prod["id"],
@@ -243,17 +291,23 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
             "quantity": c["quantity"],
             "price": price,
             "subtotal": subtotal,
+            "delivery_unit": delivery_unit,
         })
 
-    # Delivery fee
-    total_delivery = len(seller_ids) * DELIVERY_FEE_PER_SELLER
-    # Split delivery fee equally among items for each seller
-    delivery_fee_per_item = {}
-    for sid in seller_ids:
-        seller_items = [i for i in items if i["seller_id"] == sid]
-        fee_each = DELIVERY_FEE_PER_SELLER / len(seller_items)
-        for item in seller_items:
-            delivery_fee_per_item[item["product_id"]] = round(fee_each, 2)
+    # Delivery fee per unique department (walk-in has no delivery fee)
+    delivery_units = set(i["delivery_unit"] for i in items)
+    if req.purchase_type == "walkin":
+        total_delivery = 0
+        delivery_fee_per_item = {item["product_id"]: 0 for item in items}
+    else:
+        total_delivery = len(delivery_units) * DELIVERY_FEE_PER_DEPARTMENT
+        # Split delivery fee equally among items within each delivery unit (department)
+        delivery_fee_per_item = {}
+        for unit in delivery_units:
+            unit_items = [i for i in items if i["delivery_unit"] == unit]
+            fee_each = DELIVERY_FEE_PER_DEPARTMENT / len(unit_items)
+            for item in unit_items:
+                delivery_fee_per_item[item["product_id"]] = round(fee_each, 2)
 
     grand_total = products_total + total_delivery
 
@@ -278,6 +332,7 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
         admin_commission = round(amount * ADMIN_SHARE, 2)
 
         # Create transaction
+        txn_status = "pending_walkin" if req.purchase_type == "walkin" else "pending"
         txn = sb.table("product_transactions").insert({
             "buyer_id": user_id,
             "seller_id": item["seller_id"],
@@ -287,7 +342,9 @@ async def checkout_cart(current_user: dict = Depends(get_current_user)):
             "seller_amount": seller_amount,
             "admin_commission": admin_commission,
             "delivery_fee": d_fee,
-            "status": "ondeliver",
+            "delivery_address": delivery_address,
+            "purchase_type": req.purchase_type,
+            "status": txn_status,
         }).execute()
 
         if txn.data:

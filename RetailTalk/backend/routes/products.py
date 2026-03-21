@@ -121,14 +121,14 @@ async def create_product(req: CreateProductRequest, current_user: dict = Depends
     """
     sb = get_supabase()
 
-    # Verify user is a seller
-    user_result = sb.table("users").select("role").eq("id", current_user["sub"]).execute()
+    # Verify user is a manager (only managers can create products)
+    user_result = sb.table("users").select("role, department_id").eq("id", current_user["sub"]).execute()
     if not user_result.data:
         raise HTTPException(status_code=404, detail="User not found")
 
     user_role = user_result.data[0]["role"]
-    if user_role != "seller":
-        raise HTTPException(status_code=403, detail="Only sellers can create products")
+    if user_role != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can create products")
 
     # Validate required fields
     if not req.title or not req.title.strip():
@@ -212,7 +212,7 @@ async def list_products(limit: int = 50, offset: int = 0):
     sb = get_supabase()
     result = (
         sb.table("products")
-        .select("*, users!products_seller_id_fkey(full_name)")
+        .select("*, users!products_seller_id_fkey(full_name, department_id)")
         .eq("is_active", True)
         .eq("status", "approved")
         .gt("stock", 0)
@@ -220,18 +220,52 @@ async def list_products(limit: int = 50, offset: int = 0):
         .range(offset, offset + limit - 1)
         .execute()
     )
+
+    # Collect department IDs to batch-lookup department names
+    dept_ids = set()
+    for p in result.data:
+        user_info = p.get("users") or {}
+        dept_id = user_info.get("department_id")
+        if dept_id:
+            dept_ids.add(dept_id)
+
+    dept_names = {}
+    if dept_ids:
+        depts = sb.table("departments").select("id, name").in_("id", list(dept_ids)).execute()
+        dept_names = {d["id"]: d["name"] for d in (depts.data or [])}
+
     products = []
     for p in result.data:
-        seller_name = p.get("users", {}).get("full_name", "") if p.get("users") else ""
+        user_info = p.get("users") or {}
+        dept_id = user_info.get("department_id")
+        if dept_id and dept_id in dept_names:
+            seller_name = dept_names[dept_id]
+        else:
+            seller_name = user_info.get("full_name", "")
         products.append(build_product_response(p, seller_name))
     return products
 
 
 @router.get("/my", response_model=list[ProductResponse])
 async def list_my_products(current_user: dict = Depends(get_current_user)):
-    """List products owned by the current seller (includes all, even out of stock)."""
+    """List products owned by the current user or their department (includes all, even out of stock)."""
     sb = get_supabase()
-    result = sb.table("products").select("*").eq("seller_id", current_user["sub"]).order("created_at", desc=True).execute()
+    user_id = current_user["sub"]
+
+    # Check if user is a seller in a department — if so, also include products from their manager
+    user_info = sb.table("users").select("role, department_id, manager_id").eq("id", user_id).execute()
+    seller_ids = [user_id]
+
+    if user_info.data and user_info.data[0].get("department_id"):
+        dept_id = user_info.data[0]["department_id"]
+        # Find the manager of this department (they create products for the department)
+        dept = sb.table("departments").select("manager_id").eq("id", dept_id).execute()
+        if dept.data and dept.data[0].get("manager_id"):
+            manager_id = dept.data[0]["manager_id"]
+            if manager_id not in seller_ids:
+                seller_ids.append(manager_id)
+
+    result = sb.table("products").select("*").in_("seller_id", seller_ids).order("created_at", desc=True).execute()
 
     return [build_product_response(p) for p in result.data]
 
@@ -240,13 +274,19 @@ async def list_my_products(current_user: dict = Depends(get_current_user)):
 async def get_product(product_id: str):
     """Get a single product by ID (public)."""
     sb = get_supabase()
-    result = sb.table("products").select("*, users!products_seller_id_fkey(full_name)").eq("id", product_id).execute()
+    result = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").eq("id", product_id).execute()
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Product not found")
 
     p = result.data[0]
-    seller_name = p.get("users", {}).get("full_name", "") if p.get("users") else ""
+    user_info = p.get("users") or {}
+    dept_id = user_info.get("department_id")
+    seller_name = user_info.get("full_name", "")
+    if dept_id:
+        dept_resp = sb.table("departments").select("name").eq("id", dept_id).execute()
+        if dept_resp.data:
+            seller_name = dept_resp.data[0]["name"]
     return build_product_response(p, seller_name)
 
 

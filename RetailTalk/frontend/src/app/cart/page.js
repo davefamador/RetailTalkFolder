@@ -12,12 +12,23 @@ export default function CartPage() {
     const [user, setUser] = useState(null);
     const [showContactModal, setShowContactModal] = useState(false);
     const [contactNumber, setContactNumber] = useState('');
+    const [deliveryAddress, setDeliveryAddress] = useState('');
     const [contactSaving, setContactSaving] = useState(false);
+    const [purchaseType, setPurchaseType] = useState('delivery');
 
     useEffect(() => {
         setUser(getStoredUser());
         loadCart();
+        loadContact();
     }, []);
+
+    const loadContact = async () => {
+        try {
+            const data = await getMyContact();
+            setContactNumber(data.contact_number || '');
+            setDeliveryAddress(data.delivery_address || '');
+        } catch (e) { /* no contact yet */ }
+    };
 
     const loadCart = async () => {
         setLoading(true);
@@ -58,11 +69,11 @@ export default function CartPage() {
         setError('');
         setMessage('');
         try {
-            const result = await checkoutCart();
+            const result = await checkoutCart(purchaseType);
             setMessage(`${result.message} Total: PHP ${result.grand_total.toFixed(2)}`);
             await loadCart();
         } catch (err) {
-            if (err.message && err.message.includes('contact number')) {
+            if (err.message && (err.message.includes('contact number') || err.message.includes('delivery address'))) {
                 setShowContactModal(true);
             } else {
                 setError(err.message);
@@ -77,11 +88,15 @@ export default function CartPage() {
             setError('Please enter a valid contact number');
             return;
         }
+        if (purchaseType === 'delivery' && !deliveryAddress.trim()) {
+            setError('Please enter your delivery address');
+            return;
+        }
         setContactSaving(true);
         try {
-            await setMyContact(contactNumber.trim());
+            await setMyContact(contactNumber.trim(), deliveryAddress.trim());
             setShowContactModal(false);
-            setMessage('Contact number saved! You can now proceed to checkout.');
+            setMessage('Contact info saved! You can now proceed to checkout.');
         } catch (err) { setError(err.message); }
         finally { setContactSaving(false); }
     };
@@ -110,14 +125,17 @@ export default function CartPage() {
     }
 
     const statusColor = { background: 'rgba(0,212,170,0.1)', color: '#00d4aa', border: '1px solid rgba(0,212,170,0.3)' };
-    const DELIVERY_FEE = cart?.delivery_fee_per_seller || 90;
+    const DELIVERY_FEE = cart?.delivery_fee_per_department || 90;
+    const isWalkin = purchaseType === 'walkin';
+    const displayDeliveryFee = isWalkin ? 0 : (cart?.total_delivery_fee || 0);
+    const displayGrandTotal = (cart?.products_total || 0) + displayDeliveryFee;
 
     return (
         <div style={{ minHeight: '100vh', padding: '100px 20px 40px' }}>
             <div style={{ maxWidth: 900, margin: '0 auto' }}>
                 <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: 8 }}>🛒 Shopping Cart</h1>
                 <p style={{ color: 'var(--text-muted)', marginBottom: 24 }}>
-                    {cart?.items?.length || 0} item{(cart?.items?.length || 0) !== 1 ? 's' : ''} from {cart?.sellers_count || 0} seller{(cart?.sellers_count || 0) !== 1 ? 's' : ''}
+                    {cart?.items?.length || 0} item{(cart?.items?.length || 0) !== 1 ? 's' : ''} from {cart?.departments_count || 0} department store{(cart?.departments_count || 0) !== 1 ? 's' : ''}
                 </p>
 
                 {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
@@ -139,9 +157,11 @@ export default function CartPage() {
                             <div key={sellerId} className="card" style={{ marginBottom: 16, padding: 20 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                                     <span style={{ fontWeight: 700 }}>🏪 {group.seller_name}</span>
+                                    {!isWalkin && (
                                     <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', padding: '3px 10px', borderRadius: 20, background: 'rgba(108,99,255,0.1)' }}>
                                         + PHP {DELIVERY_FEE.toFixed(2)} delivery
                                     </span>
+                                    )}
                                 </div>
 
                                 {group.items.map(item => (
@@ -182,22 +202,81 @@ export default function CartPage() {
                         {/* Summary */}
                         <div className="card" style={{ padding: 24, marginTop: 8 }}>
                             <h3 style={{ marginBottom: 14, fontWeight: 700 }}>Order Summary</h3>
+
+                            {/* Walk-in / Delivery selector */}
+                            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setPurchaseType('delivery')}
+                                    style={{
+                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                        borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                                        background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                        color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                    }}
+                                >
+                                    Delivery
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPurchaseType('walkin')}
+                                    style={{
+                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                        borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
+                                        background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                        color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
+                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                    }}
+                                >
+                                    Walk-in
+                                </button>
+                            </div>
+
+                            {/* Delivery Address (for delivery orders) */}
+                            {!isWalkin && (
+                                <div style={{
+                                    padding: 14, borderRadius: 10, marginBottom: 14,
+                                    background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)',
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>📍 Delivery Address</span>
+                                        <button onClick={() => setShowContactModal(true)} style={{
+                                            background: 'none', border: 'none', cursor: 'pointer',
+                                            color: 'var(--accent-primary)', fontSize: '0.8rem', fontWeight: 600,
+                                        }}>{deliveryAddress ? 'Edit' : 'Set Address'}</button>
+                                    </div>
+                                    {deliveryAddress ? (
+                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-primary)', margin: 0, lineHeight: 1.4 }}>{deliveryAddress}</p>
+                                    ) : (
+                                        <p style={{ fontSize: '0.85rem', color: 'var(--accent-danger)', margin: 0, fontStyle: 'italic' }}>No delivery address set — required for delivery orders</p>
+                                    )}
+                                </div>
+                            )}
+
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem' }}>
                                 <span>Products Total</span><span>PHP {cart.products_total.toFixed(2)}</span>
                             </div>
+                            {!isWalkin && (
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem' }}>
-                                <span>Delivery Fee ({cart.sellers_count} seller{cart.sellers_count !== 1 ? 's' : ''} × PHP {DELIVERY_FEE.toFixed(2)})</span>
+                                <span>Delivery Fee ({cart.departments_count} dept{cart.departments_count !== 1 ? 's' : ''} × PHP {DELIVERY_FEE.toFixed(2)})</span>
                                 <span>PHP {cart.total_delivery_fee.toFixed(2)}</span>
                             </div>
+                            )}
+                            {isWalkin && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                                <span>Delivery Fee</span><span>PHP 0.00 (Walk-in)</span>
+                            </div>
+                            )}
                             <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem' }}>
                                 <span>Grand Total</span>
-                                <span style={{ color: 'var(--accent-secondary)' }}>PHP {cart.grand_total.toFixed(2)}</span>
+                                <span style={{ color: 'var(--accent-secondary)' }}>PHP {displayGrandTotal.toFixed(2)}</span>
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
                                 <button className="btn btn-outline" onClick={handleClear} style={{ flex: 1 }}>Clear Cart</button>
                                 <button className="btn btn-primary" onClick={handleCheckout} disabled={checkingOut} style={{ flex: 2 }}>
-                                    {checkingOut ? <span className="spinner" /> : '🛍️ Place Order'}
+                                    {checkingOut ? <span className="spinner" /> : `Place Order (${isWalkin ? 'Walk-in' : 'Delivery'})`}
                                 </button>
                             </div>
                         </div>
@@ -205,22 +284,37 @@ export default function CartPage() {
                 )}
             </div>
 
-            {/* Contact Number Modal */}
+            {/* Contact & Address Modal */}
             {showContactModal && (
                 <div style={{
                     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex',
                     alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
                 }} onClick={() => setShowContactModal(false)}>
                     <div className="card" style={{ maxWidth: 420, width: '100%', padding: 32 }} onClick={e => e.stopPropagation()}>
-                        <h3 style={{ marginBottom: 8 }}>📱 Contact Number Required</h3>
+                        <h3 style={{ marginBottom: 8 }}>📱 Contact Info Required</h3>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
-                            Please add your contact number before placing an order.
+                            Please add your contact details before placing an order.
                         </p>
-                        <div className="form-group">
+                        <div className="form-group" style={{ marginBottom: 14 }}>
                             <label>Contact Number</label>
                             <input type="tel" value={contactNumber} onChange={e => setContactNumber(e.target.value)}
                                 placeholder="e.g. 09171234567" />
                         </div>
+                        {purchaseType === 'delivery' && (
+                            <div className="form-group" style={{ marginBottom: 14 }}>
+                                <label>Delivery Address</label>
+                                <textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)}
+                                    placeholder="e.g. 123 Main St, Barangay, City"
+                                    rows={3}
+                                    style={{
+                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                        resize: 'vertical',
+                                    }}
+                                />
+                            </div>
+                        )}
                         <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleSaveContact} disabled={contactSaving}>
                             {contactSaving ? <span className="spinner" /> : 'Save & Continue'}
                         </button>

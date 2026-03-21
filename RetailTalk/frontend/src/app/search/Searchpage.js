@@ -1,6 +1,6 @@
 'use client';
 
-import { searchProducts, getStoredUser, buyProduct } from '../../lib/api';
+import { searchProducts, getStoredUser, getStoredAdmin, buyProduct } from '../../lib/api';
 import { useState, useEffect } from 'react';
 
 export default function SearchPage() {
@@ -15,6 +15,7 @@ export default function SearchPage() {
     const [quantity, setQuantity] = useState(1);
     const [purchased, setPurchased] = useState(false);
     const [purchaseError, setPurchaseError] = useState('');
+    const [purchaseType, setPurchaseType] = useState('delivery');
 
     // Voice-to-text state
     const [isListening, setIsListening] = useState(false);
@@ -23,7 +24,7 @@ export default function SearchPage() {
 
     // Load user on mount
     useEffect(() => {
-        setUser(getStoredUser());
+        setUser(getStoredUser() || getStoredAdmin());
         // Check if any voice input is possible (Speech API or MediaRecorder)
         const hasSpeechAPI = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
         const hasMediaRecorder = !!(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
@@ -138,7 +139,8 @@ export default function SearchPage() {
         setLoading(true);
         setError('');
         try {
-            const data = await searchProducts(query.trim());
+            const isAdmin = user?.role === 'admin';
+            const data = await searchProducts(query.trim(), isAdmin ? 50 : 20, isAdmin);
             setResults(data);
         } catch (err) {
             setError(err.message);
@@ -167,7 +169,7 @@ export default function SearchPage() {
         setPurchaseError('');
 
         try {
-            await buyProduct(selectedProduct.id, quantity);
+            await buyProduct(selectedProduct.id, quantity, purchaseType);
             setPurchased(true);
         } catch (err) {
             setPurchaseError(err.message || 'Failed to complete purchase. Check balance or stock.');
@@ -296,6 +298,7 @@ export default function SearchPage() {
                                             />
                                         </div>
                                     )}
+                                    {user?.role === 'admin' && (
                                     <div style={{ marginBottom: 12 }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                                             <span className={getLabelClass(product.relevance_label)}>
@@ -324,6 +327,7 @@ export default function SearchPage() {
                                             </span>
                                         </div>
                                     </div>
+                                    )}
                                     <h3 className="product-title">{product.title}</h3>
                                     {product.description && (
                                         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 12 }}>
@@ -443,14 +447,55 @@ export default function SearchPage() {
                                         </div>
                                     )}
 
-                                    {(!user || user.role !== 'seller') && (
-                                        <button
-                                            className="btn btn-success"
-                                            onClick={handlePurchase}
-                                            style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
-                                        >
-                                            {!user ? 'Login to Purchase' : `Buy for PHP ${(parseFloat(selectedProduct.price) * quantity).toFixed(2)}`}
-                                        </button>
+                                    {user && user.role !== 'seller' && user.role !== 'admin' && (
+                                        <>
+                                            {/* Walk-in / Delivery selector */}
+                                            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPurchaseType('delivery')}
+                                                    style={{
+                                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                                        borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                                                        background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                                        color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                                    }}
+                                                >
+                                                    Delivery
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPurchaseType('walkin')}
+                                                    style={{
+                                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                                        borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
+                                                        background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                                        color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
+                                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                                    }}
+                                                >
+                                                    Walk-in
+                                                </button>
+                                            </div>
+                                            {purchaseType === 'delivery' && (
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+                                                    + PHP 90.00 delivery fee per department store
+                                                </p>
+                                            )}
+                                            <button
+                                                className="btn btn-success"
+                                                onClick={handlePurchase}
+                                                style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
+                                            >
+                                                Buy for PHP {(parseFloat(selectedProduct.price) * quantity).toFixed(2)}
+                                            </button>
+                                        </>
+                                    )}
+                                    {!user && (
+                                        <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                            Please log in to purchase items.
+                                        </p>
                                     )}
                                 </div>
                             </div>

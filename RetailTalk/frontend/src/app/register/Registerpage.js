@@ -7,7 +7,6 @@ export default function RegisterPage() {
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [role, setRole] = useState('buyer');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -16,7 +15,7 @@ export default function RegisterPage() {
         setLoading(true);
         setError('');
         try {
-            await register(email, password, fullName, role);
+            await register(email, password, fullName, 'buyer');
             window.location.href = '/';
         } catch (err) {
             setError(err.message);
@@ -61,13 +60,6 @@ export default function RegisterPage() {
                             minLength={6}
                             required
                         />
-                    </div>
-                    <div className="form-group">
-                        <label>I want to</label>
-                        <select value={role} onChange={(e) => setRole(e.target.value)}>
-                            <option value="buyer">Buyer</option>
-                            <option value="seller">Seller</option>
-                        </select>
                     </div>
                     <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
                         {loading ? <span className="spinner"></span> : 'Create Account'}

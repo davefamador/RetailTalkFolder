@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getProduct, buyProduct, getStoredUser } from '../../../lib/api';
+import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact } from '../../../lib/api';
 
 export default function ProductDetailPage() {
     const params = useParams();
@@ -14,6 +14,10 @@ export default function ProductDetailPage() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [selectedImage, setSelectedImage] = useState(0);
+    const [purchaseType, setPurchaseType] = useState('delivery');
+    const [addressModal, setAddressModal] = useState(false);
+    const [contactNum, setContactNum] = useState('');
+    const [deliveryAddr, setDeliveryAddr] = useState('');
 
     useEffect(() => {
         setUser(getStoredUser());
@@ -44,14 +48,43 @@ export default function ProductDetailPage() {
         setError('');
         setSuccess('');
         try {
-            await buyProduct(product.id, quantity);
+            await buyProduct(product.id, quantity, purchaseType);
             setSuccess(`Successfully purchased ${quantity}x ${product.title}!`);
-            // Refresh product data to get updated stock
             const updated = await getProduct(params.id);
             setProduct(updated);
             setQuantity(1);
         } catch (err) {
-            setError(err.message);
+            const msg = err.message || '';
+            if (msg.includes('delivery address') || msg.includes('contact number')) {
+                try {
+                    const c = await getMyContact();
+                    setContactNum(c.contact_number || '');
+                    setDeliveryAddr(c.delivery_address || '');
+                } catch (_) {}
+                setAddressModal(true);
+            } else {
+                setError(msg);
+            }
+        } finally {
+            setBuying(false);
+        }
+    };
+
+    const handleSaveAddressAndBuy = async () => {
+        if (!contactNum.trim()) { setError('Contact number is required.'); return; }
+        if (purchaseType === 'delivery' && !deliveryAddr.trim()) { setError('Delivery address is required.'); return; }
+        setBuying(true);
+        setError('');
+        try {
+            await setMyContact(contactNum.trim(), deliveryAddr.trim());
+            setAddressModal(false);
+            await buyProduct(product.id, quantity, purchaseType);
+            setSuccess(`Successfully purchased ${quantity}x ${product.title}!`);
+            const updated = await getProduct(params.id);
+            setProduct(updated);
+            setQuantity(1);
+        } catch (err) {
+            setError(err.message || 'Failed to complete purchase.');
         } finally {
             setBuying(false);
         }
@@ -81,7 +114,10 @@ export default function ProductDetailPage() {
     }
 
     const images = product.images || [];
-    const totalPrice = (parseFloat(product.price) * quantity).toFixed(2);
+    const productTotal = parseFloat(product.price) * quantity;
+    const deliveryFee = purchaseType === 'delivery' ? 90 : 0;
+    const grandTotal = (productTotal + deliveryFee).toFixed(2);
+    const totalPrice = productTotal.toFixed(2);
     const inStock = (product.stock || 0) > 0;
 
     return (
@@ -222,11 +258,35 @@ export default function ProductDetailPage() {
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                 padding: '12px 0', borderTop: '1px solid var(--border-color)', marginBottom: 12,
                             }}>
-                                <span style={{ color: 'var(--text-secondary)' }}>Total:</span>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                                    {deliveryFee > 0 ? `Subtotal: PHP ${totalPrice} + PHP ${deliveryFee.toFixed(2)} delivery` : 'Total'}
+                                </span>
                                 <span style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--accent-secondary)' }}>
-                                    PHP {totalPrice}
+                                    PHP {grandTotal}
                                 </span>
                             </div>
+
+                            {/* Walk-in / Delivery selector */}
+                            {user && user.role === 'buyer' && (
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                                    <button type="button" onClick={() => setPurchaseType('delivery')}
+                                        style={{
+                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                            borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
+                                            background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                            color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                        }}>🚚 Delivery</button>
+                                    <button type="button" onClick={() => setPurchaseType('walkin')}
+                                        style={{
+                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                            borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
+                                            background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
+                                            color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
+                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                        }}>🏪 Walk-in</button>
+                                </div>
+                            )}
 
                             {user ? (
                                 user.role === 'buyer' ? (
@@ -236,7 +296,7 @@ export default function ProductDetailPage() {
                                         disabled={buying}
                                         style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
                                     >
-                                        {buying ? <><span className="spinner"></span> Processing...</> : `Buy Now — PHP ${totalPrice}`}
+                                        {buying ? <><span className="spinner"></span> Processing...</> : `Buy Now — PHP ${grandTotal}`}
                                     </button>
                                 ) : (
                                     <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
@@ -252,6 +312,78 @@ export default function ProductDetailPage() {
                     )}
                 </div>
             </div>
-        </div>
+
+        {/* ===== DELIVERY ADDRESS MODAL ===== */}
+        {addressModal && (
+            <div
+                onClick={() => setAddressModal(false)}
+                style={{
+                    position: 'fixed', inset: 0, zIndex: 1100,
+                    background: 'rgba(0,0,0,0.7)',
+                    backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: 24,
+                }}
+            >
+                <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
+                        width: 440, maxWidth: '90vw', border: '1px solid var(--border-color)',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                    }}
+                >
+                    <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: 8 }}>📍 Delivery Address Required</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 20 }}>
+                        Please provide your contact number and delivery address to place a delivery order.
+                    </p>
+
+                    {error && (
+                        <div style={{
+                            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                            color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: '0.85rem',
+                        }}>{error}</div>
+                    )}
+
+                    <div style={{ marginBottom: 14 }}>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Contact Number *</label>
+                        <input
+                            type="tel" placeholder="e.g. 09171234567"
+                            value={contactNum} onChange={(e) => setContactNum(e.target.value)}
+                            style={{
+                                width: '100%', padding: '10px 14px', borderRadius: 10,
+                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                            }}
+                        />
+                    </div>
+                    <div style={{ marginBottom: 20 }}>
+                        <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Delivery Address *</label>
+                        <textarea
+                            placeholder="Enter your full delivery address"
+                            value={deliveryAddr} onChange={(e) => setDeliveryAddr(e.target.value)}
+                            rows={3}
+                            style={{
+                                width: '100%', padding: '10px 14px', borderRadius: 10,
+                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                resize: 'vertical',
+                            }}
+                        />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 12 }}>
+                        <button className="btn btn-primary" onClick={handleSaveAddressAndBuy}
+                            disabled={buying}
+                            style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                            {buying ? 'Processing...' : 'Save & Buy'}
+                        </button>
+                        <button className="btn btn-outline" onClick={() => setAddressModal(false)}
+                            style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>Cancel</button>
+                    </div>
+                </div>
+            </div>
+        )}
+    </div>
     );
 }

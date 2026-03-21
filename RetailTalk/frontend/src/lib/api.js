@@ -179,7 +179,7 @@ export async function uploadProductImage(file) {
 }
 
 // --- Search (ML-powered!) ---
-export async function searchProducts(query, maxResults = 20) {
+export async function searchProducts(query, maxResults = 20, showAll = false) {
     // Log the prompt asynchronously (don't block the search)
     fetch(`${API_URL}/insights/prompts`, {
         method: 'POST',
@@ -190,7 +190,8 @@ export async function searchProducts(query, maxResults = 20) {
         body: JSON.stringify({ prompt: query }),
     }).catch(console.error);
 
-    return apiFetch(`/search/?q=${encodeURIComponent(query)}&max_results=${maxResults}`);
+    const params = `q=${encodeURIComponent(query)}&max_results=${maxResults}${showAll ? '&show_all=true' : ''}`;
+    return apiFetch(`/search/?${params}`);
 }
 
 // --- Insights ---
@@ -207,10 +208,10 @@ export async function getBuyerRecommendations() {
 }
 
 // --- Transactions ---
-export async function buyProduct(productId, quantity = 1) {
+export async function buyProduct(productId, quantity = 1, purchaseType = 'delivery') {
     return apiFetch('/transactions/buy', {
         method: 'POST',
-        body: JSON.stringify({ product_id: productId, quantity }),
+        body: JSON.stringify({ product_id: productId, quantity, purchase_type: purchaseType }),
     });
 }
 
@@ -278,8 +279,11 @@ export async function adminGetDashboard() {
     return apiFetch('/admin/dashboard');
 }
 
-export async function adminGetUsers(search = '') {
-    return apiFetch(`/admin/users?search=${encodeURIComponent(search)}`);
+export async function adminGetUsers(search = '', role = '', departmentId = '') {
+    let url = `/admin/users?search=${encodeURIComponent(search)}`;
+    if (role) url += `&role=${encodeURIComponent(role)}`;
+    if (departmentId) url += `&department_id=${encodeURIComponent(departmentId)}`;
+    return apiFetch(url);
 }
 
 export async function adminBanUser(userId, isBanned) {
@@ -335,10 +339,12 @@ export async function getMyContact() {
     return apiFetch('/contacts/me');
 }
 
-export async function setMyContact(contactNumber) {
+export async function setMyContact(contactNumber, deliveryAddress) {
+    const payload = { contact_number: contactNumber };
+    if (deliveryAddress !== undefined) payload.delivery_address = deliveryAddress;
     return apiFetch('/contacts/me', {
         method: 'PUT',
-        body: JSON.stringify({ contact_number: contactNumber }),
+        body: JSON.stringify(payload),
     });
 }
 
@@ -369,8 +375,11 @@ export async function clearCart() {
     return apiFetch('/cart/clear', { method: 'DELETE' });
 }
 
-export async function checkoutCart() {
-    return apiFetch('/cart/checkout', { method: 'POST' });
+export async function checkoutCart(purchaseType = 'delivery') {
+    return apiFetch('/cart/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ purchase_type: purchaseType }),
+    });
 }
 
 // --- Delivery ---
@@ -430,5 +439,176 @@ export async function updateProfile(data) {
     return apiFetch('/auth/profile', {
         method: 'PUT',
         body: JSON.stringify(data),
+    });
+}
+
+// --- Admin: Departments ---
+export async function adminGetDepartments() {
+    return apiFetch('/admin/departments');
+}
+
+export async function adminGetDepartmentDetail(deptId) {
+    return apiFetch(`/admin/departments/${deptId}`);
+}
+
+export async function adminCreateDepartment(data) {
+    return apiFetch('/admin/departments', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function adminUpdateDepartment(deptId, data) {
+    return apiFetch(`/admin/departments/${deptId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+// --- Admin: Manager Registration ---
+export async function adminRegisterManager(data) {
+    return apiFetch('/admin/managers/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+// --- Manager Dashboard ---
+export async function managerGetDashboard() {
+    return apiFetch('/manager/dashboard');
+}
+
+export async function managerGetStaff(search = '') {
+    return apiFetch(`/manager/staff?search=${encodeURIComponent(search)}`);
+}
+
+export async function managerRegisterStaff(data) {
+    return apiFetch('/manager/staff/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function managerGetStaffDetail(userId) {
+    return apiFetch(`/manager/staff/${userId}/detail`);
+}
+
+export async function managerGetRestockRequests(status = 'pending_manager') {
+    return apiFetch(`/manager/restock-requests?status=${encodeURIComponent(status)}`);
+}
+
+export async function managerApproveRestock(requestId, data = {}) {
+    return apiFetch(`/manager/restock-requests/${requestId}/approve`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function managerRejectRestock(requestId, data = {}) {
+    return apiFetch(`/manager/restock-requests/${requestId}/reject`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function managerGetProducts(search = '') {
+    const q = search ? `?search=${encodeURIComponent(search)}` : '';
+    return apiFetch(`/manager/products${q}`);
+}
+
+export async function managerGetTransactions(search = '') {
+    const q = search ? `?search=${encodeURIComponent(search)}` : '';
+    return apiFetch(`/manager/transactions${q}`);
+}
+
+// --- Restock (Staff) ---
+export async function createRestockRequest(data) {
+    return apiFetch('/restock/request', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function getMyRestockRequests() {
+    return apiFetch('/restock/my-requests');
+}
+
+// --- Restock (Delivery) ---
+export async function getRestockDeliveryQueue() {
+    return apiFetch('/restock/delivery-queue');
+}
+
+export async function acceptRestockDelivery(requestId) {
+    return apiFetch(`/restock/${requestId}/accept`, { method: 'POST' });
+}
+
+export async function modifyRestockDelivery(requestId, data) {
+    return apiFetch(`/restock/${requestId}/modify`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function completeRestockDelivery(requestId) {
+    return apiFetch(`/restock/${requestId}/deliver`, { method: 'PUT' });
+}
+
+export async function getActiveRestockDeliveries() {
+    return apiFetch('/restock/active-deliveries');
+}
+
+export async function getRestockDeliveryHistory() {
+    return apiFetch('/restock/delivery-history');
+}
+
+// --- Walk-in Orders (Staff) ---
+export async function getStaffWalkinOrders() {
+    return apiFetch('/transactions/staff/walkin-orders');
+}
+
+export async function updateWalkinOrderStatus(transactionId, status) {
+    return apiFetch(`/transactions/staff/walkin-orders/${transactionId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+    });
+}
+
+// --- Delivery Orders (Staff/Manager) ---
+export async function getStaffDeliveryOrders() {
+    return apiFetch('/transactions/staff/delivery-orders');
+}
+
+export async function updateDeliveryOrderStatus(transactionId, status) {
+    return apiFetch(`/transactions/staff/delivery-orders/${transactionId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+    });
+}
+
+export async function getManagerDeliveryOrders() {
+    return apiFetch('/transactions/manager/delivery-orders');
+}
+
+export async function managerUpdateDeliveryOrderStatus(transactionId, status) {
+    return apiFetch(`/transactions/manager/delivery-orders/${transactionId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+    });
+}
+
+export async function buyerConfirmWalkin(transactionId) {
+    return apiFetch(`/transactions/buyer/walkin-confirm/${transactionId}`, {
+        method: 'PUT',
+    });
+}
+
+export async function getManagerWalkinOrders() {
+    return apiFetch('/transactions/manager/walkin-orders');
+}
+
+export async function managerUpdateWalkinOrderStatus(transactionId, status) {
+    return apiFetch(`/transactions/manager/walkin-orders/${transactionId}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
     });
 }

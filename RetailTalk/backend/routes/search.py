@@ -159,6 +159,7 @@ async def search_products(
     max_results: int = Query(default=SEARCH_MAX_RESULTS, ge=1, le=100),
     include_complements: bool = Query(default=True, description="Include Complement results"),
     include_substitutes: bool = Query(default=True, description="Include Substitute results"),
+    show_all: bool = Query(default=False, description="Show all products without threshold filtering (admin mode)"),
 ):
     """
     Product Search following the README architecture:
@@ -228,11 +229,14 @@ async def search_products(
             top_sims = sorted([c["similarity"] for c in raw_candidates], reverse=True)[:5]
             print(f"[Search] Top similarities: {[round(s, 4) for s in top_sims]}")
 
-        # Apply minimum similarity threshold
+        # Apply minimum similarity threshold (skip in show_all mode for admin evaluation)
         MIN_SIMILARITY_THRESHOLD = 0.20
-        candidates = [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
+        if show_all:
+            candidates = raw_candidates
+        else:
+            candidates = [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
 
-        print(f"[Search] After threshold ({MIN_SIMILARITY_THRESHOLD}): {len(candidates)} candidates")
+        print(f"[Search] After threshold ({MIN_SIMILARITY_THRESHOLD}): {len(candidates)} candidates (show_all={show_all})")
 
         if not candidates:
             return SearchResponse(
@@ -315,13 +319,14 @@ async def search_products(
 
             # Filter by ranker score — the CrossEncoder sees actual text pairs
             # so it can distinguish "dress" vs "Canned Goods" reliably
-            if ranker_service._loaded and ranker_score < MIN_RANKER_SCORE:
+            # (skip in show_all mode so admin can see all products with scores)
+            if not show_all and ranker_service._loaded and ranker_score < MIN_RANKER_SCORE:
                 continue
 
-            # Skip Substitutes/Complements if user requested
-            if label == "Substitute" and not include_substitutes:
+            # Skip Substitutes/Complements if user requested (skip in show_all mode)
+            if not show_all and label == "Substitute" and not include_substitutes:
                 continue
-            if label == "Complement" and not include_complements:
+            if not show_all and label == "Complement" and not include_complements:
                 continue
 
             # Calculate priority weight for classifier component

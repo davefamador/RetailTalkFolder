@@ -38,6 +38,8 @@ class UserResponse(BaseModel):
     role: str
     is_banned: bool = False
     created_at: str
+    department_id: str = ""
+    manager_id: str = ""
 
 
 class TokenResponse(BaseModel):
@@ -159,6 +161,8 @@ async def login(req: LoginRequest):
             role=user["role"],
             is_banned=user.get("is_banned", False),
             created_at=user["created_at"],
+            department_id=user.get("department_id") or "",
+            manager_id=user.get("manager_id") or "",
         ),
     )
 
@@ -264,6 +268,8 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         role=user["role"],
         is_banned=user.get("is_banned", False),
         created_at=user["created_at"],
+        department_id=user.get("department_id") or "",
+        manager_id=user.get("manager_id") or "",
     )
 
 
@@ -292,6 +298,8 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
         "role": u["role"],
         "balance": balance,
         "contact_number": contact_number,
+        "department_id": u.get("department_id") or "",
+        "manager_id": u.get("manager_id") or "",
         "created_at": u["created_at"],
     }
 

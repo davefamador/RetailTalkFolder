@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { listProducts, getStoredUser, buyProduct, getBuyerRecommendations, addToCart } from '../../lib/api';
+import { listProducts, getStoredUser, getStoredAdmin, buyProduct, getBuyerRecommendations, addToCart, getMyContact, setMyContact } from '../../lib/api';
 
 // Static demo products shown when DB is empty so user can see the UI
 const DEMO_PRODUCTS = [
@@ -68,9 +68,13 @@ export default function ProductsPage() {
     const [selectedImage, setSelectedImage] = useState(0);
     const [purchaseError, setPurchaseError] = useState('');
     const [cartMessage, setCartMessage] = useState({ type: '', text: '' });
+    const [purchaseType, setPurchaseType] = useState('delivery');
+    const [addressModal, setAddressModal] = useState(false);
+    const [contactNum, setContactNum] = useState('');
+    const [deliveryAddress, setDeliveryAddress] = useState('');
 
     useEffect(() => {
-        const storedUser = getStoredUser();
+        const storedUser = getStoredUser() || getStoredAdmin();
         setUser(storedUser);
         loadProducts();
         if (storedUser) {
@@ -132,7 +136,7 @@ export default function ProductsPage() {
         setPurchaseError('');
 
         try {
-            await buyProduct(selectedProduct.id, quantity);
+            await buyProduct(selectedProduct.id, quantity, purchaseType);
 
             // Deduct locally for immediate UI update
             setProducts(products.map(p =>
@@ -144,7 +148,36 @@ export default function ProductsPage() {
 
             setPurchased(true);
         } catch (err) {
-            alert(err.message || 'Failed to complete purchase. Check balance or stock.');
+            const msg = err.message || '';
+            if (msg.includes('delivery address') || msg.includes('contact number')) {
+                // Load existing contact info and show modal
+                try {
+                    const c = await getMyContact();
+                    setContactNum(c.contact_number || '');
+                    setDeliveryAddress(c.delivery_address || '');
+                } catch (_) {}
+                setAddressModal(true);
+            } else {
+                setPurchaseError(msg || 'Failed to complete purchase. Check balance or stock.');
+            }
+        }
+    };
+
+    const handleSaveAddressAndBuy = async () => {
+        if (!contactNum.trim()) { setPurchaseError('Contact number is required.'); return; }
+        if (purchaseType === 'delivery' && !deliveryAddress.trim()) { setPurchaseError('Delivery address is required.'); return; }
+        try {
+            await setMyContact(contactNum.trim(), deliveryAddress.trim());
+            setAddressModal(false);
+            // Retry the purchase
+            await buyProduct(selectedProduct.id, quantity, purchaseType);
+            setProducts(products.map(p =>
+                p.id === selectedProduct.id ? { ...p, stock: p.stock - quantity } : p
+            ));
+            setSelectedProduct({ ...selectedProduct, stock: selectedProduct.stock - quantity });
+            setPurchased(true);
+        } catch (err) {
+            setPurchaseError(err.message || 'Failed to complete purchase.');
         }
     };
 
@@ -159,7 +192,10 @@ export default function ProductsPage() {
         );
     }
 
-    const totalPrice = selectedProduct ? (parseFloat(selectedProduct.price) * quantity).toFixed(2) : '0.00';
+    const productTotal = selectedProduct ? (parseFloat(selectedProduct.price) * quantity) : 0;
+    const deliveryFee = purchaseType === 'delivery' ? 90 : 0;
+    const grandTotal = (productTotal + deliveryFee).toFixed(2);
+    const totalPrice = productTotal.toFixed(2);
 
     return (
         <div className="page">
@@ -369,7 +405,7 @@ export default function ProductsPage() {
                                 <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Purchase Confirmed!</h2>
                                 <p style={{ color: 'var(--text-secondary)', maxWidth: 360, lineHeight: 1.6 }}>
                                     You bought <strong>{quantity}x {selectedProduct.title}</strong> for a total of
-                                    <strong style={{ color: 'var(--accent-secondary)' }}> PHP {totalPrice}</strong>.
+                                    <strong style={{ color: 'var(--accent-secondary)' }}> PHP {grandTotal}</strong>.
                                 </p>
                                 <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontStyle: 'italic' }}>
                                     (This is a demo — no actual purchase was made)
@@ -528,9 +564,11 @@ export default function ProductsPage() {
                                                 marginBottom: 14, paddingBottom: 14,
                                                 borderBottom: '1px solid rgba(255,255,255,0.06)',
                                             }}>
-                                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Total</span>
+                                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                                                    {deliveryFee > 0 ? `Subtotal: PHP ${totalPrice} + PHP ${deliveryFee.toFixed(2)} delivery` : 'Total'}
+                                                </span>
                                                 <span style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--accent-secondary)' }}>
-                                                    PHP {totalPrice}
+                                                    PHP {grandTotal}
                                                 </span>
                                             </div>
 
@@ -548,41 +586,81 @@ export default function ProductsPage() {
                                                 </div>
                                             )}
 
-                                            {(!user || user.role === 'buyer') && (
-                                                <div style={{ display: 'flex', gap: 8 }}>
-                                                    <button
-                                                        className="btn"
-                                                        onClick={async () => {
-                                                            if (!user) { setPurchaseError('Please log in first.'); return; }
-                                                            if (selectedProduct._demo) { setCartMessage({ type: 'error', text: 'This is a demo product' }); return; }
-                                                            try {
-                                                                setCartMessage({ type: '', text: '' });
-                                                                await addToCart(selectedProduct.id, quantity);
-                                                                setCartMessage({ type: 'success', text: `Added ${quantity}x to cart!` });
-                                                            } catch (err) {
-                                                                setCartMessage({ type: 'error', text: err.message });
-                                                            }
-                                                        }}
-                                                        style={{
-                                                            flex: 1, padding: '14px', fontSize: '0.95rem',
-                                                            fontWeight: 700, borderRadius: 12,
-                                                            background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.4)',
-                                                            color: '#818cf8', cursor: 'pointer',
-                                                        }}
-                                                    >
-                                                        🛒 Add to Cart
-                                                    </button>
-                                                    <button
-                                                        className="btn btn-success"
-                                                        onClick={handlePurchase}
-                                                        style={{
-                                                            flex: 1, padding: '14px', fontSize: '0.95rem',
-                                                            fontWeight: 700, borderRadius: 12,
-                                                        }}
-                                                    >
-                                                        {!user ? 'Login to Purchase' : `Buy — ₱${totalPrice}`}
-                                                    </button>
-                                                </div>
+                                            {user && user.role === 'buyer' && (
+                                                <>
+                                                    {/* Walk-in / Delivery selector */}
+                                                    <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPurchaseType('delivery')}
+                                                            style={{
+                                                                flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                                                borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
+                                                                background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                                                color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                                                cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                                            }}
+                                                        >
+                                                            Delivery
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPurchaseType('walkin')}
+                                                            style={{
+                                                                flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
+                                                                borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
+                                                                background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                                                color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
+                                                                cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                                            }}
+                                                        >
+                                                            Walk-in
+                                                        </button>
+                                                    </div>
+                                                    {purchaseType === 'delivery' && (
+                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+                                                            + PHP 90.00 delivery fee per department store
+                                                        </p>
+                                                    )}
+                                                    <div style={{ display: 'flex', gap: 8 }}>
+                                                        <button
+                                                            className="btn"
+                                                            onClick={async () => {
+                                                                if (selectedProduct._demo) { setCartMessage({ type: 'error', text: 'This is a demo product' }); return; }
+                                                                try {
+                                                                    setCartMessage({ type: '', text: '' });
+                                                                    await addToCart(selectedProduct.id, quantity);
+                                                                    setCartMessage({ type: 'success', text: `Added ${quantity}x to cart!` });
+                                                                } catch (err) {
+                                                                    setCartMessage({ type: 'error', text: err.message });
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                flex: 1, padding: '14px', fontSize: '0.95rem',
+                                                                fontWeight: 700, borderRadius: 12,
+                                                                background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.4)',
+                                                                color: '#818cf8', cursor: 'pointer',
+                                                            }}
+                                                        >
+                                                            Add to Cart
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-success"
+                                                            onClick={handlePurchase}
+                                                            style={{
+                                                                flex: 1, padding: '14px', fontSize: '0.95rem',
+                                                                fontWeight: 700, borderRadius: 12,
+                                                            }}
+                                                        >
+                                                            Buy — PHP {grandTotal}
+                                                        </button>
+                                                    </div>
+                                                </>
+                                            )}
+                                            {!user && (
+                                                <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                                    Please log in to purchase items.
+                                                </p>
                                             )}
 
                                             {cartMessage.text && (
@@ -601,6 +679,75 @@ export default function ProductsPage() {
                                 </div>
                             </>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* ===== DELIVERY ADDRESS MODAL ===== */}
+            {addressModal && (
+                <div
+                    onClick={() => setAddressModal(false)}
+                    style={{
+                        position: 'fixed', inset: 0, zIndex: 1100,
+                        background: 'rgba(0,0,0,0.7)',
+                        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        padding: 24,
+                    }}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                            background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
+                            width: 440, maxWidth: '90vw', border: '1px solid var(--border-color)',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                        }}
+                    >
+                        <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: 8 }}>📍 Delivery Address Required</h3>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 20 }}>
+                            Please provide your contact number and delivery address to place a delivery order.
+                        </p>
+
+                        {purchaseError && (
+                            <div style={{
+                                background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                                color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: '0.85rem',
+                            }}>{purchaseError}</div>
+                        )}
+
+                        <div style={{ marginBottom: 14 }}>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Contact Number *</label>
+                            <input
+                                type="tel" placeholder="e.g. 09171234567"
+                                value={contactNum} onChange={(e) => setContactNum(e.target.value)}
+                                style={{
+                                    width: '100%', padding: '10px 14px', borderRadius: 10,
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                    color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                }}
+                            />
+                        </div>
+                        <div style={{ marginBottom: 20 }}>
+                            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Delivery Address *</label>
+                            <textarea
+                                placeholder="Enter your full delivery address"
+                                value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)}
+                                rows={3}
+                                style={{
+                                    width: '100%', padding: '10px 14px', borderRadius: 10,
+                                    background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                    color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                    resize: 'vertical',
+                                }}
+                            />
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 12 }}>
+                            <button className="btn btn-primary" onClick={handleSaveAddressAndBuy}
+                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>Save & Buy</button>
+                            <button className="btn btn-outline" onClick={() => setAddressModal(false)}
+                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>Cancel</button>
+                        </div>
                     </div>
                 </div>
             )}

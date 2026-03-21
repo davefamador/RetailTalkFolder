@@ -6,6 +6,7 @@ import {
     adminBanUser, adminSetBalance, adminGetTransactions, adminGetReports,
     adminGetProducts, adminUpdateProduct, adminGetUserDetail,
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
+    adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminRegisterManager,
 } from '../../../lib/api';
 
 // ── Line Chart Component ─────────────────────────────────
@@ -149,6 +150,113 @@ function StatCard({ icon, label, value, color }) {
 }
 
 
+// ── Horizontal Bar Chart (for store comparisons) ─────────
+function HorizontalBarChart({ data, labelKey, valueKey, title, color = '#8b5cf6', prefix = '', height = 'auto' }) {
+    if (!data || data.length === 0) {
+        return (
+            <div>
+                <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>{title}</h4>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No data yet</p>
+            </div>
+        );
+    }
+    const maxVal = Math.max(...data.map(d => d[valueKey]), 1);
+    return (
+        <div>
+            <h4 style={{ marginBottom: 16, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>{title}</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {data.map((d, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{
+                            width: 110, fontSize: '0.8rem', fontWeight: 600,
+                            color: 'var(--text-primary)', textAlign: 'right',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0,
+                        }}>{d[labelKey]}</div>
+                        <div style={{ flex: 1, height: 28, background: 'var(--bg-secondary)', borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
+                            <div style={{
+                                height: '100%', width: `${Math.max((d[valueKey] / maxVal) * 100, 2)}%`,
+                                background: `linear-gradient(90deg, ${color}, ${color}90)`,
+                                borderRadius: 8, transition: 'width 0.5s ease',
+                                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 8,
+                            }}>
+                                {(d[valueKey] / maxVal) > 0.25 && (
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#fff' }}>
+                                        {prefix}{typeof d[valueKey] === 'number' && d[valueKey] % 1 !== 0 ? d[valueKey].toFixed(2) : d[valueKey]}
+                                    </span>
+                                )}
+                            </div>
+                            {(d[valueKey] / maxVal) <= 0.25 && (
+                                <span style={{
+                                    position: 'absolute', left: `${Math.max((d[valueKey] / maxVal) * 100, 2) + 2}%`,
+                                    top: '50%', transform: 'translateY(-50%)',
+                                    fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-secondary)',
+                                }}>
+                                    {prefix}{typeof d[valueKey] === 'number' && d[valueKey] % 1 !== 0 ? d[valueKey].toFixed(2) : d[valueKey]}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ── Donut/Ring Chart (for order type breakdown) ──────────
+function DonutChart({ data, title, size = 140 }) {
+    const canvasRef = useRef(null);
+
+    useEffect(() => {
+        if (!canvasRef.current || !data || data.length === 0) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        canvas.width = size; canvas.height = size;
+        ctx.clearRect(0, 0, size, size);
+
+        const total = data.reduce((s, d) => s + d.value, 0);
+        if (total === 0) return;
+        const cx = size / 2, cy = size / 2, r = size / 2 - 8, innerR = r * 0.6;
+        let start = -Math.PI / 2;
+        data.forEach(d => {
+            const sweep = (d.value / total) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, start, start + sweep);
+            ctx.arc(cx, cy, innerR, start + sweep, start, true);
+            ctx.closePath();
+            ctx.fillStyle = d.color;
+            ctx.fill();
+            start += sweep;
+        });
+        // center text
+        ctx.fillStyle = 'var(--text-primary)';
+        ctx.font = `bold ${size * 0.14}px Inter, system-ui`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(total.toString(), cx, cy);
+    }, [data, size]);
+
+    return (
+        <div style={{ textAlign: 'center' }}>
+            {title && <h4 style={{ marginBottom: 10, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{title}</h4>}
+            {(!data || data.length === 0 || data.every(d => d.value === 0)) ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No data</p>
+            ) : (
+                <>
+                    <canvas ref={canvasRef} style={{ width: size, height: size }} />
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 10, flexWrap: 'wrap' }}>
+                        {data.map((d, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 10, height: 10, borderRadius: 3, background: d.color }} />
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{d.label}: {d.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 export default function AdminDashboard() {
     const [admin, setAdmin] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
@@ -179,6 +287,19 @@ export default function AdminDashboard() {
     const [pendingProducts, setPendingProducts] = useState([]);
     const [selectedPendingProduct, setSelectedPendingProduct] = useState(null);
     const [pendingActionLoading, setPendingActionLoading] = useState(false);
+
+    // Department state
+    const [departments, setDepartments] = useState([]);
+    const [deptSearch, setDeptSearch] = useState('');
+    const [selectedDeptDetail, setSelectedDeptDetail] = useState(null);
+    const [deptDetailLoading, setDeptDetailLoading] = useState(false);
+    // Department creation
+    const [showCreateDept, setShowCreateDept] = useState(false);
+    const [newDeptName, setNewDeptName] = useState('');
+    const [newDeptDesc, setNewDeptDesc] = useState('');
+    // Manager registration
+    const [showRegisterManager, setShowRegisterManager] = useState(false);
+    const [managerForm, setManagerForm] = useState({ full_name: '', email: '', password: '', contact_number: '', department_id: '' });
 
     useEffect(() => {
         const stored = getStoredAdmin();
@@ -214,10 +335,48 @@ export default function AdminDashboard() {
         if (activeTab === 'reports') loadReports();
         if (activeTab === 'products') loadProducts();
         if (activeTab === 'pending') loadPending();
+        if (activeTab === 'departments') loadDepartments();
     }, [activeTab, authChecked]);
 
     const loadPending = async () => {
         try { setPendingProducts(await adminGetPendingProducts()); } catch (e) { console.error(e); }
+    };
+
+    const loadDepartments = async () => {
+        try { setDepartments(await adminGetDepartments()); } catch (e) { console.error(e); }
+    };
+    const handleDeptClick = async (deptId) => {
+        setDeptDetailLoading(true);
+        setSelectedDeptDetail(null);
+        try {
+            const detail = await adminGetDepartmentDetail(deptId);
+            setSelectedDeptDetail(detail);
+        } catch (e) {
+            setMessage({ type: 'error', text: 'Failed to load department: ' + e.message });
+        } finally {
+            setDeptDetailLoading(false);
+        }
+    };
+    const handleCreateDepartment = async () => {
+        if (!newDeptName.trim()) return;
+        try {
+            await adminCreateDepartment({ name: newDeptName.trim(), description: newDeptDesc.trim() });
+            setMessage({ type: 'success', text: 'Department created!' });
+            setShowCreateDept(false);
+            setNewDeptName('');
+            setNewDeptDesc('');
+            loadDepartments();
+            loadDashboard();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    };
+    const handleRegisterManager = async () => {
+        try {
+            await adminRegisterManager(managerForm);
+            setMessage({ type: 'success', text: 'Manager registered!' });
+            setShowRegisterManager(false);
+            setManagerForm({ full_name: '', email: '', password: '', contact_number: '', department_id: '' });
+            loadDepartments();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
 
     const handleApproveProduct = async (productId) => {
@@ -302,10 +461,12 @@ export default function AdminDashboard() {
     const sidebarItems = [
         { id: 'dashboard', icon: '📊', label: 'Dashboard' },
         { id: 'users', icon: '👥', label: 'Users' },
+        { id: 'departments', icon: '🏪', label: 'Stores' },
         { id: 'pending', icon: '⏳', label: 'Pending' },
         { id: 'transactions', icon: '💳', label: 'Transactions' },
         { id: 'products', icon: '📦', label: 'Products' },
         { id: 'reports', icon: '📈', label: 'Reports' },
+        { id: 'search', icon: '🔍', label: 'Search', href: '/search' },
     ];
 
     return (
@@ -317,36 +478,14 @@ export default function AdminDashboard() {
                 display: 'flex', flexDirection: 'column',
                 position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 200,
             }}>
-                <div style={{
-                    padding: '24px 20px', display: 'flex', alignItems: 'center', gap: 12,
-                    borderBottom: '1px solid var(--border-color)',
-                }}>
-                    <div style={{
-                        width: 36, height: 36, borderRadius: 10,
-                        background: 'var(--gradient-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'white', fontWeight: 800, fontSize: '0.9rem',
-                    }}>RT</div>
-                    <div>
-                        <div style={{ fontWeight: 700, fontSize: '1rem' }}>RetailTalk</div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--accent-danger)', fontWeight: 600 }}>ADMIN PANEL</div>
-                    </div>
-                </div>
-
                 <nav style={{ padding: '16px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <p style={{
-                        fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)',
-                        textTransform: 'uppercase', letterSpacing: 1, padding: '8px 20px',
-                    }}>
-                        Main Menu
-                    </p>
                     {sidebarItems.map(item => (
                         <SidebarItem
                             key={item.id}
                             icon={item.icon}
                             label={item.label}
                             active={activeTab === item.id}
-                            onClick={() => setActiveTab(item.id)}
+                            onClick={() => item.href ? (window.location.href = item.href) : setActiveTab(item.id)}
                         />
                     ))}
                 </nav>
@@ -410,6 +549,10 @@ export default function AdminDashboard() {
                                     <StatCard icon="📦" label="Active Products" value={stats.total_products} color="#0ea5e9" />
                                     <StatCard icon="🛒" label="Total Orders" value={stats.total_orders} color="#10b981" />
                                     <StatCard icon="💰" label="Total Revenue" value={`₱${stats.total_revenue.toFixed(2)}`} color="#f59e0b" />
+                                    <StatCard icon="🛍️" label="Total Buyers" value={stats.total_buyers || 0} color="#10b981" />
+                                    <StatCard icon="🏪" label="Stores" value={stats.total_departments || 0} color="#8b5cf6" />
+                                    <StatCard icon="👔" label="Managers" value={stats.total_managers || 0} color="#ec4899" />
+                                    <StatCard icon="🧑‍💼" label="Staff" value={stats.total_staff || 0} color="#14b8a6" />
                                 </div>
                             </>
                         ) : (
@@ -531,6 +674,433 @@ export default function AdminDashboard() {
                             </table>
                             {users.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No users found</p></div>}
                         </div>
+                    </div>
+                )}
+
+                {/* ===== DEPARTMENTS TAB ===== */}
+                {activeTab === 'departments' && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                            <div>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Store Management</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage stores, managers, and staff</p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <button
+                                    onClick={() => setShowCreateDept(true)}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 8,
+                                        padding: '10px 20px', borderRadius: 10, border: '1px solid rgba(139,92,246,0.3)',
+                                        background: 'rgba(139,92,246,0.1)', color: '#8b5cf6',
+                                        cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
+                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,92,246,0.2)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(139,92,246,0.1)'}
+                                >
+                                    🏪 + Create Store
+                                </button>
+                                <button
+                                    onClick={() => setShowRegisterManager(true)}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 8,
+                                        padding: '10px 20px', borderRadius: 10, border: '1px solid rgba(236,72,153,0.3)',
+                                        background: 'rgba(236,72,153,0.1)', color: '#ec4899',
+                                        cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
+                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(236,72,153,0.2)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(236,72,153,0.1)'}
+                                >
+                                    👔 + Register Manager
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Department Cards Grid */}
+                        <div style={{
+                            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+                            gap: 16, marginBottom: 24,
+                        }}>
+                            {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map(dept => (
+                                <div key={dept.id}
+                                    onClick={() => handleDeptClick(dept.id)}
+                                    style={{
+                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                        borderRadius: 16, padding: 20, cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#8b5cf6'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                                        <div>
+                                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>{dept.name}</h3>
+                                            {dept.description && (
+                                                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{dept.description}</p>
+                                            )}
+                                        </div>
+                                        <div style={{
+                                            width: 40, height: 40, borderRadius: 10,
+                                            background: 'rgba(139,92,246,0.15)', display: 'flex',
+                                            alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
+                                        }}>🏪</div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                                        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--bg-secondary)' }}>
+                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 2 }}>Manager</p>
+                                            <p style={{ fontSize: '0.8rem', fontWeight: 600 }}>{dept.manager_name || 'Unassigned'}</p>
+                                        </div>
+                                        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--bg-secondary)' }}>
+                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 2 }}>Staff</p>
+                                            <p style={{ fontSize: '0.8rem', fontWeight: 600 }}>{dept.staff_count || 0}</p>
+                                        </div>
+                                        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--bg-secondary)' }}>
+                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 2 }}>Products</p>
+                                            <p style={{ fontSize: '0.8rem', fontWeight: 600 }}>{dept.product_count || 0}</p>
+                                        </div>
+                                        <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--bg-secondary)' }}>
+                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 2 }}>Revenue</p>
+                                            <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#f59e0b' }}>₱{(dept.total_revenue || 0).toFixed(2)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {departments.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No departments found</p></div>}
+
+                        {/* Department Detail Slide Panel */}
+                        {(selectedDeptDetail || deptDetailLoading) && (
+                            <>
+                                <div style={{
+                                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                                    zIndex: 300, transition: 'opacity 0.3s',
+                                }} onClick={() => { setSelectedDeptDetail(null); }} />
+                                <aside style={{
+                                    position: 'fixed', top: 0, right: 0, bottom: 0,
+                                    width: 620, maxWidth: '90vw', background: 'var(--bg-primary)',
+                                    borderLeft: '1px solid var(--border-color)',
+                                    zIndex: 301, overflowY: 'auto', padding: 32,
+                                    boxShadow: '-8px 0 30px rgba(0,0,0,0.3)',
+                                    animation: 'slideInRight 0.25s ease-out',
+                                }}>
+                                    {deptDetailLoading ? (
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                                            <div className="spinner" style={{ width: 40, height: 40 }} />
+                                        </div>
+                                    ) : selectedDeptDetail ? (
+                                        <>
+                                            {/* Header */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                                                <div>
+                                                    <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: 4 }}>
+                                                        {selectedDeptDetail.department.name}
+                                                    </h2>
+                                                    {selectedDeptDetail.department.description && (
+                                                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{selectedDeptDetail.department.description}</p>
+                                                    )}
+                                                </div>
+                                                <button onClick={() => setSelectedDeptDetail(null)} style={{
+                                                    background: 'none', border: 'none', cursor: 'pointer',
+                                                    color: 'var(--text-muted)', fontSize: '1.3rem',
+                                                }}>✕</button>
+                                            </div>
+
+                                            {/* Department Info */}
+                                            <div style={{
+                                                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20,
+                                                padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                            }}>
+                                                <div>
+                                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Manager</p>
+                                                    <p style={{ fontSize: '0.85rem', fontWeight: 600 }}>{selectedDeptDetail.department.manager_name || 'Unassigned'}</p>
+                                                </div>
+                                                <div>
+                                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Created</p>
+                                                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>{new Date(selectedDeptDetail.department.created_at).toLocaleDateString()}</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Stats */}
+                                            <div style={{
+                                                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 10, marginBottom: 20,
+                                            }}>
+                                                <StatCard icon="👥" label="Staff" value={selectedDeptDetail.total_staff || 0} color="#6366f1" />
+                                                <StatCard icon="📦" label="Products" value={selectedDeptDetail.total_products || 0} color="#0ea5e9" />
+                                                <StatCard icon="💰" label="Revenue" value={`₱${(selectedDeptDetail.total_revenue || 0).toFixed(2)}`} color="#f59e0b" />
+                                                <StatCard icon="🛒" label="Orders" value={selectedDeptDetail.total_orders || 0} color="#10b981" />
+                                            </div>
+
+                                            {/* Order Type Breakdown */}
+                                            <div style={{
+                                                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20,
+                                            }}>
+                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                    <DonutChart
+                                                        title="Order Breakdown"
+                                                        size={130}
+                                                        data={[
+                                                            { label: 'Delivery', value: selectedDeptDetail.delivery_orders || 0, color: '#3b82f6' },
+                                                            { label: 'Walk-in', value: selectedDeptDetail.walkin_orders || 0, color: '#10b981' },
+                                                        ]}
+                                                    />
+                                                </div>
+                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 12 }}>
+                                                    <div>
+                                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 4 }}>Delivery Orders</p>
+                                                        <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#3b82f6' }}>{selectedDeptDetail.delivery_orders || 0}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 4 }}>Walk-in Orders</p>
+                                                        <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#10b981' }}>{selectedDeptDetail.walkin_orders || 0}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Sales Charts */}
+                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Sales</h3>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
+                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                    <LineChart
+                                                        data={[...(selectedDeptDetail.daily_sales || [])].reverse().slice(-14)}
+                                                        labelKey="date" valueKey="amount"
+                                                        title="Daily Sales (14 Days)" color="#6366f1" height={180}
+                                                    />
+                                                </div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                        <LineChart
+                                                            data={selectedDeptDetail.weekly_sales || []}
+                                                            labelKey="date" valueKey="amount"
+                                                            title="Weekly Sales" color="#0ea5e9" height={160}
+                                                        />
+                                                    </div>
+                                                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                        <LineChart
+                                                            data={selectedDeptDetail.monthly_sales || []}
+                                                            labelKey="date" valueKey="amount"
+                                                            title="Monthly Sales" color="#f59e0b" height={160}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Delivery vs Walk-in Earnings */}
+                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Delivery vs Walk-in Earnings</h3>
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                    <LineChart
+                                                        data={selectedDeptDetail.delivery_earnings || []}
+                                                        labelKey="date" valueKey="amount"
+                                                        title="Delivery Earnings" color="#3b82f6" height={150}
+                                                    />
+                                                </div>
+                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                                    <LineChart
+                                                        data={selectedDeptDetail.walkin_earnings || []}
+                                                        labelKey="date" valueKey="amount"
+                                                        title="Walk-in Earnings" color="#10b981" height={150}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Staff List */}
+                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Staff ({selectedDeptDetail.staff?.length || 0})</h3>
+                                            {selectedDeptDetail.staff && selectedDeptDetail.staff.length > 0 ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                    {selectedDeptDetail.staff.map(s => (
+                                                        <div key={s.id} style={{
+                                                            padding: 12, borderRadius: 10,
+                                                            background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                                        }}>
+                                                            <div>
+                                                                <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>{s.full_name}</p>
+                                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.email}</p>
+                                                            </div>
+                                                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                                <span style={{
+                                                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                                                    padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
+                                                                    background: s.is_banned ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+                                                                    color: s.is_banned ? '#ef4444' : '#10b981',
+                                                                }}>
+                                                                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: s.is_banned ? '#ef4444' : '#10b981' }} />
+                                                                    {s.is_banned ? 'Banned' : 'Active'}
+                                                                </span>
+                                                                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                                                    {new Date(s.created_at).toLocaleDateString()}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>No staff members</p>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <p style={{ color: 'var(--text-muted)' }}>Failed to load department details</p>
+                                    )}
+                                </aside>
+                                <style>{`
+                                    @keyframes slideInRight {
+                                        from { transform: translateX(100%); }
+                                        to { transform: translateX(0); }
+                                    }
+                                `}</style>
+                            </>
+                        )}
+
+                        {/* Create Department Modal */}
+                        {showCreateDept && (
+                            <>
+                                <div style={{
+                                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                                    zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }} onClick={() => setShowCreateDept(false)}>
+                                    <div style={{
+                                        background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
+                                        width: 440, maxWidth: '90vw', border: '1px solid var(--border-color)',
+                                        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                                    }} onClick={e => e.stopPropagation()}>
+                                        <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 20 }}>Create Store</h2>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Store Name *</label>
+                                                <input
+                                                    type="text" placeholder="Enter store name"
+                                                    value={newDeptName} onChange={e => setNewDeptName(e.target.value)}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Description</label>
+                                                <textarea
+                                                    placeholder="Enter description (optional)"
+                                                    value={newDeptDesc} onChange={e => setNewDeptDesc(e.target.value)}
+                                                    rows={3}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                        resize: 'vertical',
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                                            <button className="btn btn-primary" onClick={handleCreateDepartment}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Create Store
+                                            </button>
+                                            <button className="btn btn-outline" onClick={() => setShowCreateDept(false)}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Register Manager Modal */}
+                        {showRegisterManager && (
+                            <>
+                                <div style={{
+                                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                                    zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }} onClick={() => setShowRegisterManager(false)}>
+                                    <div style={{
+                                        background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
+                                        width: 480, maxWidth: '90vw', border: '1px solid var(--border-color)',
+                                        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                                    }} onClick={e => e.stopPropagation()}>
+                                        <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 20 }}>Register Manager</h2>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Full Name *</label>
+                                                <input
+                                                    type="text" placeholder="Enter full name"
+                                                    value={managerForm.full_name} onChange={e => setManagerForm({ ...managerForm, full_name: e.target.value })}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Email *</label>
+                                                <input
+                                                    type="email" placeholder="Enter email"
+                                                    value={managerForm.email} onChange={e => setManagerForm({ ...managerForm, email: e.target.value })}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Password *</label>
+                                                <input
+                                                    type="password" placeholder="Enter password"
+                                                    value={managerForm.password} onChange={e => setManagerForm({ ...managerForm, password: e.target.value })}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Contact Number</label>
+                                                <input
+                                                    type="text" placeholder="Enter contact number"
+                                                    value={managerForm.contact_number} onChange={e => setManagerForm({ ...managerForm, contact_number: e.target.value })}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Store *</label>
+                                                <select
+                                                    value={managerForm.department_id} onChange={e => setManagerForm({ ...managerForm, department_id: e.target.value })}
+                                                    style={{
+                                                        width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                    }}
+                                                >
+                                                    <option value="">Select store</option>
+                                                    {departments.map(d => (
+                                                        <option key={d.id} value={d.id}>{d.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                                            <button className="btn btn-primary" onClick={handleRegisterManager}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Register Manager
+                                            </button>
+                                            <button className="btn btn-outline" onClick={() => setShowRegisterManager(false)}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -706,11 +1276,34 @@ export default function AdminDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Total</th><th>Seller (90%)</th><th>Admin (10%)</th><th>Date</th>
+                                        <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Total</th><th>Seller (90%)</th><th>Admin (10%)</th><th>Status</th><th>Type</th><th>Date</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {transactions.map(t => (
+                                    {transactions.map(t => {
+                                        const statusColors = {
+                                            pending: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+                                            pending_walkin: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+                                            approved: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
+                                            inwork: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
+                                            ready: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
+                                            ondeliver: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
+                                            delivered: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
+                                            picked_up: { bg: 'rgba(14,165,233,0.15)', color: '#0ea5e9' },
+                                            completed: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
+                                            undelivered: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+                                            cancelled: { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
+                                        };
+                                        const statusLabels = {
+                                            pending: 'Pending', pending_walkin: 'Pending', approved: 'Approved',
+                                            inwork: 'In Work', ready: 'Ready', ondeliver: 'On Deliver',
+                                            delivered: 'Delivered', picked_up: 'Picked Up', completed: 'Completed',
+                                            undelivered: 'Undelivered', cancelled: 'Cancelled',
+                                        };
+                                        const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                        const sLabel = statusLabels[t.status] || t.status;
+                                        const isDelivery = t.purchase_type === 'delivery';
+                                        return (
                                         <tr key={t.id}>
                                             <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
                                             <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
@@ -719,11 +1312,25 @@ export default function AdminDashboard() {
                                             <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
                                             <td style={{ color: 'var(--accent-secondary)' }}>₱{t.seller_amount.toFixed(2)}</td>
                                             <td style={{ color: '#f59e0b' }}>₱{t.admin_commission.toFixed(2)}</td>
+                                            <td>
+                                                <span style={{
+                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
+                                                }}>{sLabel}</span>
+                                            </td>
+                                            <td>
+                                                <span style={{
+                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                    background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
+                                                    color: isDelivery ? '#3b82f6' : '#f59e0b', whiteSpace: 'nowrap',
+                                                }}>{isDelivery ? '🚚 Delivery' : '🏪 Walk-in'}</span>
+                                            </td>
                                             <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                                                 {new Date(t.created_at).toLocaleString()}
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                             {transactions.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
@@ -732,12 +1339,20 @@ export default function AdminDashboard() {
                 )}
 
                 {/* ===== PRODUCTS TAB ===== */}
-                {activeTab === 'products' && (
+                {activeTab === 'products' && (() => {
+                    // Group products by store (seller_name)
+                    const storeGroups = {};
+                    products.forEach(p => {
+                        const store = p.seller_name || 'Independent';
+                        if (!storeGroups[store]) storeGroups[store] = [];
+                        storeGroups[store].push(p);
+                    });
+                    return (
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                             <div>
-                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Product Management</h1>
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>View and edit all platform products</p>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Products by Store</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{products.length} products across {Object.keys(storeGroups).length} store{Object.keys(storeGroups).length !== 1 ? 's' : ''}</p>
                             </div>
                             <div style={{ display: 'flex', gap: 8 }}>
                                 <input
@@ -753,78 +1368,91 @@ export default function AdminDashboard() {
                                 <button className="btn btn-primary btn-sm" onClick={() => loadProducts(productSearch)}>Search</button>
                             </div>
                         </div>
-                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Product</th><th>Seller</th><th>Price</th><th>Stock</th><th>Status</th><th>Created</th><th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {products.map(p => (
-                                        <tr key={p.id}>
-                                            <td style={{ fontWeight: 500 }}>
-                                                {editProductId === p.id ? (
-                                                    <input type="text" defaultValue={p.title}
-                                                        onChange={e => setEditProductData({ ...editProductData, title: e.target.value })}
-                                                        style={{ width: 180, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
-                                                ) : p.title}
-                                            </td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{p.seller_name}</td>
-                                            <td>
-                                                {editProductId === p.id ? (
-                                                    <input type="number" defaultValue={p.price} step="0.01"
-                                                        onChange={e => setEditProductData({ ...editProductData, price: parseFloat(e.target.value) })}
-                                                        style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
-                                                ) : <span style={{ fontWeight: 600 }}>₱{p.price.toFixed(2)}</span>}
-                                            </td>
-                                            <td>
-                                                {editProductId === p.id ? (
-                                                    <input type="number" defaultValue={p.stock}
-                                                        onChange={e => setEditProductData({ ...editProductData, stock: parseInt(e.target.value) })}
-                                                        style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
-                                                ) : <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>}
-                                            </td>
-                                            <td>
-                                                {editProductId === p.id ? (
-                                                    <select defaultValue={p.is_active.toString()}
-                                                        onChange={e => setEditProductData({ ...editProductData, is_active: e.target.value === 'true' })}
-                                                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
-                                                        <option value="true">Active</option>
-                                                        <option value="false">Inactive</option>
-                                                    </select>
-                                                ) : (
-                                                    <span style={{
-                                                        padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                        background: p.is_active ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                        color: p.is_active ? '#10b981' : '#ef4444',
-                                                    }}>
-                                                        {p.is_active ? 'Active' : 'Inactive'}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                {new Date(p.created_at).toLocaleDateString()}
-                                            </td>
-                                            <td>
-                                                {editProductId === p.id ? (
-                                                    <div style={{ display: 'flex', gap: 4 }}>
-                                                        <button className="btn btn-success btn-sm" onClick={() => handleUpdateProduct(p.id)} style={{ padding: '4px 8px' }}>✓</button>
-                                                        <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(null); setEditProductData({}); }} style={{ padding: '4px 8px' }}>✕</button>
-                                                    </div>
-                                                ) : (
-                                                    <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
-                                                        style={{ fontSize: '0.75rem' }}>Edit</button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            {products.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No products found</p></div>}
-                        </div>
+
+                        {Object.entries(storeGroups).map(([storeName, storeProducts]) => (
+                            <div key={storeName} style={{ marginBottom: 24 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                    <span style={{ fontSize: '1.2rem' }}>🏪</span>
+                                    <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{storeName}</h2>
+                                    <span style={{
+                                        padding: '3px 10px', borderRadius: 12, fontSize: '0.75rem', fontWeight: 600,
+                                        background: 'rgba(139,92,246,0.1)', color: '#8b5cf6',
+                                    }}>{storeProducts.length} product{storeProducts.length !== 1 ? 's' : ''}</span>
+                                </div>
+                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Created</th><th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {storeProducts.map(p => (
+                                                <tr key={p.id}>
+                                                    <td style={{ fontWeight: 500 }}>
+                                                        {editProductId === p.id ? (
+                                                            <input type="text" defaultValue={p.title}
+                                                                onChange={e => setEditProductData({ ...editProductData, title: e.target.value })}
+                                                                style={{ width: 180, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+                                                        ) : p.title}
+                                                    </td>
+                                                    <td>
+                                                        {editProductId === p.id ? (
+                                                            <input type="number" defaultValue={p.price} step="0.01"
+                                                                onChange={e => setEditProductData({ ...editProductData, price: parseFloat(e.target.value) })}
+                                                                style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+                                                        ) : <span style={{ fontWeight: 600 }}>₱{p.price.toFixed(2)}</span>}
+                                                    </td>
+                                                    <td>
+                                                        {editProductId === p.id ? (
+                                                            <input type="number" defaultValue={p.stock}
+                                                                onChange={e => setEditProductData({ ...editProductData, stock: parseInt(e.target.value) })}
+                                                                style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
+                                                        ) : <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>}
+                                                    </td>
+                                                    <td>
+                                                        {editProductId === p.id ? (
+                                                            <select defaultValue={p.is_active.toString()}
+                                                                onChange={e => setEditProductData({ ...editProductData, is_active: e.target.value === 'true' })}
+                                                                style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>
+                                                                <option value="true">Active</option>
+                                                                <option value="false">Inactive</option>
+                                                            </select>
+                                                        ) : (
+                                                            <span style={{
+                                                                padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
+                                                                background: p.is_active ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                                                                color: p.is_active ? '#10b981' : '#ef4444',
+                                                            }}>
+                                                                {p.is_active ? 'Active' : 'Inactive'}
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                        {new Date(p.created_at).toLocaleDateString()}
+                                                    </td>
+                                                    <td>
+                                                        {editProductId === p.id ? (
+                                                            <div style={{ display: 'flex', gap: 4 }}>
+                                                                <button className="btn btn-success btn-sm" onClick={() => handleUpdateProduct(p.id)} style={{ padding: '4px 8px' }}>✓</button>
+                                                                <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(null); setEditProductData({}); }} style={{ padding: '4px 8px' }}>✕</button>
+                                                            </div>
+                                                        ) : (
+                                                            <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
+                                                                style={{ fontSize: '0.75rem' }}>Edit</button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ))}
+                        {products.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No products found</p></div>}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ===== REPORTS TAB ===== */}
                 {activeTab === 'reports' && (
@@ -1149,29 +1777,6 @@ export default function AdminDashboard() {
                                             );
                                         })}
                                     </div>
-                                )}
-
-                                {/* SVF History */}
-                                {userDetail.svf_history && userDetail.svf_history.length > 0 && (
-                                    <>
-                                        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12, marginTop: 24 }}>🏦 SVF History</h3>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                            {userDetail.svf_history.slice(0, 10).map(s => (
-                                                <div key={s.id} style={{
-                                                    display: 'flex', justifyContent: 'space-between', padding: '8px 12px',
-                                                    borderRadius: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
-                                                    fontSize: '0.8rem',
-                                                }}>
-                                                    <span style={{
-                                                        color: s.type === 'deposit' ? '#10b981' : '#ef4444',
-                                                        fontWeight: 600, textTransform: 'capitalize',
-                                                    }}>{s.type}</span>
-                                                    <span style={{ fontWeight: 600 }}>₱{parseFloat(s.amount).toFixed(2)}</span>
-                                                    <span style={{ color: 'var(--text-muted)' }}>{new Date(s.created_at).toLocaleDateString()}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </>
                                 )}
                             </>
                         ) : (

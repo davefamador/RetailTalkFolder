@@ -11,8 +11,10 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     full_name TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin', 'delivery')),
+    role TEXT NOT NULL DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin', 'delivery', 'manager')),
     is_banned BOOLEAN DEFAULT FALSE,
+    department_id UUID,
+    manager_id UUID,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -66,7 +68,8 @@ CREATE TABLE IF NOT EXISTS product_transactions (
     admin_commission DECIMAL(12,2) NOT NULL DEFAULT 0,
     delivery_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
     delivery_user_id UUID REFERENCES users(id),
-    status TEXT NOT NULL DEFAULT 'ondeliver' CHECK (status IN ('ondeliver', 'delivered', 'undelivered', 'cancelled')),
+    purchase_type TEXT NOT NULL DEFAULT 'delivery' CHECK (purchase_type IN ('walkin', 'delivery')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'cancelled', 'pending_walkin', 'inwork', 'ready', 'picked_up', 'completed')),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -88,7 +91,48 @@ CREATE TABLE IF NOT EXISTS stored_value (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. User Prompts (for search AI Insights & dynamically collected queries)
+-- 9. Departments (mall sections managed by managers)
+CREATE TABLE IF NOT EXISTS departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT UNIQUE NOT NULL,
+    description TEXT DEFAULT '',
+    manager_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add foreign keys for users.department_id and users.manager_id
+ALTER TABLE users ADD CONSTRAINT fk_users_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL;
+ALTER TABLE users ADD CONSTRAINT fk_users_manager FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL;
+
+-- 10. Restock Requests (Staff → Manager approval → Deliveryman fulfillment)
+CREATE TABLE IF NOT EXISTS restock_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    staff_id UUID NOT NULL REFERENCES users(id),
+    department_id UUID NOT NULL REFERENCES departments(id),
+    product_id UUID NOT NULL REFERENCES products(id),
+    requested_quantity INT NOT NULL CHECK (requested_quantity > 0),
+    approved_quantity INT,
+    notes TEXT DEFAULT '',
+    manager_notes TEXT DEFAULT '',
+    delivery_notes TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending_manager'
+        CHECK (status IN (
+            'pending_manager',
+            'approved_manager',
+            'rejected_manager',
+            'accepted_delivery',
+            'in_transit',
+            'delivered',
+            'cancelled'
+        )),
+    delivery_user_id UUID REFERENCES users(id),
+    manager_approved_at TIMESTAMPTZ,
+    delivery_accepted_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. User Prompts (for search AI Insights & dynamically collected queries)
 CREATE TABLE IF NOT EXISTS user_prompts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID,
@@ -111,3 +155,12 @@ CREATE INDEX IF NOT EXISTS idx_product_transactions_status ON product_transactio
 CREATE INDEX IF NOT EXISTS idx_product_transactions_delivery ON product_transactions(delivery_user_id);
 CREATE INDEX IF NOT EXISTS idx_cart_items_buyer ON cart_items(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_earnings_user ON delivery_earnings(delivery_user_id);
+
+CREATE INDEX IF NOT EXISTS idx_departments_manager ON departments(manager_id);
+CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
+CREATE INDEX IF NOT EXISTS idx_users_manager ON users(manager_id);
+CREATE INDEX IF NOT EXISTS idx_restock_requests_staff ON restock_requests(staff_id);
+CREATE INDEX IF NOT EXISTS idx_restock_requests_department ON restock_requests(department_id);
+CREATE INDEX IF NOT EXISTS idx_restock_requests_status ON restock_requests(status);
+CREATE INDEX IF NOT EXISTS idx_restock_requests_delivery ON restock_requests(delivery_user_id);
+CREATE INDEX IF NOT EXISTS idx_product_transactions_purchase_type ON product_transactions(purchase_type);
