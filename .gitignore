@@ -20,13 +20,9 @@ env/
 # ========================
 # Models & Checkpoints (large binary files)
 # ========================
-ranking/model/
-ranking/model_checkpoints/
+
 checkpoints/
-Intent Slot Training/models/
 implementation plan/
-classification_identification/quick_train/models/
-classification_identification/text_representations/
 *.safetensors
 *.bin
 *.pt
