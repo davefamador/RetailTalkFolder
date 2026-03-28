@@ -1,6 +1,6 @@
 'use client';
 
-import { getTransactionHistory, getStoredUser, buyerConfirmWalkin } from '../../lib/api';
+import { getTransactionHistory, getStoredUser, buyerConfirmWalkin, cancelOrder } from '../../lib/api';
 import { useState, useEffect } from 'react';
 
 export default function OrdersPage() {
@@ -10,6 +10,7 @@ export default function OrdersPage() {
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [orderFilter, setOrderFilter] = useState('all');
     const [confirming, setConfirming] = useState(false);
+    const [cancelling, setCancelling] = useState(null);
     const [msg, setMsg] = useState({ type: '', text: '' });
 
     useEffect(() => {
@@ -30,6 +31,37 @@ export default function OrdersPage() {
             setMsg({ type: 'error', text: err.message || 'Failed to verify pickup' });
         }
         finally { setConfirming(false); }
+    };
+
+    const handleCancelOrder = async (txn) => {
+        const walkin = isWalkin(txn);
+        const hasFee = !walkin && txn.status === 'ondeliver';
+        const confirmMsg = hasFee
+            ? 'Are you sure you want to cancel this order? A \u20B150 cancellation fee will be deducted from your refund.'
+            : 'Are you sure you want to cancel this order? You will receive a full refund.';
+        if (!window.confirm(confirmMsg)) return;
+        setCancelling(txn.id);
+        setMsg({ type: '', text: '' });
+        try {
+            const res = await cancelOrder(txn.id);
+            const parts = [];
+            if (res.message) parts.push(res.message);
+            if (res.refund_amount != null) parts.push(`Refund: \u20B1${res.refund_amount.toFixed(2)}`);
+            if (res.cancellation_fee) parts.push(`Fee: \u20B1${res.cancellation_fee.toFixed(2)}`);
+            setMsg({ type: 'success', text: parts.join(' | ') || 'Order cancelled.' });
+            setSelectedOrder(null);
+            await loadData();
+        } catch (err) {
+            setMsg({ type: 'error', text: err.message || 'Failed to cancel order' });
+        } finally {
+            setCancelling(null);
+        }
+    };
+
+    const canCancelOrder = (t) => {
+        const walkin = isWalkin(t);
+        if (walkin) return t.status === 'pending_walkin';
+        return ['pending', 'approved', 'ondeliver'].includes(t.status);
     };
 
     const loadData = async () => {
@@ -80,15 +112,18 @@ export default function OrdersPage() {
     const renderOrderCard = (t) => {
         const sInfo = statusMap[t.status] || { label: t.status, color: '#94a3b8', progress: 0 };
         const productImage = t.product_images && t.product_images.length > 0 ? t.product_images[0] : null;
+        const walkin = isWalkin(t);
+        const isReadyForPickup = walkin && t.status === 'ready';
 
         return (
             <div key={t.id} onClick={() => setSelectedOrder(t)} style={{
                 display: 'flex', gap: 12, padding: 14, borderRadius: 12, cursor: 'pointer',
-                border: '1px solid var(--border-color)', background: 'var(--card-bg)',
+                border: isReadyForPickup ? '1px solid rgba(16,185,129,0.4)' : '1px solid var(--border-color)',
+                background: isReadyForPickup ? 'rgba(16,185,129,0.04)' : 'var(--card-bg)',
                 transition: 'border-color 0.2s, transform 0.15s',
             }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = isReadyForPickup ? 'rgba(16,185,129,0.6)' : 'var(--accent-primary)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = isReadyForPickup ? 'rgba(16,185,129,0.4)' : 'var(--border-color)'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
                 <div style={{
                     width: 56, height: 56, borderRadius: 10, overflow: 'hidden',
@@ -112,12 +147,21 @@ export default function OrdersPage() {
                                 {t.seller_name || 'Seller'} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
                             </p>
                         </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                            <span style={{
-                                padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
-                                background: `${sInfo.color}20`, color: sInfo.color,
-                            }}>{sInfo.label}</span>
-                            <p style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: 2 }}>₱{t.amount.toFixed(2)}</p>
+                        <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                {/* Walk-in / Delivery type badge */}
+                                <span style={{
+                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.68rem', fontWeight: 600,
+                                    background: walkin ? 'rgba(251,191,36,0.12)' : 'rgba(59,130,246,0.12)',
+                                    color: walkin ? '#f59e0b' : '#3b82f6',
+                                }}>{walkin ? '🛒 Walk-in' : '🚚 Delivery'}</span>
+                                {/* Status badge */}
+                                <span style={{
+                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
+                                    background: `${sInfo.color}20`, color: sInfo.color,
+                                }}>{sInfo.label}</span>
+                            </div>
+                            <p style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: 0 }}>₱{t.amount.toFixed(2)}</p>
                         </div>
                     </div>
                     <div style={{ height: 3, borderRadius: 2, background: 'var(--border-color)' }}>
@@ -131,21 +175,62 @@ export default function OrdersPage() {
                             🚚 {t.delivery_user_name}
                         </p>
                     )}
-                    {t.status === 'ready' && isWalkin(t) && (
+                </div>
+
+                {/* Confirm Pickup button on the right side for ready walk-in orders */}
+                {isReadyForPickup && (
+                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                         <button
                             onClick={e => { e.stopPropagation(); handleConfirmWalkin(t.id); }}
                             disabled={confirming}
                             style={{
-                                marginTop: 8, padding: '8px 18px', borderRadius: 8, border: 'none',
-                                background: '#10b981', color: '#fff', fontWeight: 700, fontSize: '0.8rem',
-                                cursor: confirming ? 'not-allowed' : 'pointer', opacity: confirming ? 0.6 : 1,
+                                padding: '10px 18px', borderRadius: 10, border: 'none',
+                                background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff',
+                                fontWeight: 700, fontSize: '0.8rem',
+                                cursor: confirming ? 'not-allowed' : 'pointer',
+                                opacity: confirming ? 0.6 : 1,
                                 transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
+                                whiteSpace: 'nowrap',
+                                boxShadow: '0 2px 8px rgba(16,185,129,0.3)',
                             }}
+                            onMouseEnter={e => { if (!confirming) e.currentTarget.style.transform = 'scale(1.05)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
                         >
-                            {confirming ? 'Confirming...' : 'Verify Pickup'}
+                            {confirming ? 'Confirming...' : '✅ Confirm Pickup'}
                         </button>
-                    )}
-                </div>
+                    </div>
+                )}
+
+                {/* Cancel Order button */}
+                {canCancelOrder(t) && (
+                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                        <button
+                            onClick={e => { e.stopPropagation(); handleCancelOrder(t); }}
+                            disabled={cancelling === t.id}
+                            style={{
+                                padding: '8px 14px', borderRadius: 10, border: 'none',
+                                background: (!isWalkin(t) && t.status === 'ondeliver')
+                                    ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                                    : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                                color: '#fff',
+                                fontWeight: 700, fontSize: '0.75rem',
+                                cursor: cancelling === t.id ? 'not-allowed' : 'pointer',
+                                opacity: cancelling === t.id ? 0.6 : 1,
+                                transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
+                                whiteSpace: 'nowrap',
+                                boxShadow: (!isWalkin(t) && t.status === 'ondeliver')
+                                    ? '0 2px 8px rgba(245,158,11,0.3)'
+                                    : '0 2px 8px rgba(239,68,68,0.3)',
+                            }}
+                            onMouseEnter={e => { if (cancelling !== t.id) e.currentTarget.style.transform = 'scale(1.05)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+                        >
+                            {cancelling === t.id ? 'Cancelling...'
+                                : (!isWalkin(t) && t.status === 'ondeliver') ? 'Cancel Order (\u20B150 fee)'
+                                : 'Cancel Order'}
+                        </button>
+                    </div>
+                )}
             </div>
         );
     };

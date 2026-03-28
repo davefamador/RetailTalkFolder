@@ -1,6 +1,7 @@
 """
 Transaction routes — buy products, view transaction history, manage balance.
-Revenue split: 90% to seller, 10% admin commission.
+Buyer's money is held on purchase (pending). On successful delivery/completion,
+the product amount is credited to the admin. Buyer can cancel with conditions.
 Supports quantity (buyer selects how many to buy).
 """
 
@@ -12,8 +13,7 @@ from routes.auth import get_current_user
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
-SELLER_SHARE = 0.90
-ADMIN_SHARE = 0.10
+DELIVERY_FEE = 90.00
 
 
 # --- Request/Response Models ---
@@ -73,7 +73,7 @@ class SVFEntry(BaseModel):
 @router.post("/buy", response_model=TransactionResponse)
 async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_user)):
     """
-    Buy a product. Revenue split: 90% seller, 10% admin commission.
+    Buy a product. 100% of product revenue goes to the department balance.
     Buyer can select quantity. Stock is decremented.
     """
     sb = get_supabase()
@@ -151,37 +151,15 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
             detail=f"Insufficient balance. You have PHP {buyer_balance:.2f}, total cost is PHP {grand_total:.2f}",
         )
 
-    # 6. Calculate revenue split (on product cost only, not delivery fee)
-    seller_amount = round(total_price * SELLER_SHARE, 2)
-    admin_commission = round(total_price * ADMIN_SHARE, 2)
+    # 6. Amounts (no commission split — admin gets paid on successful completion)
+    seller_amount = total_price
+    admin_commission = 0.0
 
-    # 7. Deduct from buyer (product cost + delivery fee)
+    # 7. Deduct from buyer (money is held until transaction completes)
     new_buyer_balance = buyer_balance - grand_total
     sb.table("user_balances").update({"balance": new_buyer_balance}).eq("user_id", user_id).execute()
 
-    # 7b. Record SVF withdrawal (purchase reduces balance)
-    sb.table("stored_value").insert({
-        "user_id": user_id,
-        "transaction_type": "withdrawal",
-        "amount": grand_total,
-    }).execute()
-
-    # 8. Add 90% to seller
-    seller_balance_result = sb.table("user_balances").select("balance").eq("user_id", product["seller_id"]).execute()
-    if seller_balance_result.data:
-        new_seller_balance = float(seller_balance_result.data[0]["balance"]) + seller_amount
-        sb.table("user_balances").update({"balance": new_seller_balance}).eq("user_id", product["seller_id"]).execute()
-
-    # 9. Add 10% to admin balance
-    admin_result = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
-    if admin_result.data:
-        admin_id = admin_result.data[0]["id"]
-        admin_bal_result = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
-        if admin_bal_result.data:
-            new_admin_bal = float(admin_bal_result.data[0]["balance"]) + admin_commission
-            sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
-
-    # 10. Decrement stock
+    # 8. Decrement stock
     new_stock = current_stock - req.quantity
     sb.table("products").update({"stock": new_stock}).eq("id", req.product_id).execute()
 
@@ -532,6 +510,22 @@ async def update_walkin_order_status(
 
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
 
+    # On completion, credit admin with the product amount
+    if req.status == "completed":
+        txn_amount = float(txn.data[0].get("amount", 0))
+        sb.table("admin_earnings").insert({
+            "transaction_id": transaction_id,
+            "amount": txn_amount,
+        }).execute()
+        # Credit admin's balance
+        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
+        if admin_user.data:
+            admin_id = admin_user.data[0]["id"]
+            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+            if admin_bal.data:
+                new_admin_bal = float(admin_bal.data[0]["balance"]) + txn_amount
+                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
+
     return {"message": f"Walk-in order updated to '{req.status}'"}
 
 
@@ -681,6 +675,22 @@ async def manager_update_walkin_order_status(
         )
 
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
+
+    # On completion, credit admin with the product amount
+    if req.status == "completed":
+        txn_amount = float(txn.data[0].get("amount", 0))
+        sb.table("admin_earnings").insert({
+            "transaction_id": transaction_id,
+            "amount": txn_amount,
+        }).execute()
+        # Credit admin's balance
+        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
+        if admin_user.data:
+            admin_id = admin_user.data[0]["id"]
+            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+            if admin_bal.data:
+                new_admin_bal = float(admin_bal.data[0]["balance"]) + txn_amount
+                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
 
     return {"message": f"Walk-in order updated to '{req.status}'"}
 
@@ -926,3 +936,84 @@ async def manager_update_delivery_order_status(
     sb.table("product_transactions").update({"status": "approved"}).eq("id", transaction_id).execute()
 
     return {"message": "Order approved for delivery pickup"}
+
+
+# --- Buyer Order Cancellation ---
+
+CANCELLATION_FEE = 50.00
+
+
+@router.put("/buyer/cancel/{transaction_id}")
+async def buyer_cancel_order(
+    transaction_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Buyer cancels an order.
+    - Delivery: free cancel if pending/approved. 50 PHP fee if ondeliver (fee goes to delivery user).
+    - Walk-in: free cancel if pending_walkin. Cannot cancel if inwork/ready or later.
+    """
+    sb = get_supabase()
+    user_id = current_user["sub"]
+
+    txn = sb.table("product_transactions").select("*").eq(
+        "id", transaction_id
+    ).eq("buyer_id", user_id).execute()
+
+    if not txn.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order = txn.data[0]
+    status = order["status"]
+    purchase_type = order.get("purchase_type", "delivery")
+    amount = float(order.get("amount", 0))
+    delivery_fee = float(order.get("delivery_fee", 0))
+    grand_total = amount + delivery_fee
+
+    # Determine if cancellation is allowed and calculate refund
+    if purchase_type == "walkin":
+        if status != "pending_walkin":
+            raise HTTPException(status_code=400, detail="Walk-in orders can only be cancelled before preparation starts.")
+        refund_amount = grand_total
+        fee_to_delivery = 0.0
+    elif purchase_type == "delivery":
+        if status in ("pending", "approved"):
+            refund_amount = grand_total
+            fee_to_delivery = 0.0
+        elif status == "ondeliver":
+            fee_to_delivery = CANCELLATION_FEE
+            refund_amount = grand_total - fee_to_delivery
+        else:
+            raise HTTPException(status_code=400, detail=f"Cannot cancel order with status '{status}'.")
+    else:
+        raise HTTPException(status_code=400, detail="Unknown purchase type.")
+
+    # 1. Cancel the transaction
+    sb.table("product_transactions").update({"status": "cancelled"}).eq("id", transaction_id).execute()
+
+    # 2. Refund buyer
+    if refund_amount > 0:
+        buyer_bal = sb.table("user_balances").select("balance").eq("user_id", user_id).execute()
+        if buyer_bal.data:
+            new_bal = float(buyer_bal.data[0]["balance"]) + refund_amount
+            sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user_id).execute()
+
+    # 3. Pay cancellation fee to delivery user (if mid-delivery cancel)
+    if fee_to_delivery > 0 and order.get("delivery_user_id"):
+        del_bal = sb.table("user_balances").select("balance").eq("user_id", order["delivery_user_id"]).execute()
+        if del_bal.data:
+            new_del_bal = float(del_bal.data[0]["balance"]) + fee_to_delivery
+            sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", order["delivery_user_id"]).execute()
+
+    # 4. Restore product stock
+    prod = sb.table("products").select("stock").eq("id", order["product_id"]).execute()
+    if prod.data:
+        new_stock = int(prod.data[0]["stock"]) + int(order.get("quantity", 1))
+        sb.table("products").update({"stock": new_stock}).eq("id", order["product_id"]).execute()
+
+    fee_msg = f" A cancellation fee of PHP {fee_to_delivery:.2f} was deducted." if fee_to_delivery > 0 else ""
+    return {
+        "message": f"Order cancelled successfully. PHP {refund_amount:.2f} refunded to your wallet.{fee_msg}",
+        "refund_amount": refund_amount,
+        "cancellation_fee": fee_to_delivery,
+    }

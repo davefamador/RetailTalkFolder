@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getMyProducts, getTransactionHistory, getStoredUser } from '../../../lib/api';
+import { getMyProducts, getTransactionHistory, getStoredUser, getSellerWishlistReport } from '../../../lib/api';
 
 /**
  * SellerReportspage.js — Seller Insights & Reports Dashboard
  *
- * Financials: GMV, Net Revenue, AOV, Revenue Trend (daily/weekly/monthly line chart)
+ * Financials: Total Revenue, AOV, Revenue Trend (daily/weekly/monthly line chart)
  *             + Comparison cards (today vs yesterday, this week vs last, this month vs last)
  * Operations: Stock Levels, Top-Selling, Tracking, Fulfillment, Incoming Orders
  */
@@ -14,6 +14,7 @@ import { getMyProducts, getTransactionHistory, getStoredUser } from '../../../li
 export default function SellerReportsPage() {
     const [products, setProducts] = useState([]);
     const [transactions, setTransactions] = useState([]);
+    const [wishlistReport, setWishlistReport] = useState(null);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('financials');
     const [trendPeriod, setTrendPeriod] = useState('daily');
@@ -26,9 +27,14 @@ export default function SellerReportsPage() {
 
     const loadData = async () => {
         try {
-            const [prods, txns] = await Promise.all([getMyProducts(), getTransactionHistory()]);
+            const [prods, txns, wlReport] = await Promise.all([
+                getMyProducts(),
+                getTransactionHistory(),
+                getSellerWishlistReport().catch(() => null),
+            ]);
             setProducts(prods);
             setTransactions(txns);
+            setWishlistReport(wlReport);
         } catch (err) { console.error(err); }
         finally { setLoading(false); }
     };
@@ -36,8 +42,6 @@ export default function SellerReportsPage() {
     // ── Compute Financial Metrics ──────────────────────────
     const mySellerTxns = transactions.filter(t => t.seller_id === getStoredUser()?.id);
     const gmv = mySellerTxns.reduce((sum, t) => sum + t.amount, 0);
-    const netRevenue = mySellerTxns.reduce((sum, t) => sum + t.seller_amount, 0);
-    const totalCommission = mySellerTxns.reduce((sum, t) => sum + t.admin_commission, 0);
     const aov = mySellerTxns.length > 0 ? gmv / mySellerTxns.length : 0;
     const totalOrders = mySellerTxns.length;
 
@@ -56,7 +60,7 @@ export default function SellerReportsPage() {
             } else {
                 key = d.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' });
             }
-            data[key] = (data[key] || 0) + t.seller_amount;
+            data[key] = (data[key] || 0) + t.amount;
         });
         const maxEntries = period === 'daily' ? 14 : period === 'weekly' ? 8 : 6;
         return Object.entries(data).slice(-maxEntries);
@@ -70,8 +74,8 @@ export default function SellerReportsPage() {
     const todayStr = now.toDateString();
     const yesterdayStr = new Date(now.getTime() - 86400000).toDateString();
 
-    const todaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === todayStr).reduce((s, t) => s + t.seller_amount, 0);
-    const yesterdaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === yesterdayStr).reduce((s, t) => s + t.seller_amount, 0);
+    const todaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === todayStr).reduce((s, t) => s + t.amount, 0);
+    const yesterdaySales = mySellerTxns.filter(t => new Date(t.created_at).toDateString() === yesterdayStr).reduce((s, t) => s + t.amount, 0);
 
     const getWeekNumber = (d) => {
         const oneJan = new Date(d.getFullYear(), 0, 1);
@@ -79,12 +83,12 @@ export default function SellerReportsPage() {
     };
     const thisWeek = getWeekNumber(now);
     const lastWeek = thisWeek - 1;
-    const thisWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === thisWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
-    const lastWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === lastWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+    const thisWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === thisWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.amount, 0);
+    const lastWeekSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return getWeekNumber(d) === lastWeek && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.amount, 0);
 
-    const thisMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+    const thisMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, t) => s + t.amount, 0);
     const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((s, t) => s + t.seller_amount, 0);
+    const lastMonthSales = mySellerTxns.filter(t => { const d = new Date(t.created_at); return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((s, t) => s + t.amount, 0);
 
     const pctChange = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : (((curr - prev) / prev) * 100);
 
@@ -119,6 +123,7 @@ export default function SellerReportsPage() {
     const tabs = [
         { key: 'financials', label: '💰 Financials' },
         { key: 'operations', label: '📦 Operations' },
+        { key: 'wishlist', label: '❤️ Wishlist' },
     ];
 
     return (
@@ -152,10 +157,8 @@ export default function SellerReportsPage() {
                 <div>
                     {/* Metric Cards */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-                        <MetricCard label="Gross Merchandise Value" value={`₱${gmv.toFixed(2)}`} subtitle="Total sales including commissions" color="#10b981" icon="💎" />
-                        <MetricCard label="Net Revenue (90%)" value={`₱${netRevenue.toFixed(2)}`} subtitle="Your earnings after 10% commission" color="#6366f1" icon="💵" />
+                        <MetricCard label="Total Revenue" value={`₱${gmv.toFixed(2)}`} subtitle="Total sales revenue" color="#10b981" icon="💎" />
                         <MetricCard label="Average Order Value" value={`₱${aov.toFixed(2)}`} subtitle={`Across ${totalOrders} order${totalOrders !== 1 ? 's' : ''}`} color="#f59e0b" icon="📊" />
-                        <MetricCard label="Platform Commission" value={`₱${totalCommission.toFixed(2)}`} subtitle="10% of GMV retained by RetailTalk" color="#ef4444" icon="🏦" />
                     </div>
 
                     {/* Comparison Cards: Today vs Yesterday, Week vs Last Week, Month vs Last Month */}
@@ -243,8 +246,6 @@ export default function SellerReportsPage() {
                                         <tr style={{ borderBottom: '2px solid var(--border-color)' }}>
                                             <th style={thStyle}>Product</th>
                                             <th style={thStyle}>Amount</th>
-                                            <th style={thStyle}>Your Share</th>
-                                            <th style={thStyle}>Commission</th>
                                             <th style={thStyle}>Date</th>
                                         </tr>
                                     </thead>
@@ -252,9 +253,7 @@ export default function SellerReportsPage() {
                                         {mySellerTxns.slice(0, 10).map(t => (
                                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={tdStyle}>{t.product_title || 'Unknown'}</td>
-                                                <td style={tdStyle}>₱{t.amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>₱{t.seller_amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#ef4444' }}>₱{t.admin_commission.toFixed(2)}</td>
+                                                <td style={{ ...tdStyle, fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
                                                 <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
                                                     {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
                                                 </td>
@@ -367,7 +366,6 @@ export default function SellerReportsPage() {
                                             <th style={thStyle}>Product</th>
                                             <th style={thStyle}>Qty</th>
                                             <th style={thStyle}>Amount</th>
-                                            <th style={thStyle}>Your Share</th>
                                             <th style={thStyle}>Status</th>
                                             <th style={thStyle}>Date</th>
                                         </tr>
@@ -377,8 +375,7 @@ export default function SellerReportsPage() {
                                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={tdStyle}>{t.product_title || 'Unknown'}</td>
                                                 <td style={tdStyle}>{t.quantity || 1}</td>
-                                                <td style={tdStyle}>₱{t.amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>₱{t.seller_amount.toFixed(2)}</td>
+                                                <td style={{ ...tdStyle, fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
                                                 <td style={tdStyle}>
                                                     <span style={{
                                                         padding: '2px 8px', borderRadius: 10, fontSize: '0.75rem',
@@ -394,6 +391,91 @@ export default function SellerReportsPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ═══ WISHLIST ANALYTICS ═══ */}
+            {activeTab === 'wishlist' && (
+                <div>
+                    {/* Wishlist Metric Cards */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                        <MetricCard
+                            label="Total Wishlists"
+                            value={wishlistReport?.total_wishlists ?? 0}
+                            subtitle="Times your products were wishlisted"
+                            color="#ef4444" icon="❤️"
+                        />
+                        <MetricCard
+                            label="Total Products"
+                            value={wishlistReport?.total_products ?? 0}
+                            subtitle="Products in your store"
+                            color="#6366f1" icon="📦"
+                        />
+                        <MetricCard
+                            label="Wishlists / Product"
+                            value={wishlistReport?.wishlist_per_product?.toFixed(2) ?? '0.00'}
+                            subtitle="Average wishlists per product"
+                            color="#f59e0b" icon="📊"
+                        />
+                    </div>
+
+                    {/* Per-Product Wishlist Breakdown */}
+                    <div className="card">
+                        <h3 style={{ marginBottom: 16 }}>❤️ Wishlist by Product</h3>
+                        {(!wishlistReport?.products || wishlistReport.products.length === 0) ? (
+                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No wishlist data yet</p>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                {wishlistReport.products.map((prod, i) => {
+                                    const maxCount = wishlistReport.products[0]?.wishlist_count || 1;
+                                    return (
+                                        <div key={prod.product_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                            {/* Rank badge */}
+                                            <span style={{
+                                                width: 28, height: 28, borderRadius: '50%',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                fontSize: '0.8rem', fontWeight: 700,
+                                                background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--border-color)',
+                                                color: i < 3 ? '#fff' : 'var(--text-secondary)',
+                                            }}>{i + 1}</span>
+
+                                            {/* Product image */}
+                                            {prod.image_url && (
+                                                <div style={{
+                                                    width: 36, height: 36, borderRadius: 8, overflow: 'hidden',
+                                                    border: '1px solid var(--border-color)', flexShrink: 0,
+                                                }}>
+                                                    <img src={prod.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                </div>
+                                            )}
+
+                                            {/* Product info + bar */}
+                                            <div style={{ flex: 1 }}>
+                                                <p style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9rem' }}>
+                                                    {prod.title || 'Untitled'}
+                                                </p>
+                                                <div style={{ height: 6, borderRadius: 3, background: 'var(--border-color)', overflow: 'hidden' }}>
+                                                    <div style={{
+                                                        height: '100%', borderRadius: 3,
+                                                        width: `${maxCount > 0 ? (prod.wishlist_count / maxCount) * 100 : 0}%`,
+                                                        background: 'linear-gradient(90deg, #ef4444, #f59e0b)',
+                                                        transition: 'width 0.5s ease',
+                                                    }} />
+                                                </div>
+                                            </div>
+
+                                            {/* Count */}
+                                            <div style={{ textAlign: 'right', minWidth: 60 }}>
+                                                <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                                                    {prod.wishlist_count} ❤️
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

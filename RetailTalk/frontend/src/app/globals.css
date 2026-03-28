@@ -39,6 +39,42 @@
   --theme-toggle-bg: rgba(255, 255, 255, 0.08);
 }
 
+/* --- LIGHT MODE --- */
+[data-theme="light"] {
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-glass: rgba(255, 255, 255, 0.8);
+
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+
+  --accent-primary: #6c63ff;
+  --accent-primary-hover: #5a52d5;
+  --accent-secondary: #059669;
+  --accent-danger: #dc2626;
+  --accent-warning: #d97706;
+  --accent-success: #059669;
+
+  --gradient-primary: linear-gradient(135deg, #6c63ff 0%, #3b82f6 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+
+  --label-exact: #059669;
+  --label-substitute: #6c63ff;
+  --label-complement: #d97706;
+  --label-irrelevant: #dc2626;
+
+  --border-color: #e2e8f0;
+  --glass-border: rgba(0, 0, 0, 0.05);
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-glow: 0 10px 30px rgba(108, 99, 255, 0.15);
+  --theme-toggle-bg: rgba(0, 0, 0, 0.05);
+}
+
 
 
 * {

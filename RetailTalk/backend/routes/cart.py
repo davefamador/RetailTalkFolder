@@ -13,8 +13,6 @@ from routes.auth import get_current_user
 router = APIRouter(prefix="/cart", tags=["Cart"])
 
 DELIVERY_FEE_PER_DEPARTMENT = 90.00
-SELLER_SHARE = 0.90
-ADMIN_SHARE = 0.10
 
 
 class AddToCartRequest(BaseModel):
@@ -323,13 +321,14 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
             detail=f"Insufficient balance. You have PHP {buyer_balance:.2f}, total is PHP {grand_total:.2f}"
         )
 
-    # 6. Process each item
+    # 6. Process each item — create transactions and decrement stock
     transaction_ids = []
+
     for item in items:
         amount = item["subtotal"]
         d_fee = delivery_fee_per_item.get(item["product_id"], 0)
-        seller_amount = round(amount * SELLER_SHARE, 2)
-        admin_commission = round(amount * ADMIN_SHARE, 2)
+        seller_amount = amount
+        admin_commission = 0.0
 
         # Create transaction
         txn_status = "pending_walkin" if req.purchase_type == "walkin" else "pending"
@@ -356,34 +355,11 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
             new_stock = int(prod_result.data[0]["stock"]) - item["quantity"]
             sb.table("products").update({"stock": new_stock}).eq("id", item["product_id"]).execute()
 
-        # Add seller earnings
-        seller_bal = sb.table("user_balances").select("balance").eq("user_id", item["seller_id"]).execute()
-        if seller_bal.data:
-            new_seller_bal = float(seller_bal.data[0]["balance"]) + seller_amount
-            sb.table("user_balances").update({"balance": new_seller_bal}).eq("user_id", item["seller_id"]).execute()
-
-    # 7. Deduct from buyer
+    # 7. Deduct from buyer (money held until transaction completes)
     new_balance = buyer_balance - grand_total
     sb.table("user_balances").update({"balance": new_balance}).eq("user_id", user_id).execute()
 
-    # Record SVF withdrawal
-    sb.table("stored_value").insert({
-        "user_id": user_id,
-        "transaction_type": "withdrawal",
-        "amount": grand_total,
-    }).execute()
-
-    # 8. Admin commission
-    admin_result = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
-    if admin_result.data:
-        admin_id = admin_result.data[0]["id"]
-        admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
-        if admin_bal.data:
-            total_admin_comm = sum(round(i["subtotal"] * ADMIN_SHARE, 2) for i in items)
-            new_admin_bal = float(admin_bal.data[0]["balance"]) + total_admin_comm
-            sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
-
-    # 9. Clear cart
+    # 8. Clear cart
     sb.table("cart_items").delete().eq("buyer_id", user_id).execute()
 
     return {

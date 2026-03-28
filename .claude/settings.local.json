@@ -12,7 +12,8 @@
       "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*cleaned*)",
       "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*.parquet)",
       "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/classification_identification/custom_esci/\"*.parquet)",
-      "Bash(find /c/Moi/Thesis/Code/RetailTalkFolder -name *.bin -o -name *.pt)"
+      "Bash(find /c/Moi/Thesis/Code/RetailTalkFolder -name *.bin -o -name *.pt)",
+      "mcp__claude_ai_Canva__generate-design"
     ],
     "deny": [],
     "ask": []

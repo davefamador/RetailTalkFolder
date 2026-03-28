@@ -42,19 +42,13 @@ class BanRequest(BaseModel):
     is_banned: bool
 
 
-class SetBalanceRequest(BaseModel):
-    balance: float
-
-
 class DashboardResponse(BaseModel):
     total_users: int
     total_products: int
     total_orders: int
     total_revenue: float
     total_sales_volume: float
-    total_svf_deposits: float = 0
-    total_svf_withdrawals: float = 0
-    net_svf_balance: float = 0
+    total_admin_earnings: float = 0
     total_buyers: int = 0
     total_departments: int = 0
     total_managers: int = 0
@@ -137,21 +131,13 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
 
     users = sb.table("users").select("id", count="exact").execute()
     products = sb.table("products").select("id", count="exact").eq("is_active", True).execute()
-    txns = sb.table("product_transactions").select("amount, admin_commission").eq("status", "completed").execute()
+    txns = sb.table("product_transactions").select("amount").in_("status", ["completed", "delivered"]).execute()
 
-    total_revenue = sum(float(t.get("admin_commission", 0)) for t in txns.data) if txns.data else 0
     total_volume = sum(float(t.get("amount", 0)) for t in txns.data) if txns.data else 0
 
-    # SVF summary
-    svf_data = sb.table("stored_value").select("transaction_type, amount").execute()
-    total_deposits = 0
-    total_withdrawals = 0
-    if svf_data.data:
-        for sv in svf_data.data:
-            if sv["transaction_type"] == "deposit":
-                total_deposits += float(sv["amount"])
-            elif sv["transaction_type"] == "withdrawal":
-                total_withdrawals += float(sv["amount"])
+    # Admin earnings = total credited to admin from successful transactions
+    earnings = sb.table("admin_earnings").select("amount").execute()
+    total_admin_earnings = sum(float(e["amount"]) for e in (earnings.data or []))
 
     # Role counts
     buyers_count = sb.table("users").select("id", count="exact").eq("role", "buyer").execute()
@@ -163,11 +149,9 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         total_users=users.count or 0,
         total_products=products.count or 0,
         total_orders=len(txns.data) if txns.data else 0,
-        total_revenue=round(total_revenue, 2),
+        total_revenue=round(total_volume, 2),
         total_sales_volume=round(total_volume, 2),
-        total_svf_deposits=round(total_deposits, 2),
-        total_svf_withdrawals=round(total_withdrawals, 2),
-        net_svf_balance=round(total_deposits - total_withdrawals, 2),
+        total_admin_earnings=round(total_admin_earnings, 2),
         total_buyers=buyers_count.count or 0,
         total_departments=departments_count.count or 0,
         total_managers=managers_count.count or 0,
@@ -182,10 +166,10 @@ async def list_users(
     department_id: str = Query("", description="Filter by department ID"),
     admin: dict = Depends(require_admin),
 ):
-    """List all users with balances. Supports search, role filter, and department filter."""
+    """List all users. Supports search, role filter, and department filter."""
     sb = get_supabase()
 
-    query = sb.table("users").select("*, user_balances(balance)")
+    query = sb.table("users").select("*")
 
     if search:
         query = query.or_(f"full_name.ilike.%{search}%,email.ilike.%{search}%")
@@ -205,20 +189,13 @@ async def list_users(
 
     result = []
     for u in users.data:
-        bal = 0.0
-        if u.get("user_balances"):
-            if isinstance(u["user_balances"], list) and len(u["user_balances"]) > 0:
-                bal = float(u["user_balances"][0].get("balance", 0))
-            elif isinstance(u["user_balances"], dict):
-                bal = float(u["user_balances"].get("balance", 0))
-
         result.append(AdminUserResponse(
             id=u["id"],
             email=u["email"],
             full_name=u["full_name"],
             role=u["role"],
             is_banned=u.get("is_banned", False),
-            balance=bal,
+            balance=0.0,
             created_at=u["created_at"],
             department_id=u.get("department_id"),
             department_name=dept_names.get(u.get("department_id", ""), None),
@@ -241,22 +218,6 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
     return {"message": f"User {'banned' if req.is_banned else 'unbanned'} successfully"}
 
 
-@router.put("/users/{user_id}/balance")
-async def set_user_balance(user_id: str, req: SetBalanceRequest, admin: dict = Depends(require_admin)):
-    """Set a user's balance to a specific value."""
-    sb = get_supabase()
-
-    user = sb.table("users").select("id").eq("id", user_id).execute()
-    if not user.data:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    result = sb.table("user_balances").update({"balance": req.balance}).eq("user_id", user_id).execute()
-    if not result.data:
-        sb.table("user_balances").insert({"user_id": user_id, "balance": req.balance}).execute()
-
-    return {"message": f"Balance set to {req.balance:.2f}", "balance": req.balance}
-
-
 @router.get("/transactions", response_model=list[TransactionDetail])
 async def list_transactions(
     search: str = Query("", description="Search by buyer or seller name"),
@@ -267,7 +228,7 @@ async def list_transactions(
 
     txns = sb.table("product_transactions").select(
         "*, products(title, images)"
-    ).order("created_at", desc=True).limit(200).execute()
+    ).order("created_at", desc=True).execute()
 
     if not txns.data:
         return []
@@ -379,36 +340,41 @@ async def admin_reports(admin: dict = Depends(require_admin)):
             return dept_names[dept_id]
         return u.get("full_name", "Unknown")
 
+    # Admin income comes from admin_earnings (credited on successful transactions)
+    earnings_data = sb.table("admin_earnings").select("amount, created_at").order("created_at", desc=True).execute()
+
     total_income = 0
-    total_volume = 0
     daily_data = {}
     monthly_data = {}
+    for e in (earnings_data.data or []):
+        e_amount = float(e["amount"])
+        total_income += e_amount
+        try:
+            dt = datetime.fromisoformat(e["created_at"].replace("Z", "+00:00"))
+            day_key = dt.strftime("%Y-%m-%d")
+            month_key = dt.strftime("%Y-%m")
+        except Exception:
+            day_key = e["created_at"][:10]
+            month_key = e["created_at"][:7]
+
+        if day_key not in daily_data:
+            daily_data[day_key] = {"income": 0, "count": 0}
+        daily_data[day_key]["income"] += e_amount
+        daily_data[day_key]["count"] += 1
+
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {"income": 0, "count": 0}
+        monthly_data[month_key]["income"] += e_amount
+        monthly_data[month_key]["count"] += 1
+
+    # Sales volume and top sellers/products from transactions
+    total_volume = 0
     seller_data = {}
     product_data = {}
 
     for t in txns.data:
         amount = float(t["amount"])
-        commission = float(t.get("admin_commission", 0))
-        total_income += commission
         total_volume += amount
-
-        try:
-            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-            day_key = dt.strftime("%Y-%m-%d")
-            month_key = dt.strftime("%Y-%m")
-        except Exception:
-            day_key = t["created_at"][:10]
-            month_key = t["created_at"][:7]
-
-        if day_key not in daily_data:
-            daily_data[day_key] = {"income": 0, "count": 0}
-        daily_data[day_key]["income"] += commission
-        daily_data[day_key]["count"] += 1
-
-        if month_key not in monthly_data:
-            monthly_data[month_key] = {"income": 0, "count": 0}
-        monthly_data[month_key]["income"] += commission
-        monthly_data[month_key]["count"] += 1
 
         sid = t["seller_id"]
         if sid not in seller_data:
@@ -1131,9 +1097,6 @@ async def admin_register_manager(req: ManagerRegisterRequest, admin: dict = Depe
 
         user = result.data[0]
 
-        # Create balance
-        sb.table("user_balances").insert({"user_id": user["id"], "balance": 0.00}).execute()
-
         # Create contact if provided
         if req.contact_number:
             sb.table("user_contacts").insert({"user_id": user["id"], "contact_number": req.contact_number}).execute()
@@ -1158,3 +1121,92 @@ async def admin_register_manager(req: ManagerRegisterRequest, admin: dict = Depe
         print(f"[ManagerRegister] ERROR: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+# --- Product Removal Approval ---
+
+@router.get("/pending-removals")
+async def admin_get_pending_removals(admin: dict = Depends(require_admin)):
+    """Get all products with status 'pending_removal'."""
+    sb = get_supabase()
+    prods = sb.table("products").select("*").eq("status", "pending_removal").order("removal_requested_at", desc=True).execute()
+
+    results = []
+    for p in (prods.data or []):
+        seller = sb.table("users").select("full_name, email, department_id").eq("id", p["seller_id"]).execute()
+        seller_info = seller.data[0] if seller.data else {}
+
+        seller_name = seller_info.get("full_name", "Unknown")
+        dept_id = seller_info.get("department_id")
+        dept_name = ""
+        if dept_id:
+            dept_resp = sb.table("departments").select("name").eq("id", dept_id).execute()
+            if dept_resp.data:
+                dept_name = dept_resp.data[0]["name"]
+                seller_name = dept_name
+
+        requester_name = ""
+        if p.get("removal_requested_by"):
+            req_user = sb.table("users").select("full_name").eq("id", p["removal_requested_by"]).execute()
+            if req_user.data:
+                requester_name = req_user.data[0]["full_name"]
+
+        results.append({
+            "id": p["id"],
+            "title": p["title"],
+            "description": p.get("description", ""),
+            "price": float(p["price"]),
+            "stock": p["stock"],
+            "images": p.get("images", []),
+            "seller_id": p["seller_id"],
+            "seller_name": seller_name,
+            "department_name": dept_name,
+            "status": p["status"],
+            "removal_requested_by": p.get("removal_requested_by"),
+            "requester_name": requester_name,
+            "removal_requested_at": p.get("removal_requested_at"),
+            "created_at": p["created_at"],
+        })
+
+    return results
+
+
+@router.put("/products/{product_id}/approve-removal")
+async def admin_approve_removal(product_id: str, admin: dict = Depends(require_admin)):
+    """Approve a product removal request. Deactivates the product."""
+    sb = get_supabase()
+
+    prod = sb.table("products").select("status").eq("id", product_id).execute()
+    if not prod.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if prod.data[0]["status"] != "pending_removal":
+        raise HTTPException(status_code=400, detail="Product is not pending removal")
+
+    sb.table("products").update({
+        "is_active": False,
+        "status": "unapproved",
+    }).eq("id", product_id).execute()
+
+    return {"message": "Product removal approved. Product has been deactivated."}
+
+
+@router.put("/products/{product_id}/reject-removal")
+async def admin_reject_removal(product_id: str, admin: dict = Depends(require_admin)):
+    """Reject a product removal request. Product returns to approved status."""
+    sb = get_supabase()
+
+    prod = sb.table("products").select("status").eq("id", product_id).execute()
+    if not prod.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if prod.data[0]["status"] != "pending_removal":
+        raise HTTPException(status_code=400, detail="Product is not pending removal")
+
+    sb.table("products").update({
+        "status": "approved",
+        "removal_requested_by": None,
+        "removal_requested_at": None,
+    }).eq("id", product_id).execute()
+
+    return {"message": "Product removal rejected. Product remains active."}

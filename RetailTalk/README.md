@@ -15,8 +15,9 @@ RetailTalk/
 │   │   └── classifier.py      # QueryProductClassifier (E/S/C/I)
 │   ├── routes/
 │   │   ├── auth.py             # Login / Register
-│   │   ├── products.py         # CRUD + auto BERT embedding  
+│   │   ├── products.py         # CRUD + auto BERT embedding
 │   │   ├── search.py           # ML-powered search (thesis core!)
+│   │   ├── wishlist.py         # Wishlist (add/remove/check/seller-report)
 │   │   └── transactions.py     # Buy / Balance / History
 │   ├── requirements.txt
 │   └── Dockerfile
@@ -26,8 +27,9 @@ RetailTalk/
 │       │   ├── page.js         # Home — AI search
 │       │   ├── login/          # Login
 │       │   ├── register/       # Register
-│       │   ├── sell/           # Seller dashboard
-│       │   ├── products/       # Browse products
+│       │   ├── sell/           # Seller dashboard (includes wishlist analytics)
+│       │   ├── products/       # Browse products (with wishlist toggle)
+│       │   ├── wishlist/       # Buyer wishlist page
 │       │   ├── history/        # Transaction history
 │       │   └── wallet/         # Balance management
 │       └── lib/api.js          # API client
@@ -94,3 +96,4 @@ The app will be at: http://localhost:3000
 
 1. **Seller creates product** → BERT computes 768-dim embedding → stored in Supabase via pgvector
 2. **Buyer searches** → BERT computes query embedding → pgvector finds top 50 similar products → QueryProductClassifier labels each as Exact/Substitute/Complement/Irrelevant → results ranked and returned
+3. **Buyer wishlists** → Save products for later via `/wishlist/add` → view saved items on `/wishlist` page → sellers see wishlist analytics on their reports dashboard

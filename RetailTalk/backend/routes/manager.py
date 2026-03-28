@@ -139,7 +139,7 @@ async def list_staff(
     if not dept_id:
         raise HTTPException(status_code=400, detail="Manager is not assigned to a department")
 
-    query = sb.table("users").select("*, user_balances(balance)").eq(
+    query = sb.table("users").select("*").eq(
         "department_id", dept_id
     ).eq("role", "seller")
 
@@ -150,20 +150,12 @@ async def list_staff(
 
     staff_list = []
     for u in (result.data or []):
-        bal = 0.0
-        if u.get("user_balances"):
-            if isinstance(u["user_balances"], list) and len(u["user_balances"]) > 0:
-                bal = float(u["user_balances"][0].get("balance", 0))
-            elif isinstance(u["user_balances"], dict):
-                bal = float(u["user_balances"].get("balance", 0))
-
         staff_list.append({
             "id": u["id"],
             "email": u["email"],
             "full_name": u["full_name"],
             "role": u["role"],
             "is_banned": u.get("is_banned", False),
-            "balance": bal,
             "created_at": u["created_at"],
         })
 
@@ -219,9 +211,6 @@ async def register_staff(req: StaffRegisterRequest, manager: dict = Depends(requ
 
         user = result.data[0]
 
-        # Create balance
-        sb.table("user_balances").insert({"user_id": user["id"], "balance": 0.00}).execute()
-
         # Create contact if provided
         if req.contact_number:
             sb.table("user_contacts").insert({"user_id": user["id"], "contact_number": req.contact_number}).execute()
@@ -253,20 +242,13 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
     dept_id = manager.get("department_id")
 
     # Verify staff belongs to manager's department
-    user_resp = sb.table("users").select("*, user_balances(balance), user_contacts(contact_number)").eq("id", user_id).execute()
+    user_resp = sb.table("users").select("*, user_contacts(contact_number)").eq("id", user_id).execute()
     if not user_resp.data:
         raise HTTPException(status_code=404, detail="User not found")
 
     u = user_resp.data[0]
     if u.get("department_id") != dept_id:
         raise HTTPException(status_code=403, detail="This user is not in your department")
-
-    bal = 0.0
-    if u.get("user_balances"):
-        if isinstance(u["user_balances"], list) and len(u["user_balances"]) > 0:
-            bal = float(u["user_balances"][0].get("balance", 0))
-        elif isinstance(u["user_balances"], dict):
-            bal = float(u["user_balances"].get("balance", 0))
 
     contact = ""
     if u.get("user_contacts"):
@@ -339,7 +321,6 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             "full_name": u["full_name"],
             "role": u["role"],
             "is_banned": u.get("is_banned", False),
-            "balance": bal,
             "contact_number": contact,
             "created_at": u["created_at"],
         },
@@ -578,3 +559,40 @@ async def list_department_transactions(
         })
 
     return results
+
+
+# --- Product Removal Request ---
+
+@router.post("/products/{product_id}/request-removal")
+async def request_product_removal(product_id: str, manager: dict = Depends(require_manager)):
+    """Manager requests removal of a product. Sets status to 'pending_removal' for admin approval."""
+    sb = get_supabase()
+    dept_id = manager.get("department_id")
+    manager_id = manager["sub"]
+
+    if not dept_id:
+        raise HTTPException(status_code=400, detail="Manager is not assigned to a department")
+
+    # Get all staff IDs in this department + manager
+    staff_result = sb.table("users").select("id").eq("department_id", dept_id).eq("role", "seller").execute()
+    staff_ids = [s["id"] for s in (staff_result.data or [])]
+    if manager_id not in staff_ids:
+        staff_ids.append(manager_id)
+
+    prod = sb.table("products").select("id, status, seller_id").eq("id", product_id).execute()
+    if not prod.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    if prod.data[0]["seller_id"] not in staff_ids:
+        raise HTTPException(status_code=403, detail="Product does not belong to your department")
+
+    if prod.data[0]["status"] != "approved":
+        raise HTTPException(status_code=400, detail="Only approved products can be requested for removal")
+
+    sb.table("products").update({
+        "status": "pending_removal",
+        "removal_requested_by": manager_id,
+        "removal_requested_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", product_id).execute()
+
+    return {"message": "Product removal requested. Awaiting admin approval."}

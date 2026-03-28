@@ -10,13 +10,16 @@ export default function RootLayout({ children }) {
     const [admin, setAdmin] = useState(null);
     const [balance, setBalance] = useState(null);
     const [hydrated, setHydrated] = useState(false);
+    const [theme, setTheme] = useState('dark');
     const pathname = usePathname();
     const hideNav = pathname === '/sell' || pathname?.startsWith('/manager') || pathname === '/delivery' || pathname?.startsWith('/admin/dashboard');
 
     useEffect(() => {
         const storedUser = getStoredUser();
         const storedAdmin = getStoredAdmin();
-        document.documentElement.setAttribute('data-theme', 'dark');
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        setTheme(savedTheme);
+        document.documentElement.setAttribute('data-theme', savedTheme);
 
         if (storedUser) {
             setUser(storedUser);
@@ -43,8 +46,15 @@ export default function RootLayout({ children }) {
         window.location.href = '/admin';
     };
 
+    const toggleTheme = () => {
+        const newTheme = theme === 'dark' ? 'light' : 'dark';
+        setTheme(newTheme);
+        localStorage.setItem('theme', newTheme);
+        document.documentElement.setAttribute('data-theme', newTheme);
+    };
+
     return (
-        <html lang="en" data-theme="dark">
+        <html lang="en" data-theme={theme || 'dark'}>
             <head>
                 <title>RetailTalk - An NLP for querying e-commerce product</title>
                 <meta name="description" content="An NLP for querying e-commerce product. BERT-powered intelligent product search." />
@@ -74,6 +84,7 @@ export default function RootLayout({ children }) {
                                 {user && user.role === 'buyer' && (
                                     <>
                                         <a href="/cart">🛒 Cart</a>
+                                        <a href="/wishlist">❤️ Wishlist</a>
                                         <a href="/orders">📦 Orders</a>
                                         <a href="/transactions">Transactions</a>
                                     </>
@@ -95,6 +106,11 @@ export default function RootLayout({ children }) {
                     </div>
 
                     <div className="navbar-user">
+                        {hydrated && (
+                            <button onClick={toggleTheme} className="theme-toggle" title="Toggle Light/Dark Mode" style={{ marginRight: '8px' }}>
+                                {theme === 'dark' ? '☀️' : '🌙'}
+                            </button>
+                        )}
                         {hydrated ? (
                             admin ? (
                                 <>

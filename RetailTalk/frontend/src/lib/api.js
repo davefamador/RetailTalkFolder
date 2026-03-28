@@ -293,13 +293,6 @@ export async function adminBanUser(userId, isBanned) {
     });
 }
 
-export async function adminSetBalance(userId, balance) {
-    return apiFetch(`/admin/users/${userId}/balance`, {
-        method: 'PUT',
-        body: JSON.stringify({ balance }),
-    });
-}
-
 export async function adminGetTransactions(search = '') {
     return apiFetch(`/admin/transactions?search=${encodeURIComponent(search)}`);
 }
@@ -465,6 +458,29 @@ export async function adminUpdateDepartment(deptId, data) {
     });
 }
 
+// --- Admin: Product Removal Approval ---
+export async function adminGetPendingRemovals() {
+    return apiFetch('/admin/pending-removals');
+}
+
+export async function adminApproveRemoval(productId) {
+    return apiFetch(`/admin/products/${productId}/approve-removal`, { method: 'PUT' });
+}
+
+export async function adminRejectRemoval(productId) {
+    return apiFetch(`/admin/products/${productId}/reject-removal`, { method: 'PUT' });
+}
+
+// --- Buyer: Cancel Order ---
+export async function cancelOrder(transactionId) {
+    return apiFetch(`/transactions/buyer/cancel/${transactionId}`, { method: 'PUT' });
+}
+
+// --- Manager: Product Removal Request ---
+export async function managerRequestProductRemoval(productId) {
+    return apiFetch(`/manager/products/${productId}/request-removal`, { method: 'POST' });
+}
+
 // --- Admin: Manager Registration ---
 export async function adminRegisterManager(data) {
     return apiFetch('/admin/managers/register', {
@@ -611,4 +627,28 @@ export async function managerUpdateWalkinOrderStatus(transactionId, status) {
         method: 'PUT',
         body: JSON.stringify({ status }),
     });
+}
+
+// --- Wishlist ---
+export async function getWishlist() {
+    return apiFetch('/wishlist/');
+}
+
+export async function addToWishlist(productId) {
+    return apiFetch('/wishlist/add', {
+        method: 'POST',
+        body: JSON.stringify({ product_id: productId }),
+    });
+}
+
+export async function removeFromWishlist(productId) {
+    return apiFetch(`/wishlist/remove/${productId}`, { method: 'DELETE' });
+}
+
+export async function checkWishlist(productId) {
+    return apiFetch(`/wishlist/check/${productId}`);
+}
+
+export async function getSellerWishlistReport() {
+    return apiFetch('/wishlist/seller-report');
 }

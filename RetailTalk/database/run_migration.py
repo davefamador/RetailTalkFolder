@@ -11,7 +11,7 @@ if not DATABASE_URL:
     print("ERROR: DATABASE_URL not set in .env")
     sys.exit(1)
 
-migration_path = os.path.join(os.path.dirname(__file__), 'migration_v2.sql')
+migration_path = os.path.join(os.path.dirname(__file__), 'migration_v8.sql')
 with open(migration_path, 'r') as f:
     sql = f.read()
 

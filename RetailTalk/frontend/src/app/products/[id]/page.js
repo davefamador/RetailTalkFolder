@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact } from '../../../lib/api';
+import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact, checkWishlist, addToWishlist, removeFromWishlist } from '../../../lib/api';
 
 export default function ProductDetailPage() {
     const params = useParams();
@@ -18,10 +18,16 @@ export default function ProductDetailPage() {
     const [addressModal, setAddressModal] = useState(false);
     const [contactNum, setContactNum] = useState('');
     const [deliveryAddr, setDeliveryAddr] = useState('');
+    const [wishlisted, setWishlisted] = useState(false);
+    const [wishlistLoading, setWishlistLoading] = useState(false);
 
     useEffect(() => {
-        setUser(getStoredUser());
+        const stored = getStoredUser();
+        setUser(stored);
         loadProduct();
+        if (stored && stored.role === 'buyer') {
+            checkWishlist(params.id).then(r => setWishlisted(r.in_wishlist)).catch(() => {});
+        }
     }, []);
 
     const loadProduct = async () => {
@@ -32,6 +38,25 @@ export default function ProductDetailPage() {
             setError(err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleWishlistToggle = async () => {
+        if (!user) { window.location.href = '/login'; return; }
+        if (user.role !== 'buyer') return;
+        setWishlistLoading(true);
+        try {
+            if (wishlisted) {
+                await removeFromWishlist(params.id);
+                setWishlisted(false);
+            } else {
+                await addToWishlist(params.id);
+                setWishlisted(true);
+            }
+        } catch (err) {
+            console.error('Wishlist toggle failed:', err);
+        } finally {
+            setWishlistLoading(false);
         }
     };
 
@@ -167,7 +192,36 @@ export default function ProductDetailPage() {
 
                 {/* Right: Product Info */}
                 <div>
-                    <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: 8 }}>{product.title}</h1>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+                        <h1 style={{ fontSize: '1.8rem', fontWeight: 800, flex: 1, margin: 0 }}>{product.title}</h1>
+                        {user && user.role === 'buyer' && (
+                            <button
+                                onClick={handleWishlistToggle}
+                                disabled={wishlistLoading}
+                                title={wishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
+                                style={{
+                                    background: wishlisted ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)',
+                                    border: `1.5px solid ${wishlisted ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
+                                    borderRadius: 12, padding: '10px 12px', cursor: 'pointer',
+                                    fontSize: '1.3rem', lineHeight: 1, transition: 'all 0.25s ease',
+                                    flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    transform: wishlisted ? 'scale(1.1)' : 'scale(1)',
+                                }}
+                                onMouseEnter={e => {
+                                    e.currentTarget.style.transform = 'scale(1.2)';
+                                    e.currentTarget.style.background = wishlisted ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.1)';
+                                }}
+                                onMouseLeave={e => {
+                                    e.currentTarget.style.transform = wishlisted ? 'scale(1.1)' : 'scale(1)';
+                                    e.currentTarget.style.background = wishlisted ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)';
+                                }}
+                            >
+                                {wishlistLoading ? (
+                                    <span className="spinner" style={{ width: 20, height: 20 }}></span>
+                                ) : wishlisted ? '❤️' : '🤍'}
+                            </button>
+                        )}
+                    </div>
 
                     {product.seller_name && (
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 16 }}>

@@ -3,10 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
     getStoredAdmin, adminLogout, adminGetDashboard, adminGetUsers,
-    adminBanUser, adminSetBalance, adminGetTransactions, adminGetReports,
+    adminBanUser, adminGetTransactions, adminGetReports,
     adminGetProducts, adminUpdateProduct, adminGetUserDetail,
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminRegisterManager,
+    adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
 } from '../../../lib/api';
 
 // ── Line Chart Component ─────────────────────────────────
@@ -265,8 +266,6 @@ export default function AdminDashboard() {
     const [stats, setStats] = useState(null);
     const [users, setUsers] = useState([]);
     const [userSearch, setUserSearch] = useState('');
-    const [editBalanceId, setEditBalanceId] = useState(null);
-    const [editBalanceVal, setEditBalanceVal] = useState('');
     const [transactions, setTransactions] = useState([]);
     const [txnSearch, setTxnSearch] = useState('');
     const [reports, setReports] = useState(null);
@@ -287,6 +286,7 @@ export default function AdminDashboard() {
     const [pendingProducts, setPendingProducts] = useState([]);
     const [selectedPendingProduct, setSelectedPendingProduct] = useState(null);
     const [pendingActionLoading, setPendingActionLoading] = useState(false);
+    const [pendingSubTab, setPendingSubTab] = useState('products');
 
     // Department state
     const [departments, setDepartments] = useState([]);
@@ -300,6 +300,10 @@ export default function AdminDashboard() {
     // Manager registration
     const [showRegisterManager, setShowRegisterManager] = useState(false);
     const [managerForm, setManagerForm] = useState({ full_name: '', email: '', password: '', contact_number: '', department_id: '' });
+    // Pending removals state
+    const [pendingRemovals, setPendingRemovals] = useState([]);
+    const [removalLoading, setRemovalLoading] = useState(false);
+    const [selectedRemoval, setSelectedRemoval] = useState(null);
 
     useEffect(() => {
         const stored = getStoredAdmin();
@@ -334,12 +338,15 @@ export default function AdminDashboard() {
         if (activeTab === 'transactions') loadTransactions();
         if (activeTab === 'reports') loadReports();
         if (activeTab === 'products') loadProducts();
-        if (activeTab === 'pending') loadPending();
+        if (activeTab === 'pending') { loadPending(); loadPendingRemovals(); }
         if (activeTab === 'departments') loadDepartments();
     }, [activeTab, authChecked]);
 
     const loadPending = async () => {
         try { setPendingProducts(await adminGetPendingProducts()); } catch (e) { console.error(e); }
+    };
+    const loadPendingRemovals = async () => {
+        try { setPendingRemovals(await adminGetPendingRemovals()); } catch (e) { console.error(e); }
     };
 
     const loadDepartments = async () => {
@@ -409,13 +416,26 @@ export default function AdminDashboard() {
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
 
-    const handleSetBalance = async (userId) => {
+    const handleApproveRemoval = async (productId) => {
+        setRemovalLoading(true);
         try {
-            await adminSetBalance(userId, parseFloat(editBalanceVal));
-            setMessage({ type: 'success', text: 'Balance updated' });
-            setEditBalanceId(null);
-            loadUsers(userSearch);
+            await adminApproveRemoval(productId);
+            setMessage({ type: 'success', text: 'Removal approved! Product has been removed.' });
+            setSelectedRemoval(null);
+            loadPendingRemovals();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setRemovalLoading(false); }
+    };
+
+    const handleRejectRemoval = async (productId) => {
+        setRemovalLoading(true);
+        try {
+            await adminRejectRemoval(productId);
+            setMessage({ type: 'success', text: 'Removal rejected.' });
+            setSelectedRemoval(null);
+            loadPendingRemovals();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setRemovalLoading(false); }
     };
 
     const handleUpdateProduct = async (productId) => {
@@ -548,7 +568,7 @@ export default function AdminDashboard() {
                                     <StatCard icon="👥" label="Total Users" value={stats.total_users} color="#6366f1" />
                                     <StatCard icon="📦" label="Active Products" value={stats.total_products} color="#0ea5e9" />
                                     <StatCard icon="🛒" label="Total Orders" value={stats.total_orders} color="#10b981" />
-                                    <StatCard icon="💰" label="Total Revenue" value={`₱${stats.total_revenue.toFixed(2)}`} color="#f59e0b" />
+                                    <StatCard icon="💰" label="Admin Earnings" value={`₱${(stats.total_admin_earnings || 0).toFixed(2)}`} color="#f59e0b" />
                                     <StatCard icon="🛍️" label="Total Buyers" value={stats.total_buyers || 0} color="#10b981" />
                                     <StatCard icon="🏪" label="Stores" value={stats.total_departments || 0} color="#8b5cf6" />
                                     <StatCard icon="👔" label="Managers" value={stats.total_managers || 0} color="#ec4899" />
@@ -603,7 +623,7 @@ export default function AdminDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th><th>Email</th><th>Role</th><th>Balance</th><th>Status</th><th>Joined</th><th>Actions</th>
+                                        <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -627,21 +647,6 @@ export default function AdminDashboard() {
                                                 }}>
                                                     {u.role}
                                                 </span>
-                                            </td>
-                                            <td>
-                                                {editBalanceId === u.id ? (
-                                                    <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                                                        <input type="number" value={editBalanceVal} onChange={e => setEditBalanceVal(e.target.value)}
-                                                            style={{ width: 100, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }} />
-                                                        <button className="btn btn-success btn-sm" onClick={() => handleSetBalance(u.id)} style={{ padding: '4px 8px' }}>✓</button>
-                                                        <button className="btn btn-outline btn-sm" onClick={() => setEditBalanceId(null)} style={{ padding: '4px 8px' }}>✕</button>
-                                                    </div>
-                                                ) : (
-                                                    <span style={{ color: 'var(--accent-secondary)', fontWeight: 600, cursor: 'pointer' }}
-                                                        onClick={e => { e.stopPropagation(); setEditBalanceId(u.id); setEditBalanceVal(u.balance.toString()); }}>
-                                                        ₱{u.balance.toFixed(2)}
-                                                    </span>
-                                                )}
                                             </td>
                                             <td>
                                                 <span style={{
@@ -1104,54 +1109,116 @@ export default function AdminDashboard() {
                     </div>
                 )}
 
-                {/* ===== PENDING PRODUCTS TAB ===== */}
+                {/* ===== PENDING TAB ===== */}
                 {activeTab === 'pending' && (
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                             <div>
-                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Pending Products</h1>
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Review and approve or unapprove seller products</p>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Pending Reviews</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Review and manage pending products and removal requests</p>
                             </div>
-                            <span style={{
-                                padding: '6px 14px', borderRadius: 20, fontSize: '0.85rem', fontWeight: 700,
-                                background: 'rgba(251,191,36,0.15)', color: '#fbbf24',
-                            }}>
-                                {pendingProducts.length} Pending
-                            </span>
                         </div>
 
-                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                            <table className="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Product</th><th>Price</th><th>Stock</th><th>Seller</th><th>Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pendingProducts.map(p => (
-                                        <tr key={p.id} style={{ cursor: 'pointer', transition: 'background 0.15s' }}
-                                            onClick={() => setSelectedPendingProduct(p)}
-                                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(251,191,36,0.06)'}
-                                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                        >
-                                            <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10 }}>
-                                                {p.images && p.images.length > 0 && (
-                                                    <img src={p.images[0]} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
-                                                )}
-                                                {p.title}
-                                            </td>
-                                            <td style={{ fontWeight: 600 }}>₱{p.price.toFixed(2)}</td>
-                                            <td>{p.stock}</td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{p.seller_name}</td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                {new Date(p.created_at).toLocaleString()}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            {pendingProducts.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No pending products 🎉</p></div>}
+                        {/* Sub-tabs */}
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                            <button
+                                onClick={() => setPendingSubTab('products')}
+                                style={{
+                                    padding: '8px 20px', borderRadius: 10, border: '1px solid',
+                                    borderColor: pendingSubTab === 'products' ? '#fbbf24' : 'var(--border-color)',
+                                    background: pendingSubTab === 'products' ? 'rgba(251,191,36,0.15)' : 'transparent',
+                                    color: pendingSubTab === 'products' ? '#fbbf24' : 'var(--text-secondary)',
+                                    cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                }}
+                            >
+                                Pending Products ({pendingProducts.length})
+                            </button>
+                            <button
+                                onClick={() => setPendingSubTab('removals')}
+                                style={{
+                                    padding: '8px 20px', borderRadius: 10, border: '1px solid',
+                                    borderColor: pendingSubTab === 'removals' ? '#ef4444' : 'var(--border-color)',
+                                    background: pendingSubTab === 'removals' ? 'rgba(239,68,68,0.15)' : 'transparent',
+                                    color: pendingSubTab === 'removals' ? '#ef4444' : 'var(--text-secondary)',
+                                    cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                }}
+                            >
+                                Pending Removals ({pendingRemovals.length})
+                            </button>
                         </div>
+
+                        {/* Pending Products Sub-tab */}
+                        {pendingSubTab === 'products' && (
+                            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Product</th><th>Price</th><th>Stock</th><th>Seller</th><th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pendingProducts.map(p => (
+                                            <tr key={p.id} style={{ cursor: 'pointer', transition: 'background 0.15s' }}
+                                                onClick={() => setSelectedPendingProduct(p)}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(251,191,36,0.06)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    {p.images && p.images.length > 0 && (
+                                                        <img src={p.images[0]} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
+                                                    )}
+                                                    {p.title}
+                                                </td>
+                                                <td style={{ fontWeight: 600 }}>₱{p.price.toFixed(2)}</td>
+                                                <td>{p.stock}</td>
+                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{p.seller_name}</td>
+                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                    {new Date(p.created_at).toLocaleString()}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {pendingProducts.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No pending products</p></div>}
+                            </div>
+                        )}
+
+                        {/* Pending Removals Sub-tab */}
+                        {pendingSubTab === 'removals' && (
+                            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Title</th><th>Department</th><th>Requested By</th><th>Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pendingRemovals.map(r => (
+                                            <tr key={r.id} style={{ cursor: 'pointer', transition: 'background 0.15s' }}
+                                                onClick={() => setSelectedRemoval(r)}
+                                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.06)'}
+                                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                                            >
+                                                <td style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    {r.images && r.images.length > 0 && (
+                                                        <img src={r.images[0]} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} />
+                                                    )}
+                                                    {r.title}
+                                                </td>
+                                                <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{r.department_name || '—'}</td>
+                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{r.requested_by || r.seller_name || '—'}</td>
+                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                    {r.requested_at ? new Date(r.requested_at).toLocaleString() : r.created_at ? new Date(r.created_at).toLocaleString() : '—'}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {pendingRemovals.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No pending removals</p></div>}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1250,6 +1317,106 @@ export default function AdminDashboard() {
                     </>
                 )}
 
+                {/* Pending Removal Detail Slide Panel */}
+                {selectedRemoval && (
+                    <>
+                        <div style={{
+                            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                            zIndex: 300, transition: 'opacity 0.3s',
+                        }} onClick={() => setSelectedRemoval(null)} />
+                        <aside style={{
+                            position: 'fixed', top: 0, right: 0, bottom: 0,
+                            width: 480, maxWidth: '90vw', background: 'var(--bg-primary)',
+                            borderLeft: '1px solid var(--border-color)',
+                            zIndex: 301, overflowY: 'auto', padding: 32,
+                            boxShadow: '-8px 0 30px rgba(0,0,0,0.3)',
+                            animation: 'slideInRight 0.25s ease-out',
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                                <div>
+                                    <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 4 }}>
+                                        Removal Request
+                                    </h2>
+                                    <span style={{
+                                        padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
+                                        background: 'rgba(239,68,68,0.15)', color: '#ef4444',
+                                    }}>Pending Removal</span>
+                                </div>
+                                <button onClick={() => setSelectedRemoval(null)} style={{
+                                    background: 'none', border: 'none', cursor: 'pointer',
+                                    color: 'var(--text-muted)', fontSize: '1.3rem',
+                                }}>✕</button>
+                            </div>
+
+                            {/* Product Image */}
+                            {selectedRemoval.images && selectedRemoval.images.length > 0 && (
+                                <div style={{ marginBottom: 20, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                    <img src={selectedRemoval.images[0]} alt="" style={{ width: '100%', height: 200, objectFit: 'cover' }} />
+                                </div>
+                            )}
+
+                            {/* Removal Details */}
+                            <div style={{
+                                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24,
+                                padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                            }}>
+                                <div style={{ gridColumn: '1 / -1' }}>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Product Name</p>
+                                    <p style={{ fontSize: '1rem', fontWeight: 700 }}>{selectedRemoval.title}</p>
+                                </div>
+                                {selectedRemoval.description && (
+                                    <div style={{ gridColumn: '1 / -1' }}>
+                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Description</p>
+                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{selectedRemoval.description}</p>
+                                    </div>
+                                )}
+                                <div>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Price</p>
+                                    <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-secondary)' }}>₱{selectedRemoval.price?.toFixed(2) || '0.00'}</p>
+                                </div>
+                                <div>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Stock</p>
+                                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>{selectedRemoval.stock}</p>
+                                </div>
+                                <div>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Department</p>
+                                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>{selectedRemoval.department_name || '—'}</p>
+                                </div>
+                                <div>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Requested By</p>
+                                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>{selectedRemoval.requested_by || selectedRemoval.seller_name || '—'}</p>
+                                </div>
+                                <div>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Date Requested</p>
+                                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                                        {selectedRemoval.requested_at ? new Date(selectedRemoval.requested_at).toLocaleString() : selectedRemoval.created_at ? new Date(selectedRemoval.created_at).toLocaleString() : '—'}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div style={{ display: 'flex', gap: 12 }}>
+                                <button
+                                    className="btn btn-success"
+                                    disabled={removalLoading}
+                                    onClick={() => handleApproveRemoval(selectedRemoval.id)}
+                                    style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}
+                                >
+                                    {removalLoading ? '...' : '✓ Approve Removal'}
+                                </button>
+                                <button
+                                    className="btn btn-danger"
+                                    disabled={removalLoading}
+                                    onClick={() => handleRejectRemoval(selectedRemoval.id)}
+                                    style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}
+                                >
+                                    {removalLoading ? '...' : 'Reject Removal'}
+                                </button>
+                            </div>
+                        </aside>
+                    </>
+                )}
+
                 {/* ===== TRANSACTIONS TAB ===== */}
                 {activeTab === 'transactions' && (
                     <div>
@@ -1276,7 +1443,7 @@ export default function AdminDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Total</th><th>Seller (90%)</th><th>Admin (10%)</th><th>Status</th><th>Type</th><th>Date</th>
+                                        <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1310,8 +1477,6 @@ export default function AdminDashboard() {
                                             <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
                                             <td>{t.quantity || 1}</td>
                                             <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
-                                            <td style={{ color: 'var(--accent-secondary)' }}>₱{t.seller_amount.toFixed(2)}</td>
-                                            <td style={{ color: '#f59e0b' }}>₱{t.admin_commission.toFixed(2)}</td>
                                             <td>
                                                 <span style={{
                                                     padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
@@ -1335,6 +1500,7 @@ export default function AdminDashboard() {
                             </table>
                             {transactions.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
                         </div>
+
                     </div>
                 )}
 

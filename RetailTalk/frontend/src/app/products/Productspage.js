@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { listProducts, getStoredUser, getStoredAdmin, buyProduct, getBuyerRecommendations, addToCart, getMyContact, setMyContact } from '../../lib/api';
+import { listProducts, getStoredUser, getStoredAdmin, buyProduct, getBuyerRecommendations, addToCart, getMyContact, setMyContact, addToWishlist, removeFromWishlist, checkWishlist } from '../../lib/api';
 
 // Static demo products shown when DB is empty so user can see the UI
 const DEMO_PRODUCTS = [
@@ -72,6 +72,8 @@ export default function ProductsPage() {
     const [addressModal, setAddressModal] = useState(false);
     const [contactNum, setContactNum] = useState('');
     const [deliveryAddress, setDeliveryAddress] = useState('');
+    const [inWishlist, setInWishlist] = useState(false);
+    const [wishlistLoading, setWishlistLoading] = useState(false);
 
     useEffect(() => {
         const storedUser = getStoredUser() || getStoredAdmin();
@@ -114,13 +116,38 @@ export default function ProductsPage() {
         }
     };
 
-    const openProduct = (product) => {
+    const openProduct = async (product) => {
         setSelectedProduct(product);
         setQuantity(1);
         setPurchased(false);
         setSelectedImage(0);
         setPurchaseError('');
         setCartMessage({ type: '', text: '' });
+        setInWishlist(false);
+        if (user && user.role === 'buyer' && !product._demo) {
+            try {
+                const res = await checkWishlist(product.id);
+                setInWishlist(res.in_wishlist);
+            } catch (_) {}
+        }
+    };
+
+    const handleWishlistToggle = async () => {
+        if (!selectedProduct || wishlistLoading) return;
+        setWishlistLoading(true);
+        try {
+            if (inWishlist) {
+                await removeFromWishlist(selectedProduct.id);
+                setInWishlist(false);
+            } else {
+                await addToWishlist(selectedProduct.id);
+                setInWishlist(true);
+            }
+        } catch (err) {
+            console.error('Wishlist error:', err);
+        } finally {
+            setWishlistLoading(false);
+        }
     };
 
     const closeModal = () => {
@@ -491,18 +518,40 @@ export default function ProductsPage() {
                                             PHP {parseFloat(selectedProduct.price).toFixed(2)}
                                         </div>
 
-                                        {/* Stock Badge */}
-                                        <div style={{
-                                            display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content',
-                                            padding: '6px 14px', borderRadius: 20, marginBottom: 16,
-                                            background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)',
-                                        }}>
-                                            <span style={{
-                                                width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-success)',
-                                            }}></span>
-                                            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-success)' }}>
-                                                {selectedProduct.stock} in stock
-                                            </span>
+                                        {/* Stock Badge + Wishlist */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                                            <div style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content',
+                                                padding: '6px 14px', borderRadius: 20,
+                                                background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)',
+                                            }}>
+                                                <span style={{
+                                                    width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-success)',
+                                                }}></span>
+                                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-success)' }}>
+                                                    {selectedProduct.stock} in stock
+                                                </span>
+                                            </div>
+                                            {user && user.role === 'buyer' && !selectedProduct._demo && (
+                                                <button
+                                                    onClick={handleWishlistToggle}
+                                                    disabled={wishlistLoading}
+                                                    title={inWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}
+                                                    style={{
+                                                        width: 38, height: 38, borderRadius: '50%', border: 'none',
+                                                        cursor: wishlistLoading ? 'not-allowed' : 'pointer',
+                                                        background: inWishlist ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)',
+                                                        color: inWishlist ? '#ef4444' : 'var(--text-muted)',
+                                                        fontSize: '1.15rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        transition: 'all 0.25s ease',
+                                                        transform: wishlistLoading ? 'scale(0.9)' : 'scale(1)',
+                                                    }}
+                                                    onMouseEnter={e => { if (!wishlistLoading) e.currentTarget.style.transform = 'scale(1.15)'; }}
+                                                    onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                                >
+                                                    {inWishlist ? '❤️' : '🤍'}
+                                                </button>
+                                            )}
                                         </div>
 
                                         {/* Description */}

@@ -10,6 +10,7 @@ import {
     createProduct, uploadProductImage,
     getManagerDeliveryOrders, managerUpdateDeliveryOrderStatus,
     getManagerWalkinOrders, managerUpdateWalkinOrderStatus,
+    managerRequestProductRemoval,
 } from '../../../lib/api';
 import SearchContent from '../../components/SearchContent';
 import ReportsContent from '../../components/ReportsContent';
@@ -198,6 +199,9 @@ export default function ManagerDashboard() {
     const [mgrWalkinOrders, setMgrWalkinOrders] = useState([]);
     const [walkinOrderLoading, setWalkinOrderLoading] = useState(false);
 
+    // Product removal
+    const [removalLoading, setRemovalLoading] = useState(false);
+
     // Restock approve/reject inline forms
     const [approveId, setApproveId] = useState(null);
     const [approveData, setApproveData] = useState({ approved_quantity: '', manager_notes: '' });
@@ -258,6 +262,20 @@ export default function ManagerDashboard() {
             if (status === 'completed') loadDashboard();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
         finally { setWalkinOrderLoading(false); }
+    };
+
+    const handleRequestRemoval = async (productId) => {
+        if (!window.confirm('Are you sure you want to request removal of this product?')) return;
+        setRemovalLoading(true);
+        try {
+            await managerRequestProductRemoval(productId);
+            setMessage({ type: 'success', text: 'Product removal request submitted successfully!' });
+            loadMgrProducts(mgrProductSearch);
+        } catch (e) {
+            setMessage({ type: 'error', text: e.message });
+        } finally {
+            setRemovalLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -603,7 +621,7 @@ export default function ManagerDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th><th>Email</th><th>Balance</th><th>Status</th><th>Joined</th>
+                                        <th>Name</th><th>Email</th><th>Status</th><th>Joined</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -615,11 +633,6 @@ export default function ManagerDashboard() {
                                         >
                                             <td style={{ fontWeight: 500 }}>{s.full_name}</td>
                                             <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{s.email}</td>
-                                            <td>
-                                                <span style={{ color: 'var(--accent-secondary)', fontWeight: 600 }}>
-                                                    ₱{(s.balance || 0).toFixed(2)}
-                                                </span>
-                                            </td>
                                             <td>
                                                 <span style={{
                                                     display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -1157,7 +1170,7 @@ export default function ManagerDashboard() {
                                     {prods.map(p => (
                                         <div key={p.id} style={{
                                             background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                                            borderRadius: 12, padding: 14, display: 'flex', gap: 12, alignItems: 'center',
+                                            borderRadius: 12, padding: 14, display: 'flex', gap: 12, alignItems: 'flex-start',
                                         }}>
                                             <div style={{
                                                 width: 56, height: 56, borderRadius: 10, overflow: 'hidden',
@@ -1180,10 +1193,38 @@ export default function ManagerDashboard() {
                                                     }}>{p.stock} stock</span>
                                                     <span style={{
                                                         fontSize: '0.65rem', padding: '2px 6px', borderRadius: 4, fontWeight: 600,
-                                                        background: p.status === 'approved' ? 'rgba(16,185,129,0.1)' : p.status === 'pending' ? 'rgba(251,191,36,0.1)' : 'rgba(239,68,68,0.1)',
-                                                        color: p.status === 'approved' ? '#10b981' : p.status === 'pending' ? '#fbbf24' : '#ef4444',
-                                                    }}>{p.status}</span>
+                                                        background: p.status === 'approved' ? 'rgba(16,185,129,0.1)' : p.status === 'pending' ? 'rgba(251,191,36,0.1)' : p.status === 'pending_removal' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
+                                                        color: p.status === 'approved' ? '#10b981' : p.status === 'pending' ? '#fbbf24' : p.status === 'pending_removal' ? '#f59e0b' : '#ef4444',
+                                                    }}>{p.status === 'pending_removal' ? 'pending removal' : p.status}</span>
                                                 </div>
+                                                {p.status === 'approved' && (
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleRequestRemoval(p.id); }}
+                                                        disabled={removalLoading}
+                                                        style={{
+                                                            marginTop: 6, padding: '4px 10px', borderRadius: 6,
+                                                            border: '1px solid rgba(239,68,68,0.3)',
+                                                            background: 'rgba(239,68,68,0.1)', color: '#ef4444',
+                                                            cursor: removalLoading ? 'not-allowed' : 'pointer',
+                                                            fontWeight: 600, fontSize: '0.7rem',
+                                                            fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                            opacity: removalLoading ? 0.6 : 1,
+                                                        }}
+                                                        onMouseEnter={e => { if (!removalLoading) e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; }}
+                                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+                                                    >
+                                                        {removalLoading ? '...' : 'Request Removal'}
+                                                    </button>
+                                                )}
+                                                {p.status === 'pending_removal' && (
+                                                    <span style={{
+                                                        display: 'inline-block', marginTop: 6, padding: '4px 10px', borderRadius: 6,
+                                                        background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+                                                        color: '#f59e0b', fontWeight: 600, fontSize: '0.7rem',
+                                                    }}>
+                                                        Removal Pending
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1394,10 +1435,6 @@ export default function ManagerDashboard() {
                                     <div>
                                         <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Contact</p>
                                         <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>{staffDetail.user.contact_number || '—'}</p>
-                                    </div>
-                                    <div>
-                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Balance</p>
-                                        <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-secondary)' }}>₱{(staffDetail.user.balance || 0).toFixed(2)}</p>
                                     </div>
                                     <div>
                                         <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Joined</p>

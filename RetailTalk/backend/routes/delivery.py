@@ -249,20 +249,34 @@ async def update_delivery_status(
     # Update status
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
 
-    # If delivered, create earnings entry and add to wallet
+    # If delivered, create delivery earnings and credit admin with product amount
     if req.status == "delivered":
         fee = float(txn.data[0].get("delivery_fee", DELIVERY_FEE))
+        txn_amount = float(txn.data[0].get("amount", 0))
+
+        # Delivery user gets delivery fee
         sb.table("delivery_earnings").insert({
             "delivery_user_id": user_id,
             "transaction_id": transaction_id,
             "amount": fee,
         }).execute()
-
-        # Add to delivery user's balance
         bal = sb.table("user_balances").select("balance").eq("user_id", user_id).execute()
         if bal.data:
             new_bal = float(bal.data[0]["balance"]) + fee
             sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user_id).execute()
+
+        # Admin gets the product amount
+        sb.table("admin_earnings").insert({
+            "transaction_id": transaction_id,
+            "amount": txn_amount,
+        }).execute()
+        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
+        if admin_user.data:
+            admin_id = admin_user.data[0]["id"]
+            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+            if admin_bal.data:
+                new_admin_bal = float(admin_bal.data[0]["balance"]) + txn_amount
+                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
 
     status_msg = "delivered" if req.status == "delivered" else "marked as undelivered"
     return {"message": f"Order {status_msg} successfully!"}

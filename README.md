@@ -111,21 +111,54 @@ RetailTalkFolder/
 │   │       ├── auth.py           # Authentication
 │   │       ├── admin.py          # Admin dashboard
 │   │       ├── transactions.py   # Purchase transactions
+│   │       ├── wishlist.py       # Wishlist management
 │   │       └── insights.py       # AI insights
 │   ├── frontend/                 # Next.js frontend
 │   │   └── src/app/
 │   │       ├── search/           # Search page
 │   │       ├── products/         # Product listing & detail
+│   │       ├── wishlist/         # Buyer wishlist
 │   │       ├── admin/            # Admin dashboard
-│   │       ├── sell/             # Seller portal
+│   │       ├── sell/             # Seller portal (includes wishlist analytics)
 │   │       ├── wallet/           # User wallet
 │   │       └── transactions/     # Transaction history
 │   └── database/
-│       └── schema.sql            # PostgreSQL schema
+│       ├── schema.sql            # PostgreSQL schema
+│       └── migration_v6.sql      # Wishlist table migration
 ├── ranking/                      # CrossEncoder training scripts
 ├── classification_identification/ # ESCI classifier training scripts
 └── shopping_queries_dataset/     # Training data (not tracked)
 ```
+
+---
+
+## Key Features
+
+- **NLP-Powered Search** — Multi-stage pipeline with Intent Classification, Slot Extraction, BERT Embeddings, CrossEncoder Re-Ranking, and ESCI Classification
+- **Voice Search** — Speech-to-text via Google Speech Recognition, feeding directly into the search pipeline
+- **ESCI Relevance Labels** — Transparent Exact/Substitute/Complement/Irrelevant classification on every search result
+- **Product Wishlist** — Buyers can save products to a personal wishlist for future reference. Sellers get wishlist analytics (total wishlists, per-product breakdown) on their reports dashboard
+- **Shopping Cart & Checkout** — Multi-seller cart with automatic delivery fee calculation (₱90 per unique department/seller) and wallet-based payments
+- **Role-Based Dashboards** — Separate dashboards for Buyers, Sellers, Managers, Delivery Personnel, and Admins
+- **Inventory & Restock Management** — Staff request restocks, managers approve, delivery personnel fulfill
+- **Admin Analytics & Reports** — Revenue tracking, top sellers/products, daily/monthly trends, SVF summary
+
+### Database Tables
+
+| Table | Description |
+|-------|-------------|
+| `users` | User accounts with roles (buyer/seller/admin/delivery/manager) |
+| `user_balances` | Wallet balances |
+| `user_contacts` | Contact numbers and delivery addresses |
+| `products` | Product catalog with BERT embeddings (vector(768)) via pgvector |
+| `cart_items` | Shopping cart items (unique per buyer+product) |
+| `wishlist_items` | Saved products per buyer (unique per buyer+product, indexed on buyer_id and product_id) |
+| `product_transactions` | Purchase records with commission splits and delivery fees |
+| `delivery_earnings` | Delivery user earnings per transaction |
+| `stored_value` | Wallet deposit/withdrawal history (SVF) |
+| `departments` | Store departments |
+| `department_sellers` | Seller-department assignments |
+| `restock_requests` | Inventory restock workflow |
 
 ---
 
