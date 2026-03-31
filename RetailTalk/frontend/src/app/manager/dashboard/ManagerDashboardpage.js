@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
     getStoredUser, logout,
     managerGetDashboard, managerGetStaff, managerRegisterStaff,
-    managerGetStaffDetail, managerGetRestockRequests,
+    managerGetStaffDetail, managerRemoveStaff, managerGetRestockRequests,
     managerApproveRestock, managerRejectRestock,
     managerGetProducts, managerGetTransactions,
     createProduct, uploadProductImage,
@@ -12,6 +12,10 @@ import {
     getManagerWalkinOrders, managerUpdateWalkinOrderStatus,
     managerRequestProductRemoval,
 } from '../../../lib/api';
+import {
+    LayoutDashboard, Users, Package, ShoppingCart, Truck, Tag,
+    CreditCard, Search, TrendingUp, LogOut, Trash2,
+} from 'lucide-react';
 import SearchContent from '../../components/SearchContent';
 import ReportsContent from '../../components/ReportsContent';
 
@@ -107,7 +111,7 @@ function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height 
 }
 
 // ── Sidebar Item ─────────────────────────────────────────
-function SidebarItem({ icon, label, active, onClick }) {
+function SidebarItem({ icon: Icon, label, active, onClick }) {
     return (
         <button onClick={onClick} style={{
             display: 'flex', alignItems: 'center', gap: 12,
@@ -120,7 +124,9 @@ function SidebarItem({ icon, label, active, onClick }) {
             transition: 'all 0.2s',
             fontFamily: 'Inter, sans-serif',
         }}>
-            <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>{icon}</span>
+            <span style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {typeof Icon === 'string' ? Icon : <Icon size={20} strokeWidth={1.8} />}
+            </span>
             {label}
         </button>
     );
@@ -194,13 +200,20 @@ export default function ManagerDashboard() {
     // Delivery orders
     const [mgrDeliveryOrders, setMgrDeliveryOrders] = useState([]);
     const [deliveryOrderLoading, setDeliveryOrderLoading] = useState(false);
+    const [deliveryStatusFilter, setDeliveryStatusFilter] = useState('all');
+    const [deliverySearch, setDeliverySearch] = useState('');
 
     // Walk-in orders
     const [mgrWalkinOrders, setMgrWalkinOrders] = useState([]);
     const [walkinOrderLoading, setWalkinOrderLoading] = useState(false);
+    const [walkinStatusFilter, setWalkinStatusFilter] = useState('all');
+    const [walkinSearch, setWalkinSearch] = useState('');
 
     // Product removal
     const [removalLoading, setRemovalLoading] = useState(false);
+
+    // Staff removal
+    const [removeStaffLoading, setRemoveStaffLoading] = useState(false);
 
     // Restock approve/reject inline forms
     const [approveId, setApproveId] = useState(null);
@@ -323,6 +336,22 @@ export default function ManagerDashboard() {
         setStaffDetail(null);
     };
 
+    const handleRemoveStaff = async (userId, staffName) => {
+        if (!window.confirm(`Are you sure you want to remove "${staffName}" from your department? They will be unassigned but their account will not be deleted.`)) return;
+        setRemoveStaffLoading(true);
+        try {
+            await managerRemoveStaff(userId);
+            setMessage({ type: 'success', text: `Staff member "${staffName}" has been removed from the department.` });
+            closeStaffPanel();
+            loadStaff(staffSearch);
+            loadDashboard();
+        } catch (e) {
+            setMessage({ type: 'error', text: e.message });
+        } finally {
+            setRemoveStaffLoading(false);
+        }
+    };
+
     const handleApproveRestock = async (requestId) => {
         setRestockActionLoading(true);
         try {
@@ -407,16 +436,16 @@ export default function ManagerDashboard() {
     }
 
     const sidebarItems = [
-        { id: 'dashboard', icon: '📊', label: 'Dashboard' },
-        { id: 'staff', icon: '👥', label: 'Staff' },
-        { id: 'restock', icon: '📦', label: 'Restock' },
-        { id: 'walkin_orders', icon: '🛒', label: 'Walk-in Orders' },
-        { id: 'delivery_orders', icon: '🚚', label: 'Delivery Orders' },
-        { id: 'products', icon: '🏷️', label: 'Products' },
-        { id: 'transactions', icon: '💳', label: 'Transactions' },
+        { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { id: 'staff', icon: Users, label: 'Staff' },
+        { id: 'restock', icon: Package, label: 'Restock' },
+        { id: 'walkin_orders', icon: ShoppingCart, label: 'Walk-in Orders' },
+        { id: 'delivery_orders', icon: Truck, label: 'Delivery Orders' },
+        { id: 'products', icon: Tag, label: 'Products' },
+        { id: 'transactions', icon: CreditCard, label: 'Transactions' },
         { id: 'divider' },
-        { id: 'search', icon: '🔍', label: 'Search' },
-        { id: 'reports', icon: '📈', label: 'Reports' },
+        { id: 'search', icon: Search, label: 'Search' },
+        { id: 'reports', icon: TrendingUp, label: 'Reports' },
     ];
 
     return (
@@ -428,14 +457,22 @@ export default function ManagerDashboard() {
                 display: 'flex', flexDirection: 'column',
                 position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 200,
             }}>
-                <a href="/" style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '20px 20px 16px', textDecoration: 'none',
+                <div style={{
+                    padding: '20px 16px 16px',
                     borderBottom: '1px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', gap: 10,
                 }}>
-                    <img src="/logo.png" alt="RetailTalk" style={{ height: 28, width: 28 }} />
-                    <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>RetailTalk</span>
-                </a>
+                    <div style={{
+                        width: 40, height: 40, borderRadius: 10,
+                        background: 'var(--gradient-primary)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1.3rem', fontWeight: 800, color: '#fff',
+                    }}>RT</div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>RetailTalk</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manager</div>
+                    </div>
+                </div>
                 <nav style={{ padding: '16px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {sidebarItems.map(item =>
                         item.id === 'divider' ? (
@@ -473,7 +510,7 @@ export default function ManagerDashboard() {
                     <button onClick={handleLogout} title="Logout" style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         color: 'var(--text-muted)', fontSize: '1.1rem',
-                    }}>🚪</button>
+                    }}><LogOut size={18} /></button>
                 </div>
             </aside>
 
@@ -621,7 +658,7 @@ export default function ManagerDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th><th>Email</th><th>Status</th><th>Joined</th>
+                                        <th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th style={{ width: 100, textAlign: 'center' }}>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -646,6 +683,26 @@ export default function ManagerDashboard() {
                                             </td>
                                             <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                                                 {new Date(s.created_at).toLocaleDateString()}
+                                            </td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleRemoveStaff(s.id, s.full_name); }}
+                                                    disabled={removeStaffLoading}
+                                                    title="Remove from department"
+                                                    style={{
+                                                        padding: '5px 12px', borderRadius: 8,
+                                                        border: '1px solid rgba(239,68,68,0.3)',
+                                                        background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                                                        cursor: removeStaffLoading ? 'not-allowed' : 'pointer',
+                                                        fontWeight: 600, fontSize: '0.75rem',
+                                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                        opacity: removeStaffLoading ? 0.5 : 1,
+                                                    }}
+                                                    onMouseEnter={e => { if (!removeStaffLoading) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
+                                                >
+                                                    Remove
+                                                </button>
                                             </td>
                                         </tr>
                                     ))}
@@ -735,34 +792,69 @@ export default function ManagerDashboard() {
                 )}
 
                 {/* ===== WALK-IN ORDERS TAB ===== */}
-                {activeTab === 'walkin_orders' && (
+                {activeTab === 'walkin_orders' && (() => {
+                    const walkinColors = {
+                        pending_walkin: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
+                        inwork: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'In Work' },
+                        ready: { bg: 'rgba(139,92,246,0.1)', color: '#8b5cf6', label: 'Ready' },
+                        picked_up: { bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9', label: 'Picked Up' },
+                        completed: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Completed' },
+                    };
+                    let filteredWalkin = mgrWalkinOrders;
+                    if (walkinStatusFilter !== 'all') filteredWalkin = filteredWalkin.filter(o => o.status === walkinStatusFilter);
+                    if (walkinSearch.trim()) {
+                        const q = walkinSearch.toLowerCase();
+                        filteredWalkin = filteredWalkin.filter(o =>
+                            (o.product_title || '').toLowerCase().includes(q) ||
+                            (o.buyer_name || '').toLowerCase().includes(q) ||
+                            (o.seller_name || '').toLowerCase().includes(q)
+                        );
+                    }
+                    const nextStatus = { pending_walkin: 'inwork', inwork: 'ready', picked_up: 'completed' };
+                    const nextLabel = { pending_walkin: 'Start Working', inwork: 'Mark Ready', picked_up: 'Mark Completed' };
+                    return (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Walk-in Orders</h1>
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage walk-in orders — buyer must confirm to complete</p>
                             </div>
-                            <button className="btn btn-outline btn-sm" onClick={loadMgrWalkinOrders}>Refresh</button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    type="text" placeholder="Search orders..."
+                                    value={walkinSearch} onChange={e => setWalkinSearch(e.target.value)}
+                                    style={{
+                                        width: 180, padding: '8px 12px', borderRadius: 8,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontSize: '0.82rem',
+                                    }}
+                                />
+                                <button className="btn btn-outline btn-sm" onClick={loadMgrWalkinOrders}>Refresh</button>
+                            </div>
                         </div>
-                        {mgrWalkinOrders.length === 0 ? (
+                        {/* Status Filter */}
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                            {[{ key: 'all', label: 'All' }, ...Object.entries(walkinColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (
+                                <button key={f.key} onClick={() => setWalkinStatusFilter(f.key)} style={{
+                                    padding: '5px 14px', borderRadius: 8, border: '1px solid',
+                                    borderColor: walkinStatusFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    background: walkinStatusFilter === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: walkinStatusFilter === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.15s',
+                                }}>{f.label}</button>
+                            ))}
+                        </div>
+                        {filteredWalkin.length === 0 ? (
                             <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
                                 <h3>No walk-in orders</h3>
                                 <p>Walk-in orders from buyers will appear here</p>
                             </div>
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
-                                {mgrWalkinOrders.map(order => {
-                                    const walkinColors = {
-                                        pending_walkin: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
-                                        inwork: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'In Work' },
-                                        ready: { bg: 'rgba(139,92,246,0.1)', color: '#8b5cf6', label: 'Ready - Waiting for Buyer' },
-                                        picked_up: { bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9', label: 'Picked Up' },
-                                        completed: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Completed' },
-                                    };
+                                {filteredWalkin.map(order => {
                                     const wc = walkinColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
-                                    const nextStatus = { pending_walkin: 'inwork', inwork: 'ready', picked_up: 'completed' };
-                                    const nextLabel = { pending_walkin: 'Start Working', inwork: 'Mark Ready', picked_up: 'Mark Completed' };
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
                                             <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
@@ -809,32 +901,71 @@ export default function ManagerDashboard() {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ===== DELIVERY ORDERS TAB ===== */}
-                {activeTab === 'delivery_orders' && (
+                {activeTab === 'delivery_orders' && (() => {
+                    const deliveryColors = {
+                        pending: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
+                        approved: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Ready for Pickup' },
+                        ondeliver: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'On Delivery' },
+                        delivered: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Delivered' },
+                        undelivered: { bg: 'rgba(239,68,68,0.1)', color: '#ef4444', label: 'Undelivered' },
+                        cancelled: { bg: 'rgba(148,163,184,0.1)', color: '#94a3b8', label: 'Cancelled' },
+                    };
+                    let filteredDelivery = mgrDeliveryOrders;
+                    if (deliveryStatusFilter !== 'all') filteredDelivery = filteredDelivery.filter(o => o.status === deliveryStatusFilter);
+                    if (deliverySearch.trim()) {
+                        const q = deliverySearch.toLowerCase();
+                        filteredDelivery = filteredDelivery.filter(o =>
+                            (o.product_title || '').toLowerCase().includes(q) ||
+                            (o.buyer_name || '').toLowerCase().includes(q) ||
+                            (o.seller_name || '').toLowerCase().includes(q)
+                        );
+                    }
+                    return (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Delivery Orders</h1>
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage delivery orders — mark as ready for pickup</p>
                             </div>
-                            <button className="btn btn-outline btn-sm" onClick={loadMgrDeliveryOrders}>Refresh</button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    type="text" placeholder="Search orders..."
+                                    value={deliverySearch} onChange={e => setDeliverySearch(e.target.value)}
+                                    style={{
+                                        width: 180, padding: '8px 12px', borderRadius: 8,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontSize: '0.82rem',
+                                    }}
+                                />
+                                <button className="btn btn-outline btn-sm" onClick={loadMgrDeliveryOrders}>Refresh</button>
+                            </div>
                         </div>
-                        {mgrDeliveryOrders.length === 0 ? (
+                        {/* Status Filter */}
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                            {[{ key: 'all', label: 'All' }, ...Object.entries(deliveryColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (
+                                <button key={f.key} onClick={() => setDeliveryStatusFilter(f.key)} style={{
+                                    padding: '5px 14px', borderRadius: 8, border: '1px solid',
+                                    borderColor: deliveryStatusFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    background: deliveryStatusFilter === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: deliveryStatusFilter === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.15s',
+                                }}>{f.label}</button>
+                            ))}
+                        </div>
+                        {filteredDelivery.length === 0 ? (
                             <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
                                 <h3>No delivery orders</h3>
                                 <p>Delivery orders from buyers will appear here</p>
                             </div>
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
-                                {mgrDeliveryOrders.map(order => {
-                                    const statusColors = {
-                                        pending: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
-                                        approved: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Ready for Pickup' },
-                                        ondeliver: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'On Delivery' },
-                                    };
-                                    const sc = statusColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                {filteredDelivery.map(order => {
+                                    const sc = deliveryColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -888,7 +1019,8 @@ export default function ManagerDashboard() {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ===== RESTOCK TAB ===== */}
                 {activeTab === 'restock' && (
@@ -1417,10 +1549,30 @@ export default function ManagerDashboard() {
                                             background: 'rgba(108,99,255,0.1)', color: '#6366f1',
                                         }}>{staffDetail.user.role}</span>
                                     </div>
-                                    <button onClick={closeStaffPanel} style={{
-                                        background: 'none', border: 'none', cursor: 'pointer',
-                                        color: 'var(--text-muted)', fontSize: '1.3rem',
-                                    }}>✕</button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <button
+                                            onClick={() => handleRemoveStaff(staffDetail.user.id, staffDetail.user.full_name)}
+                                            disabled={removeStaffLoading}
+                                            style={{
+                                                padding: '8px 16px', borderRadius: 10,
+                                                border: '1px solid rgba(239,68,68,0.3)',
+                                                background: 'rgba(239,68,68,0.1)', color: '#ef4444',
+                                                cursor: removeStaffLoading ? 'not-allowed' : 'pointer',
+                                                fontWeight: 700, fontSize: '0.8rem',
+                                                fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                opacity: removeStaffLoading ? 0.5 : 1,
+                                                display: 'flex', alignItems: 'center', gap: 6,
+                                            }}
+                                            onMouseEnter={e => { if (!removeStaffLoading) e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; }}
+                                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+                                        >
+                                            <Trash2 size={16} /> {removeStaffLoading ? 'Removing...' : 'Remove Staff'}
+                                        </button>
+                                        <button onClick={closeStaffPanel} style={{
+                                            background: 'none', border: 'none', cursor: 'pointer',
+                                            color: 'var(--text-muted)', fontSize: '1.3rem',
+                                        }}>✕</button>
+                                    </div>
                                 </div>
 
                                 {/* Staff Details */}

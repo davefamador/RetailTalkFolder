@@ -229,7 +229,6 @@ export default function DeliveryPage() {
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
 
                     <SidebarItem icon="💰" label="Transactions" active={activeSection === 'transactions'} onClick={() => setActiveSection('transactions')} />
-                    <SidebarItem icon="📈" label="Report" active={activeSection === 'report'} onClick={() => setActiveSection('report')} />
                 </nav>
 
                 <div style={{
@@ -324,6 +323,38 @@ export default function DeliveryPage() {
                                 <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24' }}>{restockQueue.length}</div>
                             </div>
                         </div>
+
+                        {/* Report Section — Earnings & Delivery Count Graphs */}
+                        {earnings && (
+                            <>
+                                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 28, marginBottom: 12 }}>Delivery Report</h2>
+                                {/* Graph period toggle */}
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                                    {['daily', 'weekly', 'monthly'].map(p => (
+                                        <button key={p} onClick={() => setGraphPeriod(p)} style={{
+                                            padding: '8px 18px', borderRadius: 10, fontSize: '0.85rem', fontWeight: 600,
+                                            border: '1px solid',
+                                            borderColor: graphPeriod === p ? 'var(--accent-primary)' : 'var(--border-color)',
+                                            background: graphPeriod === p ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                            color: graphPeriod === p ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                            cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
+                                        }}>{p.charAt(0).toUpperCase() + p.slice(1)}</button>
+                                    ))}
+                                </div>
+
+                                {/* Earnings graph */}
+                                <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+                                    <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Earnings ({graphPeriod})</h4>
+                                    <BarChart data={earnings[graphPeriod]} valueKey="amount" />
+                                </div>
+
+                                {/* Delivery count graph */}
+                                <div className="card" style={{ padding: 20 }}>
+                                    <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Deliveries Count ({graphPeriod})</h4>
+                                    <BarChart data={earnings[`${graphPeriod}_delivery_count`]} valueKey="count" />
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -669,41 +700,6 @@ export default function DeliveryPage() {
                     </div>
                 )}
 
-                {/* ===== REPORT ===== */}
-                {activeSection === 'report' && !loading && earnings && (
-                    <div>
-                        <div style={{ marginBottom: 24 }}>
-                            <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Report</h1>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Delivery earnings and activity reports</p>
-                        </div>
-
-                        {/* Graph period toggle */}
-                        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                            {['daily', 'weekly', 'monthly'].map(p => (
-                                <button key={p} onClick={() => setGraphPeriod(p)} style={{
-                                    padding: '8px 18px', borderRadius: 10, fontSize: '0.85rem', fontWeight: 600,
-                                    border: '1px solid',
-                                    borderColor: graphPeriod === p ? 'var(--accent-primary)' : 'var(--border-color)',
-                                    background: graphPeriod === p ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                    color: graphPeriod === p ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                    cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
-                                }}>{p.charAt(0).toUpperCase() + p.slice(1)}</button>
-                            ))}
-                        </div>
-
-                        {/* Earnings graph */}
-                        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
-                            <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Earnings ({graphPeriod})</h4>
-                            <BarChart data={earnings[graphPeriod]} valueKey="amount" />
-                        </div>
-
-                        {/* Delivery count graph */}
-                        <div className="card" style={{ padding: 20 }}>
-                            <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Deliveries Count ({graphPeriod})</h4>
-                            <BarChart data={earnings[`${graphPeriod}_delivery_count`]} valueKey="count" />
-                        </div>
-                    </div>
-                )}
             </main>
 
             {/* Contact Modal */}

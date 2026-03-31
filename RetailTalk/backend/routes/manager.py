@@ -561,6 +561,45 @@ async def list_department_transactions(
     return results
 
 
+# --- Staff Removal ---
+
+@router.delete("/staff/{user_id}/remove")
+async def remove_staff(user_id: str, manager: dict = Depends(require_manager)):
+    """Remove a staff member from the manager's department.
+    This unassigns them from the department (sets department_id and manager_id to null).
+    """
+    sb = get_supabase()
+    dept_id = manager.get("department_id")
+    manager_id = manager["sub"]
+
+    if not dept_id:
+        raise HTTPException(status_code=400, detail="Manager is not assigned to a department")
+
+    # Prevent manager from removing themselves
+    if user_id == manager_id:
+        raise HTTPException(status_code=400, detail="You cannot remove yourself from the department")
+
+    # Verify user exists and belongs to this manager's department
+    user_resp = sb.table("users").select("id, role, department_id, full_name").eq("id", user_id).execute()
+    if not user_resp.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user = user_resp.data[0]
+    if user.get("department_id") != dept_id:
+        raise HTTPException(status_code=403, detail="This user is not in your department")
+
+    if user.get("role") != "seller":
+        raise HTTPException(status_code=400, detail="Can only remove staff (seller) members")
+
+    # Unassign staff from department
+    sb.table("users").update({
+        "department_id": None,
+        "manager_id": None,
+    }).eq("id", user_id).execute()
+
+    return {"message": f"Staff member '{user['full_name']}' has been removed from the department"}
+
+
 # --- Product Removal Request ---
 
 @router.post("/products/{product_id}/request-removal")

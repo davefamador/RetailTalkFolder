@@ -510,9 +510,10 @@ async def update_walkin_order_status(
 
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
 
-    # On completion, credit admin with the product amount
+    # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
     if req.status == "completed":
         txn_amount = float(txn.data[0].get("amount", 0))
+        # Admin gets 100% of product amount for walk-in orders
         sb.table("admin_earnings").insert({
             "transaction_id": transaction_id,
             "amount": txn_amount,
@@ -676,9 +677,10 @@ async def manager_update_walkin_order_status(
 
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
 
-    # On completion, credit admin with the product amount
+    # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
     if req.status == "completed":
         txn_amount = float(txn.data[0].get("amount", 0))
+        # Admin gets 100% of product amount for walk-in orders
         sb.table("admin_earnings").insert({
             "transaction_id": transaction_id,
             "amount": txn_amount,
@@ -1004,6 +1006,13 @@ async def buyer_cancel_order(
         if del_bal.data:
             new_del_bal = float(del_bal.data[0]["balance"]) + fee_to_delivery
             sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", order["delivery_user_id"]).execute()
+
+        # Log in delivery_earnings for earnings history
+        sb.table("delivery_earnings").insert({
+            "delivery_user_id": order["delivery_user_id"],
+            "transaction_id": transaction_id,
+            "amount": fee_to_delivery,
+        }).execute()
 
     # 4. Restore product stock
     prod = sb.table("products").select("stock").eq("id", order["product_id"]).execute()

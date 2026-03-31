@@ -81,3 +81,5 @@ tmp_*.py
 shopping_queries_dataset/slot_generation_prompt.md
 shopping_queries_dataset/intent_generation_prompt.md
 classification_identification/custom_esci/user_query_generation_prompt.md
+RetailTalk_System_Use_Cases.md
+RetailTalk_System_Use_Cases.md

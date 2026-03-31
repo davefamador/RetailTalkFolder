@@ -249,23 +249,54 @@ async def update_delivery_status(
     # Update status
     sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
 
-    # If delivered, create delivery earnings and credit admin with product amount
+    # If undelivered, refund buyer the full amount (product + delivery fee) and restore stock
+    if req.status == "undelivered":
+        buyer_id = txn.data[0]["buyer_id"]
+        product_id = txn.data[0]["product_id"]
+        quantity = int(txn.data[0].get("quantity", 1))
+        refund_amount = float(txn.data[0].get("amount", 0))
+        refund_fee = float(txn.data[0].get("delivery_fee", 0))
+        total_refund = refund_amount + refund_fee
+
+        # Refund buyer
+        buyer_bal = sb.table("user_balances").select("balance").eq("user_id", buyer_id).execute()
+        if buyer_bal.data:
+            new_buyer_bal = float(buyer_bal.data[0]["balance"]) + total_refund
+            sb.table("user_balances").update({"balance": new_buyer_bal}).eq("user_id", buyer_id).execute()
+
+        # Log refund in stored_value for auditability
+        sb.table("stored_value").insert({
+            "user_id": buyer_id,
+            "transaction_type": "deposit",
+            "amount": total_refund,
+        }).execute()
+
+        # Restore product stock
+        product = sb.table("products").select("stock").eq("id", product_id).execute()
+        if product.data:
+            current_stock = int(product.data[0].get("stock", 0))
+            new_stock = current_stock + quantity
+            sb.table("products").update({"stock": new_stock}).eq("id", product_id).execute()
+
+    # If delivered: delivery fee goes to delivery user, product amount goes to admin
     if req.status == "delivered":
         fee = float(txn.data[0].get("delivery_fee", DELIVERY_FEE))
         txn_amount = float(txn.data[0].get("amount", 0))
 
-        # Delivery user gets delivery fee
-        sb.table("delivery_earnings").insert({
-            "delivery_user_id": user_id,
-            "transaction_id": transaction_id,
-            "amount": fee,
-        }).execute()
-        bal = sb.table("user_balances").select("balance").eq("user_id", user_id).execute()
-        if bal.data:
-            new_bal = float(bal.data[0]["balance"]) + fee
-            sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user_id).execute()
+        # Delivery user gets the delivery fee
+        if fee > 0:
+            sb.table("delivery_earnings").insert({
+                "delivery_user_id": user_id,
+                "transaction_id": transaction_id,
+                "amount": fee,
+            }).execute()
+            # Credit delivery user's balance
+            del_bal = sb.table("user_balances").select("balance").eq("user_id", user_id).execute()
+            if del_bal.data:
+                new_del_bal = float(del_bal.data[0]["balance"]) + fee
+                sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", user_id).execute()
 
-        # Admin gets the product amount
+        # Admin gets product amount only (no delivery fee)
         sb.table("admin_earnings").insert({
             "transaction_id": transaction_id,
             "amount": txn_amount,

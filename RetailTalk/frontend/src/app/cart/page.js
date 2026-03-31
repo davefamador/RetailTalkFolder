@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getCart, updateCartItem, removeFromCart, clearCart, checkoutCart, getStoredUser, getMyContact, setMyContact } from '../../lib/api';
+import { ShoppingCart, Smartphone } from 'lucide-react';
 
 export default function CartPage() {
     const [cart, setCart] = useState(null);
@@ -133,7 +134,7 @@ export default function CartPage() {
     return (
         <div style={{ minHeight: '100vh', padding: '100px 20px 40px' }}>
             <div style={{ maxWidth: 900, margin: '0 auto' }}>
-                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: 8 }}>🛒 Shopping Cart</h1>
+                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}><ShoppingCart size={28} /> Shopping Cart</h1>
                 <p style={{ color: 'var(--text-muted)', marginBottom: 24 }}>
                     {cart?.items?.length || 0} item{(cart?.items?.length || 0) !== 1 ? 's' : ''} from {cart?.departments_count || 0} department store{(cart?.departments_count || 0) !== 1 ? 's' : ''}
                 </p>
@@ -145,7 +146,7 @@ export default function CartPage() {
                     <div style={{ textAlign: 'center', padding: 60 }}><span className="spinner" /></div>
                 ) : !cart || cart.items.length === 0 ? (
                     <div className="card" style={{ textAlign: 'center', padding: 60 }}>
-                        <div style={{ fontSize: '3rem', marginBottom: 16 }}>🛒</div>
+                        <div style={{ marginBottom: 16, color: 'var(--text-muted)' }}><ShoppingCart size={48} strokeWidth={1.5} /></div>
                         <h3>Your cart is empty</h3>
                         <p style={{ color: 'var(--text-muted)' }}>Browse products and add items to your cart.</p>
                         <a href="/products" className="btn btn-primary" style={{ marginTop: 16 }}>Browse Products</a>
@@ -291,7 +292,7 @@ export default function CartPage() {
                     alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
                 }} onClick={() => setShowContactModal(false)}>
                     <div className="card" style={{ maxWidth: 420, width: '100%', padding: 32 }} onClick={e => e.stopPropagation()}>
-                        <h3 style={{ marginBottom: 8 }}>📱 Contact Info Required</h3>
+                        <h3 style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}><Smartphone size={20} /> Contact Info Required</h3>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 20 }}>
                             Please add your contact details before placing an order.
                         </p>

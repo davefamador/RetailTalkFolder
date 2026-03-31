@@ -13,7 +13,10 @@
       "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/shopping_queries_dataset/\"*.parquet)",
       "Bash(ls \"c:/Moi/Thesis/Code/RetailTalkFolder/classification_identification/custom_esci/\"*.parquet)",
       "Bash(find /c/Moi/Thesis/Code/RetailTalkFolder -name *.bin -o -name *.pt)",
-      "mcp__claude_ai_Canva__generate-design"
+      "mcp__claude_ai_Canva__generate-design",
+      "Bash(npx next:*)",
+      "WebFetch(domain:www.tryflint.com)",
+      "Bash(python3 \"C:\\\\Users\\\\loopy\\\\.claude\\\\plugins\\\\marketplaces\\\\ui-ux-pro-max-skill\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"AI search tool modern minimal dark landing page\" --design-system -p \"RetailTalk\")"
     ],
     "deny": [],
     "ask": []

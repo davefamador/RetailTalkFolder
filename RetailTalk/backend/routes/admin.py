@@ -46,6 +46,7 @@ class DashboardResponse(BaseModel):
     total_users: int
     total_products: int
     total_orders: int
+    total_transaction_orders: int = 0
     total_revenue: float
     total_sales_volume: float
     total_admin_earnings: float = 0
@@ -113,6 +114,8 @@ class AdminProductResponse(BaseModel):
     images: list[str]
     is_active: bool
     created_at: str
+    department_id: Optional[str] = None
+    department_name: Optional[str] = None
 
 
 class AdminUpdateProductRequest(BaseModel):
@@ -132,6 +135,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
     users = sb.table("users").select("id", count="exact").execute()
     products = sb.table("products").select("id", count="exact").eq("is_active", True).execute()
     txns = sb.table("product_transactions").select("amount").in_("status", ["completed", "delivered"]).execute()
+    all_txns = sb.table("product_transactions").select("id", count="exact").execute()
 
     total_volume = sum(float(t.get("amount", 0)) for t in txns.data) if txns.data else 0
 
@@ -149,6 +153,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
         total_users=users.count or 0,
         total_products=products.count or 0,
         total_orders=len(txns.data) if txns.data else 0,
+        total_transaction_orders=all_txns.count or 0,
         total_revenue=round(total_volume, 2),
         total_sales_volume=round(total_volume, 2),
         total_admin_earnings=round(total_admin_earnings, 2),
@@ -221,17 +226,66 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
 @router.get("/transactions", response_model=list[TransactionDetail])
 async def list_transactions(
     search: str = Query("", description="Search by buyer or seller name"),
+    txn_type: str = Query("", description="Filter by purchase_type (delivery/walk-in)"),
+    status: str = Query("", description="Filter by transaction status"),
+    date_range: str = Query("", description="day, week, month, or specific"),
+    specific_date: str = Query("", description="YYYY-MM-DD if date_range is specific"),
     admin: dict = Depends(require_admin),
 ):
-    """List all product transactions with search support."""
+    """List all product transactions with search and filters support."""
     sb = get_supabase()
 
-    txns = sb.table("product_transactions").select(
+    q = sb.table("product_transactions").select(
         "*, products(title, images)"
-    ).order("created_at", desc=True).execute()
+    ).order("created_at", desc=True)
+
+    if txn_type:
+        q = q.eq("purchase_type", txn_type)
+    if status:
+        q = q.eq("status", status)
+
+    # Basic date filters locally since we fetch all matching
+    txns = q.execute()
 
     if not txns.data:
         return []
+
+    # Local date filtering
+    filtered_data = []
+    from datetime import datetime, timedelta
+    
+    today = datetime.now()
+    if date_range == "day":
+        start = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "week":
+        start = today - timedelta(days=today.weekday())
+        start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "month":
+        start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif date_range == "specific" and specific_date:
+        try:
+            start = datetime.strptime(specific_date, "%Y-%m-%d")
+        except:
+            start = None
+    else:
+        start = None
+
+    for t in txns.data:
+        try:
+            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00")).replace(tzinfo=None)
+            if start:
+                if date_range == "specific":
+                    # For specific date, must match exactly the day
+                    if dt.date() != start.date():
+                        continue
+                else:
+                    if dt < start:
+                        continue
+            filtered_data.append(t)
+        except:
+            filtered_data.append(t)
+
+    txns.data = filtered_data
 
     # Get all user IDs we need names for
     user_ids = set()
@@ -477,6 +531,8 @@ async def list_admin_products(
             images=p.get("images") or [],
             is_active=p["is_active"],
             created_at=p["created_at"],
+            department_id=dept_id,
+            department_name=dept_names.get(dept_id) if dept_id else None,
         ))
     return results
 
@@ -525,6 +581,8 @@ async def admin_update_product(
         images=p.get("images") or [],
         is_active=p["is_active"],
         created_at=p["created_at"],
+        department_id=dept_id,
+        department_name=seller_name if dept_id else None,
     )
 
 
@@ -873,9 +931,11 @@ async def list_departments(admin: dict = Depends(require_admin)):
             staff_ids.append(d["manager_id"])
 
         product_count = 0
+        low_stock_count = 0
         if staff_ids:
-            prods = sb.table("products").select("id", count="exact").in_("seller_id", staff_ids).execute()
-            product_count = prods.count or 0
+            prods = sb.table("products").select("id, stock").in_("seller_id", staff_ids).eq("is_active", True).execute()
+            product_count = len(prods.data) if prods.data else 0
+            low_stock_count = sum(1 for p in (prods.data or []) if int(p.get("stock", 0)) < 5)
 
         # Revenue and order counts from completed transactions
         total_revenue = 0
@@ -902,6 +962,7 @@ async def list_departments(admin: dict = Depends(require_admin)):
             "manager_name": manager_name,
             "staff_count": staff.count or 0,
             "product_count": product_count,
+            "low_stock_count": low_stock_count,
             "total_revenue": round(total_revenue, 2),
             "total_orders": total_orders,
             "delivery_orders": delivery_orders,
@@ -939,11 +1000,59 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
     if d.get("manager_id") and d["manager_id"] not in staff_ids:
         staff_ids.append(d["manager_id"])
 
-    # Products count
+    # Products with revenue data
     product_count = 0
+    low_stock_count = 0
+    department_products = []
     if staff_ids:
-        prods = sb.table("products").select("id", count="exact").in_("seller_id", staff_ids).execute()
-        product_count = prods.count or 0
+        prods = sb.table("products").select("id, title, images, price, stock, is_active").in_("seller_id", staff_ids).eq("is_active", True).execute()
+        product_count = len(prods.data) if prods.data else 0
+        low_stock_count = sum(1 for p in (prods.data or []) if int(p.get("stock", 0)) < 5)
+
+        # Get revenue per product from completed transactions
+        if prods.data:
+            prod_ids = [p["id"] for p in prods.data]
+            prod_txns = sb.table("product_transactions").select(
+                "product_id, amount"
+            ).in_("product_id", prod_ids).in_("status", ["delivered", "completed"]).execute()
+            prod_revenue = {}
+            for pt in (prod_txns.data or []):
+                pid = pt["product_id"]
+                prod_revenue[pid] = prod_revenue.get(pid, 0) + float(pt["amount"])
+
+            for p in prods.data:
+                department_products.append({
+                    "id": p["id"],
+                    "title": p["title"],
+                    "images": p.get("images", []),
+                    "price": float(p["price"]),
+                    "stock": int(p.get("stock", 0)),
+                    "total_revenue": round(prod_revenue.get(p["id"], 0), 2),
+                })
+            # Sort by revenue descending
+            department_products.sort(key=lambda x: x["total_revenue"], reverse=True)
+
+    # Pending restock requests for this department
+    pending_restocks = []
+    restock_result = sb.table("restock_requests").select(
+        "*, products(title, images, stock)"
+    ).eq("department_id", dept_id).in_("status", ["pending_manager", "approved_manager"]).order("created_at", desc=True).limit(20).execute()
+    if restock_result.data:
+        rs_staff_ids = set(r["staff_id"] for r in restock_result.data)
+        rs_users = sb.table("users").select("id, full_name").in_("id", list(rs_staff_ids)).execute() if rs_staff_ids else None
+        rs_names = {u["id"]: u["full_name"] for u in (rs_users.data or [])} if rs_users else {}
+        for r in restock_result.data:
+            prod_info = r.get("products") or {}
+            pending_restocks.append({
+                "id": r["id"],
+                "product_title": prod_info.get("title", ""),
+                "product_images": prod_info.get("images", []),
+                "current_stock": int(prod_info.get("stock", 0)),
+                "requested_quantity": r["requested_quantity"],
+                "status": r["status"],
+                "requested_by": rs_names.get(r["staff_id"], "Unknown"),
+                "created_at": r["created_at"],
+            })
 
     # Transaction data for sales graphs
     daily_sales = {}
@@ -1013,6 +1122,9 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
         "staff": staff_result.data or [],
         "total_staff": len(staff_result.data or []),
         "total_products": product_count,
+        "low_stock_count": low_stock_count,
+        "products": department_products,
+        "pending_restocks": pending_restocks,
         "total_revenue": round(total_revenue, 2),
         "total_orders": total_orders,
         "delivery_orders": delivery_order_count,
@@ -1210,3 +1322,265 @@ async def admin_reject_removal(product_id: str, admin: dict = Depends(require_ad
     }).eq("id", product_id).execute()
 
     return {"message": "Product removal rejected. Product remains active."}
+
+
+# --- Deliveries Management ---
+
+class DeliveryStatsDay(BaseModel):
+    date: str
+    count: int
+
+class Deliveryman(BaseModel):
+    user_id: str
+    full_name: str
+    email: str
+    contact_number: str = ""
+    total_deliveries: int = 0
+    avg_delivery_time: Optional[float] = None
+    completed_count: int = 0
+
+class DeliveriesStatsResponse(BaseModel):
+    total_deliveries: int
+    avg_delivery_time: Optional[float]
+    deliveries_by_day: list[DeliveryStatsDay]
+    deliveries_by_week: list[DeliveryStatsDay]
+    deliveries_by_month: list[DeliveryStatsDay]
+    deliverymen: list[Deliveryman]
+
+
+@router.get("/deliveries/stats", response_model=DeliveriesStatsResponse)
+async def get_deliveries_stats(admin: dict = Depends(require_admin)):
+    """Get all deliveries stats including avg delivery time and breakdown by deliveryman."""
+    sb = get_supabase()
+
+    # Get all delivery transactions (filter out empty delivery_user_id locally)
+    all_txns = sb.table("product_transactions").select(
+        "*"
+    ).order("created_at", desc=False).execute()
+    
+    if all_txns.data:
+        txns_data = [t for t in all_txns.data if t.get("delivery_user_id")]
+    else:
+        txns_data = []
+        
+    class AttrDict:
+        def __init__(self, d):
+            self.data = d
+    txns = AttrDict(txns_data)
+
+    if not txns.data:
+        return DeliveriesStatsResponse(
+            total_deliveries=0,
+            avg_delivery_time=None,
+            deliveries_by_day=[],
+            deliveries_by_week=[],
+            deliveries_by_month=[],
+            deliverymen=[]
+        )
+
+    # Get deliveryman contact info
+    deliveryman_ids = list(set(t["delivery_user_id"] for t in txns.data if t["delivery_user_id"]))
+    contacts = {}
+    if deliveryman_ids:
+        contacts_result = sb.table("user_contacts").select("user_id, contact_number").in_("user_id", deliveryman_ids).execute()
+        contacts = {c["user_id"]: c["contact_number"] for c in (contacts_result.data or [])}
+
+    # Get user details for deliverymen
+    user_details = {}
+    if deliveryman_ids:
+        users_result = sb.table("users").select("id, full_name, email").in_("id", deliveryman_ids).execute()
+        user_details = {u["id"]: u for u in (users_result.data or [])}
+
+    # Calculate stats
+    delivery_times = []
+    deliveries_by_date = {}
+    deliveries_by_week = {}
+    deliveries_by_month = {}
+    deliverymen_map = {}
+
+    for t in txns.data:
+        delivery_user_id = t.get("delivery_user_id")
+        if not delivery_user_id:
+            continue
+
+        # Initialize deliveryman entry
+        if delivery_user_id not in deliverymen_map:
+            user_info = user_details.get(delivery_user_id, {})
+            deliverymen_map[delivery_user_id] = {
+                "user_id": delivery_user_id,
+                "full_name": user_info.get("full_name", "Unknown"),
+                "email": user_info.get("email", ""),
+                "contact_number": contacts.get(delivery_user_id, ""),
+                "total_deliveries": 0,
+                "completed_count": 0,
+                "delivery_times": []
+            }
+
+        deliverymen_map[delivery_user_id]["total_deliveries"] += 1
+
+        # Track delivery time if status is delivered
+        if t.get("status") == "delivered":
+            deliverymen_map[delivery_user_id]["completed_count"] += 1
+            created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+            if t.get("updated_at"):
+                updated = datetime.fromisoformat(t["updated_at"].replace("Z", "+00:00"))
+                time_diff = (updated - created).total_seconds() / 3600  # hours
+                deliverymen_map[delivery_user_id]["delivery_times"].append(time_diff)
+                delivery_times.append(time_diff)
+
+        # Count by date
+        created_date = t["created_at"].split("T")[0]
+        deliveries_by_date[created_date] = deliveries_by_date.get(created_date, 0) + 1
+
+        # Count by week (ISO week)
+        created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+        week_key = created.strftime("%Y-W%U")
+        deliveries_by_week[week_key] = deliveries_by_week.get(week_key, 0) + 1
+
+        # Count by month
+        month_key = created.strftime("%Y-%m")
+        deliveries_by_month[month_key] = deliveries_by_month.get(month_key, 0) + 1
+
+    # Calculate average delivery time
+    avg_delivery_time = sum(delivery_times) / len(delivery_times) if delivery_times else None
+
+    # Format deliveries breakdown
+    days_list = [{"date": date, "count": count} for date, count in sorted(deliveries_by_date.items())]
+    weeks_list = [{"date": week, "count": count} for week, count in sorted(deliveries_by_week.items())]
+    months_list = [{"date": month, "count": count} for month, count in sorted(deliveries_by_month.items())]
+
+    # Build deliverymen list
+    deliverymen_list = []
+    for user_id, data in deliverymen_map.items():
+        avg_time = sum(data["delivery_times"]) / len(data["delivery_times"]) if data["delivery_times"] else None
+        deliverymen_list.append(Deliveryman(
+            user_id=user_id,
+            full_name=data["full_name"],
+            email=data["email"],
+            contact_number=data["contact_number"],
+            total_deliveries=data["total_deliveries"],
+            avg_delivery_time=avg_time,
+            completed_count=data["completed_count"]
+        ))
+
+    return DeliveriesStatsResponse(
+        total_deliveries=len(txns.data),
+        avg_delivery_time=avg_delivery_time,
+        deliveries_by_day=days_list,
+        deliveries_by_week=weeks_list,
+        deliveries_by_month=months_list,
+        deliverymen=deliverymen_list
+    )
+
+
+# --- Admin Restock Request ---
+
+class AdminRestockRequestCreate(BaseModel):
+    product_id: str
+    requested_quantity: int
+    notes: str = ""
+
+
+@router.post("/restock-request")
+async def admin_create_restock_request(req: AdminRestockRequestCreate, admin: dict = Depends(require_admin)):
+    """
+    Admin creates a restock request that bypasses manager approval.
+    Status is set directly to 'approved_manager' so delivery can pick it up.
+    """
+    sb = get_supabase()
+    admin_id = admin["sub"]
+
+    if req.requested_quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+
+    # Get the product and its department
+    product = sb.table("products").select("id, seller_id, title").eq("id", req.product_id).execute()
+    if not product.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Get seller's department_id
+    seller_id = product.data[0]["seller_id"]
+    seller = sb.table("users").select("department_id").eq("id", seller_id).execute()
+    department_id = seller.data[0].get("department_id") if seller.data else None
+
+    if not department_id:
+        raise HTTPException(status_code=400, detail="Product does not belong to a department")
+
+    # Get admin name
+    admin_user = sb.table("users").select("full_name").eq("id", admin_id).execute()
+    admin_name = admin_user.data[0]["full_name"] if admin_user.data else "Admin"
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Create restock request with status 'approved_manager' (bypasses manager)
+    result = sb.table("restock_requests").insert({
+        "staff_id": admin_id,
+        "department_id": department_id,
+        "product_id": req.product_id,
+        "requested_quantity": req.requested_quantity,
+        "approved_quantity": req.requested_quantity,
+        "notes": req.notes,
+        "status": "approved_manager",
+        "manager_approved_at": now,
+    }).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create restock request")
+
+    return {
+        "message": f"Restock request created by {admin_name} and marked as To Be Delivered",
+        "request": result.data[0],
+        "requested_by": admin_name,
+    }
+
+
+@router.get("/restock-requests")
+async def admin_get_restock_requests(
+    department_id: str = Query("", description="Filter by department ID"),
+    status: str = Query("", description="Filter by status"),
+    admin: dict = Depends(require_admin),
+):
+    """Get restock requests, optionally filtered by department and status."""
+    sb = get_supabase()
+
+    query = sb.table("restock_requests").select(
+        "*, products(title, price, stock, images)"
+    ).order("created_at", desc=True).limit(100)
+
+    if department_id:
+        query = query.eq("department_id", department_id)
+    if status:
+        query = query.eq("status", status)
+
+    requests = query.execute()
+
+    # Get staff names
+    staff_ids = set()
+    for r in (requests.data or []):
+        staff_ids.add(r["staff_id"])
+
+    staff_names = {}
+    if staff_ids:
+        users_result = sb.table("users").select("id, full_name, role").in_("id", list(staff_ids)).execute()
+        staff_names = {u["id"]: {"name": u["full_name"], "role": u.get("role", "")} for u in (users_result.data or [])}
+
+    results = []
+    for r in (requests.data or []):
+        prod = r.get("products") or {}
+        staff_info = staff_names.get(r["staff_id"], {"name": "Unknown", "role": ""})
+        results.append({
+            "id": r["id"],
+            "product_id": r["product_id"],
+            "product_title": prod.get("title", ""),
+            "product_images": prod.get("images", []),
+            "current_stock": int(prod.get("stock", 0)),
+            "requested_quantity": r["requested_quantity"],
+            "approved_quantity": r.get("approved_quantity"),
+            "notes": r.get("notes", ""),
+            "requested_by": staff_info["name"],
+            "requested_by_role": staff_info["role"],
+            "status": r["status"],
+            "created_at": r["created_at"],
+        })
+
+    return results

@@ -1,11 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance } from '../../lib/api';
+import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, getSellerWishlistReport } from '../../lib/api';
 import SearchContent from '../components/SearchContent';
+import {
+    LayoutDashboard, Tag, ShoppingCart, Truck, Package,
+    Search, ClipboardList, Heart, LogOut, TrendingUp,
+} from 'lucide-react';
 
 // ── Sidebar Item ─────────────────────────────────────────
-function SidebarItem({ icon, label, active, onClick, badge }) {
+function SidebarItem({ icon: Icon, label, active, onClick, badge }) {
     return (
         <button onClick={onClick} style={{
             display: 'flex', alignItems: 'center', gap: 12,
@@ -18,7 +22,9 @@ function SidebarItem({ icon, label, active, onClick, badge }) {
             transition: 'all 0.2s',
             fontFamily: 'Inter, sans-serif',
         }}>
-            <span style={{ fontSize: '1.1rem', width: 24, textAlign: 'center' }}>{icon}</span>
+            <span style={{ width: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {typeof Icon === 'string' ? Icon : <Icon size={20} strokeWidth={1.8} />}
+            </span>
             <span style={{ flex: 1 }}>{label}</span>
             {badge != null && badge > 0 && (
                 <span style={{
@@ -58,15 +64,22 @@ export default function SellPage() {
     // Walk-in orders state
     const [walkinOrders, setWalkinOrders] = useState([]);
     const [walkinLoading, setWalkinLoading] = useState(false);
+    const [staffWalkinFilter, setStaffWalkinFilter] = useState('all');
+    const [staffWalkinSearch, setStaffWalkinSearch] = useState('');
     // Delivery orders state
     const [deliveryOrders, setDeliveryOrders] = useState([]);
     const [deliveryLoading, setDeliveryLoading] = useState(false);
+    const [staffDeliveryFilter, setStaffDeliveryFilter] = useState('all');
+    const [staffDeliverySearch, setStaffDeliverySearch] = useState('');
     // Active section tab
     const [activeSection, setActiveSection] = useState('dashboard');
     const [initialLoading, setInitialLoading] = useState(true);
     // Dashboard state
     const [sellerBalance, setSellerBalance] = useState(0);
     const [sellerTxns, setSellerTxns] = useState([]);
+    // Wishlist analytics
+    const [wishlistReport, setWishlistReport] = useState(null);
+    const [wishlistLoading, setWishlistLoading] = useState(false);
 
     useEffect(() => {
         const stored = getStoredUser();
@@ -86,10 +99,19 @@ export default function SellPage() {
     const loadInitialData = async () => {
         setInitialLoading(true);
         try {
-            await Promise.all([loadProducts(), loadRestockRequests(), loadWalkinOrders(), loadDeliveryOrders(), loadDashboardData()]);
+            await Promise.all([loadProducts(), loadRestockRequests(), loadWalkinOrders(), loadDeliveryOrders(), loadDashboardData(), loadWishlistReport()]);
         } finally {
             setInitialLoading(false);
         }
+    };
+
+    const loadWishlistReport = async () => {
+        setWishlistLoading(true);
+        try {
+            const data = await getSellerWishlistReport();
+            setWishlistReport(data);
+        } catch (e) { console.error(e); }
+        finally { setWishlistLoading(false); }
     };
 
     const loadDashboardData = async () => {
@@ -318,26 +340,35 @@ export default function SellPage() {
                 display: 'flex', flexDirection: 'column',
                 position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 200,
             }}>
-                <a href="/" style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '20px 20px 16px', textDecoration: 'none',
+                <div style={{
+                    padding: '20px 16px 16px',
                     borderBottom: '1px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', gap: 10,
                 }}>
-                    <img src="/logo.png" alt="RetailTalk" style={{ height: 28, width: 28 }} />
-                    <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}>RetailTalk</span>
-                </a>
+                    <div style={{
+                        width: 40, height: 40, borderRadius: 10,
+                        background: 'var(--gradient-primary)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1.3rem', fontWeight: 800, color: '#fff',
+                    }}>RT</div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>RetailTalk</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Seller</div>
+                    </div>
+                </div>
 
                 <nav style={{ padding: '16px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <SidebarItem icon="📊" label="Dashboard" active={activeSection === 'dashboard'} onClick={() => setActiveSection('dashboard')} />
-                    <SidebarItem icon="🏷️" label="Products" active={activeSection === 'products'} onClick={() => setActiveSection('products')} />
-                    <SidebarItem icon="🛒" label="Walk-in Orders" active={activeSection === 'walkin'} onClick={() => setActiveSection('walkin')} badge={walkinOrders.length} />
-                    <SidebarItem icon="🚚" label="Delivery Orders" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={deliveryOrders.filter(o => o.status === 'pending').length} />
-                    <SidebarItem icon="📦" label="Restock" active={activeSection === 'restock'} onClick={() => setActiveSection('restock')} badge={restockRequests.length} />
+                    <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeSection === 'dashboard'} onClick={() => setActiveSection('dashboard')} />
+                    <SidebarItem icon={Tag} label="Products" active={activeSection === 'products'} onClick={() => setActiveSection('products')} />
+                    <SidebarItem icon={ShoppingCart} label="Walk-in Orders" active={activeSection === 'walkin'} onClick={() => setActiveSection('walkin')} badge={walkinOrders.length} />
+                    <SidebarItem icon={Truck} label="Delivery Orders" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={deliveryOrders.filter(o => o.status === 'pending').length} />
+                    <SidebarItem icon={Package} label="Restock" active={activeSection === 'restock'} onClick={() => setActiveSection('restock')} badge={restockRequests.length} />
 
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
 
-                    <SidebarItem icon="🔍" label="Search" active={activeSection === 'search'} onClick={() => setActiveSection('search')} />
-                    <SidebarItem icon="📋" label="Order History" active={activeSection === 'orderhistory'} onClick={() => setActiveSection('orderhistory')} />
+                    <SidebarItem icon={Search} label="Search" active={activeSection === 'search'} onClick={() => setActiveSection('search')} />
+                    <SidebarItem icon={ClipboardList} label="Order History" active={activeSection === 'orderhistory'} onClick={() => setActiveSection('orderhistory')} />
+                    <SidebarItem icon={Heart} label="Wishlist Analytics" active={activeSection === 'wishlist'} onClick={() => { setActiveSection('wishlist'); loadWishlistReport(); }} />
                 </nav>
 
                 <div style={{
@@ -360,8 +391,8 @@ export default function SellPage() {
                     </div>
                     <button onClick={handleLogout} title="Logout" style={{
                         background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--text-muted)', fontSize: '1.1rem',
-                    }}>🚪</button>
+                        color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
+                    }}><LogOut size={18} /></button>
                 </div>
             </aside>
 
@@ -466,6 +497,128 @@ export default function SellPage() {
                     );
                 })()}
 
+                {/* ===== WISHLIST ANALYTICS TAB ===== */}
+                {activeSection === 'wishlist' && (
+                    <div>
+                        <div style={{ marginBottom: 24 }}>
+                            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}><Heart size={24} /> Wishlist Analytics</h1>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>See which products buyers are saving</p>
+                        </div>
+
+                        {wishlistLoading ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '60px 0', flexDirection: 'column', gap: 16 }}>
+                                <div className="spinner" style={{ width: 36, height: 36 }} />
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading wishlist data...</p>
+                            </div>
+                        ) : (
+                            <>
+                                {/* Summary Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+                                    <div className="card" style={{ padding: 20, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+                                        <div style={{ position: 'absolute', top: -4, right: -4, opacity: 0.07 }}><Heart size={56} /></div>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Wishlists</div>
+                                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444' }}>{wishlistReport?.total_wishlists ?? 0}</div>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>times your products were saved</div>
+                                    </div>
+                                    <div className="card" style={{ padding: 20, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+                                        <div style={{ position: 'absolute', top: -4, right: -4, opacity: 0.07 }}><Package size={56} /></div>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Products Tracked</div>
+                                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#6366f1' }}>{wishlistReport?.total_products ?? 0}</div>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>products in your store</div>
+                                    </div>
+                                    <div className="card" style={{ padding: 20, textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
+                                        <div style={{ position: 'absolute', top: -4, right: -4, opacity: 0.07 }}><TrendingUp size={56} /></div>
+                                        <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Avg / Product</div>
+                                        <div style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b' }}>{wishlistReport?.wishlist_per_product?.toFixed(2) ?? '0.00'}</div>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>average wishlists per product</div>
+                                    </div>
+                                </div>
+
+                                {/* Per-Product Breakdown */}
+                                <div className="card">
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                                        <h3 style={{ fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 6 }}><Heart size={18} /> Wishlist by Product</h3>
+                                        <button
+                                            onClick={loadWishlistReport}
+                                            style={{
+                                                padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border-color)',
+                                                background: 'var(--bg-secondary)', color: 'var(--text-secondary)',
+                                                cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+                                                fontFamily: 'Inter, sans-serif',
+                                            }}
+                                        >↻ Refresh</button>
+                                    </div>
+
+                                    {(!wishlistReport?.products || wishlistReport.products.length === 0) ? (
+                                        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
+                                            <div style={{ marginBottom: 12, color: 'var(--text-muted)' }}><Heart size={40} /></div>
+                                            <p style={{ fontWeight: 600, marginBottom: 6 }}>No wishlist data yet</p>
+                                            <p style={{ fontSize: '0.85rem' }}>When buyers save your products, they'll appear here</p>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                            {wishlistReport.products.map((prod, i) => {
+                                                const maxCount = wishlistReport.products[0]?.wishlist_count || 1;
+                                                const barWidth = maxCount > 0 ? (prod.wishlist_count / maxCount) * 100 : 0;
+                                                const rankColors = ['#ef4444', '#f59e0b', '#6366f1'];
+                                                const rankColor = rankColors[i] || 'var(--border-color)';
+                                                return (
+                                                    <div key={prod.product_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        {/* Rank */}
+                                                        <span style={{
+                                                            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            fontSize: '0.78rem', fontWeight: 700,
+                                                            background: i < 3 ? rankColor : 'var(--border-color)',
+                                                            color: i < 3 ? '#fff' : 'var(--text-muted)',
+                                                        }}>{i + 1}</span>
+
+                                                        {/* Image */}
+                                                        {prod.image_url && (
+                                                            <div style={{
+                                                                width: 40, height: 40, borderRadius: 8, overflow: 'hidden',
+                                                                border: '1px solid var(--border-color)', flexShrink: 0,
+                                                            }}>
+                                                                <img src={prod.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                                            </div>
+                                                        )}
+
+                                                        {/* Name + Bar */}
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <p style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {prod.title || 'Untitled'}
+                                                            </p>
+                                                            <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-secondary)', overflow: 'hidden' }}>
+                                                                <div style={{
+                                                                    height: '100%', borderRadius: 3,
+                                                                    width: `${barWidth}%`,
+                                                                    background: 'linear-gradient(90deg, #ef4444, #f59e0b)',
+                                                                    transition: 'width 0.6s ease',
+                                                                }} />
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Count badge */}
+                                                        <div style={{
+                                                            display: 'flex', alignItems: 'center', gap: 4,
+                                                            padding: '4px 10px', borderRadius: 20, flexShrink: 0,
+                                                            background: 'rgba(239,68,68,0.1)',
+                                                            color: '#ef4444', fontWeight: 700, fontSize: '0.85rem',
+                                                        }}>
+                                                            <Heart size={14} />
+                                                            <span>{prod.wishlist_count}</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+
                 {/* ===== SEARCH TAB (embedded) ===== */}
                 {activeSection === 'search' && <SearchContent />}
 
@@ -527,7 +680,7 @@ export default function SellPage() {
                                                     {img ? (
                                                         <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                     ) : (
-                                                        <span style={{ fontSize: '1.5rem' }}>📦</span>
+                                                        <Package size={24} style={{ color: 'var(--text-muted)' }} />
                                                     )}
                                                 </div>
 
@@ -544,7 +697,7 @@ export default function SellPage() {
                                                             color: order.purchase_type === 'delivery' ? '#6366f1' : '#10b981',
                                                             padding: '1px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
                                                         }}>
-                                                            {order.purchase_type === 'delivery' ? '🚚 Delivery' : '🛒 Walk-in'}
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{order.purchase_type === 'delivery' ? <><Truck size={12} /> Delivery</> : <><ShoppingCart size={12} /> Walk-in</>}</span>
                                                         </span>
                                                     </div>
                                                 </div>
@@ -815,26 +968,62 @@ export default function SellPage() {
                 </>)}
 
                 {/* ===== DELIVERY ORDERS TAB ===== */}
-                {activeSection === 'delivery' && !initialLoading && (
+                {activeSection === 'delivery' && !initialLoading && (() => {
+                    const deliveryColors = {
+                        pending: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
+                        approved: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Ready for Pickup' },
+                        ondeliver: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'On Delivery' },
+                        delivered: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Delivered' },
+                        undelivered: { bg: 'rgba(239,68,68,0.1)', color: '#ef4444', label: 'Undelivered' },
+                        cancelled: { bg: 'rgba(148,163,184,0.1)', color: '#94a3b8', label: 'Cancelled' },
+                    };
+                    let filtered = deliveryOrders;
+                    if (staffDeliveryFilter !== 'all') filtered = filtered.filter(o => o.status === staffDeliveryFilter);
+                    if (staffDeliverySearch.trim()) {
+                        const q = staffDeliverySearch.toLowerCase();
+                        filtered = filtered.filter(o =>
+                            (o.product_title || '').toLowerCase().includes(q) ||
+                            (o.buyer_name || '').toLowerCase().includes(q)
+                        );
+                    }
+                    return (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Delivery Orders</h1>
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage delivery orders — mark as ready for pickup</p>
                             </div>
-                            <button className="btn btn-outline btn-sm" onClick={loadDeliveryOrders}>Refresh</button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    type="text" placeholder="Search orders..."
+                                    value={staffDeliverySearch} onChange={e => setStaffDeliverySearch(e.target.value)}
+                                    style={{
+                                        width: 180, padding: '8px 12px', borderRadius: 8,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontSize: '0.82rem',
+                                    }}
+                                />
+                                <button className="btn btn-outline btn-sm" onClick={loadDeliveryOrders}>Refresh</button>
+                            </div>
                         </div>
-                        {deliveryOrders.length === 0 ? (
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                            {[{ key: 'all', label: 'All' }, ...Object.entries(deliveryColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (
+                                <button key={f.key} onClick={() => setStaffDeliveryFilter(f.key)} style={{
+                                    padding: '5px 14px', borderRadius: 8, border: '1px solid',
+                                    borderColor: staffDeliveryFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    background: staffDeliveryFilter === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: staffDeliveryFilter === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.15s',
+                                }}>{f.label}</button>
+                            ))}
+                        </div>
+                        {filtered.length === 0 ? (
                             <div className="empty-state"><h3>No delivery orders</h3><p>Delivery orders from buyers will appear here</p></div>
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
-                                {deliveryOrders.map(order => {
-                                    const statusColors = {
-                                        pending: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
-                                        approved: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Ready for Pickup' },
-                                        ondeliver: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'On Delivery' },
-                                    };
-                                    const sc = statusColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                {filtered.map(order => {
+                                    const sc = deliveryColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -888,32 +1077,67 @@ export default function SellPage() {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ===== WALK-IN ORDERS TAB ===== */}
-                {activeSection === 'walkin' && !initialLoading && (
+                {activeSection === 'walkin' && !initialLoading && (() => {
+                    const walkinColors = {
+                        pending_walkin: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
+                        inwork: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'In Work' },
+                        ready: { bg: 'rgba(139,92,246,0.1)', color: '#8b5cf6', label: 'Ready' },
+                        picked_up: { bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9', label: 'Picked Up' },
+                        completed: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Completed' },
+                    };
+                    let filtered = walkinOrders;
+                    if (staffWalkinFilter !== 'all') filtered = filtered.filter(o => o.status === staffWalkinFilter);
+                    if (staffWalkinSearch.trim()) {
+                        const q = staffWalkinSearch.toLowerCase();
+                        filtered = filtered.filter(o =>
+                            (o.product_title || '').toLowerCase().includes(q) ||
+                            (o.buyer_name || '').toLowerCase().includes(q)
+                        );
+                    }
+                    const nextStatus = { pending_walkin: 'inwork', inwork: 'ready', picked_up: 'completed' };
+                    const nextLabel = { pending_walkin: 'Start Working', inwork: 'Mark Ready', picked_up: 'Mark Completed' };
+                    return (
                     <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Walk-in Orders</h1>
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Walk-in orders from buyers</p>
                             </div>
-                            <button className="btn btn-outline btn-sm" onClick={loadWalkinOrders}>Refresh</button>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                                <input
+                                    type="text" placeholder="Search orders..."
+                                    value={staffWalkinSearch} onChange={e => setStaffWalkinSearch(e.target.value)}
+                                    style={{
+                                        width: 180, padding: '8px 12px', borderRadius: 8,
+                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontSize: '0.82rem',
+                                    }}
+                                />
+                                <button className="btn btn-outline btn-sm" onClick={loadWalkinOrders}>Refresh</button>
+                            </div>
                         </div>
-                        {walkinOrders.length === 0 ? (
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                            {[{ key: 'all', label: 'All' }, ...Object.entries(walkinColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (
+                                <button key={f.key} onClick={() => setStaffWalkinFilter(f.key)} style={{
+                                    padding: '5px 14px', borderRadius: 8, border: '1px solid',
+                                    borderColor: staffWalkinFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    background: staffWalkinFilter === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: staffWalkinFilter === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.15s',
+                                }}>{f.label}</button>
+                            ))}
+                        </div>
+                        {filtered.length === 0 ? (
                             <div className="empty-state"><h3>No walk-in orders</h3><p>Walk-in orders from buyers will appear here</p></div>
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
-                                {walkinOrders.map(order => {
-                                    const statusColors = {
-                                        pending_walkin: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
-                                        inwork: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'In Work' },
-                                        ready: { bg: 'rgba(139,92,246,0.1)', color: '#8b5cf6', label: 'Ready - Waiting for Buyer' },
-                                        picked_up: { bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9', label: 'Picked Up' },
-                                    };
-                                    const sc = statusColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
-                                    const nextStatus = { pending_walkin: 'inwork', inwork: 'ready', picked_up: 'completed' };
-                                    const nextLabel = { pending_walkin: 'Start Working', inwork: 'Mark Ready', picked_up: 'Mark Completed' };
+                                {filtered.map(order => {
+                                    const sc = walkinColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -961,7 +1185,8 @@ export default function SellPage() {
                             </div>
                         )}
                     </div>
-                )}
+                    );
+                })()}
 
                 {/* ===== RESTOCK TAB ===== */}
                 {activeSection === 'restock' && !initialLoading && (

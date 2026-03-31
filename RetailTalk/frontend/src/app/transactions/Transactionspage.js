@@ -4,7 +4,7 @@ import { getTransactionHistory, getBalance, getStoredUser } from '../../lib/api'
 import { useState, useEffect } from 'react';
 
 /**
- * Transactionspage.js — Buyer Spending Dashboard
+ * Transactionspage.js — Order History & Spending Dashboard
  */
 
 export default function TransactionsPage() {
@@ -13,6 +13,9 @@ export default function TransactionsPage() {
     const [loading, setLoading] = useState(true);
     const [authChecked, setAuthChecked] = useState(false);
     const [spendingPeriod, setSpendingPeriod] = useState('daily');
+    const [orderTypeFilter, setOrderTypeFilter] = useState('all');
+    const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+    const [orderSearch, setOrderSearch] = useState('');
 
     useEffect(() => {
         const stored = getStoredUser();
@@ -95,8 +98,8 @@ export default function TransactionsPage() {
     return (
         <div className="page">
             <div className="page-header">
-                <h1>📊 Transactions</h1>
-                <p>Spending reports & purchase history</p>
+                <h1>📋 Order History</h1>
+                <p>Your spending reports & purchase history</p>
             </div>
 
             {/* Summary Cards */}
@@ -148,52 +151,117 @@ export default function TransactionsPage() {
                 )}
             </div>
 
-            {/* Purchased Products */}
+            {/* Order History */}
             <div className="card">
-                <h3 style={{ marginBottom: 16 }}>🛍️ Products Purchased</h3>
-                {myBuyerTxns.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No purchases yet</p>
-                ) : (
-                    <div style={{ display: 'grid', gap: 10, maxHeight: 400, overflowY: 'auto', paddingRight: 6 }}>
-                        {myBuyerTxns.map(t => {
-                            const productImage = t.product_images && t.product_images.length > 0 ? t.product_images[0] : null;
-                            const sInfo = statusMap[t.status] || { label: t.status, color: '#94a3b8' };
-                            return (
-                                <div key={t.id} style={{
-                                    display: 'flex', gap: 12, padding: 12, borderRadius: 10,
-                                    border: '1px solid var(--border-color)', alignItems: 'center',
-                                }}>
-                                    <div style={{
-                                        width: 48, height: 48, borderRadius: 8, overflow: 'hidden',
-                                        background: 'var(--bg-secondary)', flexShrink: 0,
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                    <h3 style={{ margin: 0 }}>🛍️ Order History</h3>
+                    <input
+                        type="text" placeholder="Search orders..."
+                        value={orderSearch} onChange={e => setOrderSearch(e.target.value)}
+                        style={{
+                            width: 180, padding: '8px 12px', borderRadius: 8,
+                            background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                            color: 'var(--text-primary)', fontSize: '0.82rem',
+                        }}
+                    />
+                </div>
+                {/* Type + Status Filters */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginRight: 2 }}>Type:</span>
+                    {[{ key: 'all', label: 'All' }, { key: 'delivery', label: 'Delivery' }, { key: 'walkin', label: 'Walk-in' }].map(f => (
+                        <button key={f.key} onClick={() => { setOrderTypeFilter(f.key); setOrderStatusFilter('all'); }} style={{
+                            padding: '5px 12px', borderRadius: 8, border: '1px solid',
+                            borderColor: orderTypeFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                            background: orderTypeFilter === f.key ? 'var(--accent-primary)' : 'transparent',
+                            color: orderTypeFilter === f.key ? '#fff' : 'var(--text-muted)',
+                            fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+                        }}>{f.label}</button>
+                    ))}
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginLeft: 10, marginRight: 2 }}>Status:</span>
+                    <select
+                        value={orderStatusFilter}
+                        onChange={e => setOrderStatusFilter(e.target.value)}
+                        style={{
+                            padding: '5px 10px', borderRadius: 8,
+                            border: '1px solid var(--border-color)',
+                            background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                            fontSize: '0.75rem', cursor: 'pointer',
+                        }}
+                    >
+                        <option value="all">All</option>
+                        {Object.entries(statusMap)
+                            .filter(([k]) => {
+                                if (orderTypeFilter === 'delivery') return ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'].includes(k);
+                                if (orderTypeFilter === 'walkin') return ['pending_walkin', 'inwork', 'ready', 'picked_up', 'completed', 'cancelled'].includes(k);
+                                return true;
+                            })
+                            .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select>
+                </div>
+                {(() => {
+                    let filtered = myBuyerTxns;
+                    if (orderTypeFilter === 'delivery') filtered = filtered.filter(t => t.purchase_type === 'delivery');
+                    else if (orderTypeFilter === 'walkin') filtered = filtered.filter(t => t.purchase_type !== 'delivery');
+                    if (orderStatusFilter !== 'all') filtered = filtered.filter(t => t.status === orderStatusFilter);
+                    if (orderSearch.trim()) {
+                        const q = orderSearch.toLowerCase();
+                        filtered = filtered.filter(t =>
+                            (t.product_title || '').toLowerCase().includes(q) ||
+                            (t.seller_name || '').toLowerCase().includes(q)
+                        );
+                    }
+                    return filtered.length === 0 ? (
+                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No orders found</p>
+                    ) : (
+                        <div style={{ display: 'grid', gap: 10, maxHeight: 400, overflowY: 'auto', paddingRight: 6 }}>
+                            {filtered.map(t => {
+                                const productImage = t.product_images && t.product_images.length > 0 ? t.product_images[0] : null;
+                                const sInfo = statusMap[t.status] || { label: t.status, color: '#94a3b8' };
+                                const isDelivery = t.purchase_type === 'delivery';
+                                return (
+                                    <div key={t.id} style={{
+                                        display: 'flex', gap: 12, padding: 12, borderRadius: 10,
+                                        border: '1px solid var(--border-color)', alignItems: 'center',
                                     }}>
-                                        {productImage ? (
-                                            <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                onError={e => e.target.style.display = 'none'} />
-                                        ) : (
-                                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '1rem' }}>📦</div>
-                                        )}
+                                        <div style={{
+                                            width: 48, height: 48, borderRadius: 8, overflow: 'hidden',
+                                            background: 'var(--bg-secondary)', flexShrink: 0,
+                                        }}>
+                                            {productImage ? (
+                                                <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                    onError={e => e.target.style.display = 'none'} />
+                                            ) : (
+                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '1rem' }}>📦</div>
+                                            )}
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <p style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {t.product_title || 'Product'}
+                                            </p>
+                                            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                                {t.seller_name || 'Seller'} • Qty: {t.quantity || 1} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                                            </p>
+                                        </div>
+                                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                            <p style={{ fontWeight: 700, fontSize: '0.85rem' }}>₱{t.amount.toFixed(2)}</p>
+                                            <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 2 }}>
+                                                <span style={{
+                                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
+                                                    background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
+                                                    color: isDelivery ? '#3b82f6' : '#f59e0b',
+                                                }}>{isDelivery ? '🚚 Delivery' : '🏪 Walk-in'}</span>
+                                                <span style={{
+                                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
+                                                    background: `${sInfo.color}20`, color: sInfo.color,
+                                                }}>{sInfo.label}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                        <p style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {t.product_title || 'Product'}
-                                        </p>
-                                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                            {t.seller_name || 'Seller'} • Qty: {t.quantity || 1} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
-                                        </p>
-                                    </div>
-                                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                        <p style={{ fontWeight: 700, fontSize: '0.85rem' }}>₱{t.amount.toFixed(2)}</p>
-                                        <span style={{
-                                            padding: '2px 8px', borderRadius: 10, fontSize: '0.65rem', fontWeight: 600,
-                                            background: `${sInfo.color}20`, color: sInfo.color,
-                                        }}>{sInfo.label}</span>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
+                                );
+                            })}
+                        </div>
+                    );
+                })()}
             </div>
         </div>
     );

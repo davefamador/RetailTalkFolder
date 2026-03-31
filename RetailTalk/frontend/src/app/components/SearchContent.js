@@ -15,6 +15,7 @@ export default function SearchContent() {
     const [purchased, setPurchased] = useState(false);
     const [purchaseError, setPurchaseError] = useState('');
     const [purchaseType, setPurchaseType] = useState('delivery');
+    const [purchaseLoading, setPurchaseLoading] = useState(false);
 
     const [isListening, setIsListening] = useState(false);
     const [voiceSupported, setVoiceSupported] = useState(true);
@@ -148,12 +149,16 @@ export default function SearchContent() {
 
     const handlePurchase = async () => {
         if (!user) { setPurchaseError('Please log in to purchase items.'); return; }
+        if (purchaseLoading) return;
         setPurchaseError('');
+        setPurchaseLoading(true);
         try {
             await buyProduct(selectedProduct.id, quantity, purchaseType);
             setPurchased(true);
         } catch (err) {
             setPurchaseError(err.message || 'Failed to complete purchase.');
+        } finally {
+            setPurchaseLoading(false);
         }
     };
 
@@ -341,8 +346,9 @@ export default function SearchContent() {
                                             {purchaseType === 'delivery' && (
                                                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>+ PHP 90.00 delivery fee per department store</p>
                                             )}
-                                            <button className="btn btn-success" onClick={handlePurchase} style={{ width: '100%', padding: '12px', fontSize: '1rem' }}>
-                                                Buy for PHP {(parseFloat(selectedProduct.price) * quantity).toFixed(2)}
+                                            <button className="btn btn-success" onClick={handlePurchase} disabled={purchaseLoading}
+                                                style={{ width: '100%', padding: '12px', fontSize: '1rem', opacity: purchaseLoading ? 0.6 : 1, cursor: purchaseLoading ? 'not-allowed' : 'pointer' }}>
+                                                {purchaseLoading ? 'Processing...' : `Buy for PHP ${(parseFloat(selectedProduct.price) * quantity).toFixed(2)}`}
                                             </button>
                                         </>
                                     )}

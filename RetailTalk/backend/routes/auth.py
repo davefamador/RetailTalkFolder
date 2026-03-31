@@ -142,6 +142,10 @@ async def login(req: LoginRequest):
 
     user = result.data[0]
 
+    # Block admin accounts from using the main login — they must use /auth/admin/login
+    if user.get("role") == "admin":
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
     # Check if user is banned
     if user.get("is_banned"):
         raise HTTPException(status_code=403, detail="Your account has been banned. Contact admin for support.")

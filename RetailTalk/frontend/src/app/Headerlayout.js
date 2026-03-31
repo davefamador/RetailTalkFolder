@@ -4,6 +4,9 @@ import './globals.css';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { getStoredUser, logout, getBalance, getStoredAdmin, adminLogout } from '../lib/api';
+import {
+    ShoppingCart, Heart, Package, Truck, User, Sun, Moon,
+} from 'lucide-react';
 
 export default function RootLayout({ children }) {
     const [user, setUser] = useState(null);
@@ -68,8 +71,13 @@ export default function RootLayout({ children }) {
                     </a>
 
                     <div className="navbar-links">
-                        <a href="/search">Search</a>
-                        <a href="/products">Browse</a>
+                        {/* Search & Browse: only for buyer, admin, or unauthenticated users */}
+                        {(!hydrated || !user || user.role === 'buyer' || admin) && (
+                            <>
+                                <a href="/search">Search</a>
+                                <a href="/products">Browse</a>
+                            </>
+                        )}
 
                         {hydrated && (
                             <>
@@ -77,16 +85,16 @@ export default function RootLayout({ children }) {
                                     <>
                                         <a href="/sell">Products</a>
                                         <a href="/sell/reports">Reports</a>
-                                        <a href="/transactions">Transactions</a>
+                                        <a href="/transactions">Order History</a>
                                     </>
                                 )}
 
                                 {user && user.role === 'buyer' && (
                                     <>
-                                        <a href="/cart">🛒 Cart</a>
-                                        <a href="/wishlist">❤️ Wishlist</a>
-                                        <a href="/orders">📦 Orders</a>
-                                        <a href="/transactions">Transactions</a>
+                                        <a href="/cart" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><ShoppingCart size={16} /> Cart</a>
+                                        <a href="/wishlist" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Heart size={16} /> Wishlist</a>
+                                        <a href="/orders" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Package size={16} /> Orders</a>
+                                        <a href="/transactions">Order History</a>
                                     </>
                                 )}
 
@@ -95,7 +103,7 @@ export default function RootLayout({ children }) {
                                 )}
 
                                 {user && user.role === 'delivery' && (
-                                    <a href="/delivery" style={{ color: 'var(--accent-secondary)' }}>🚚 Delivery</a>
+                                    <a href="/delivery" style={{ color: 'var(--accent-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Truck size={16} /> Delivery</a>
                                 )}
 
                                 {admin && (
@@ -108,7 +116,7 @@ export default function RootLayout({ children }) {
                     <div className="navbar-user">
                         {hydrated && (
                             <button onClick={toggleTheme} className="theme-toggle" title="Toggle Light/Dark Mode" style={{ marginRight: '8px' }}>
-                                {theme === 'dark' ? '☀️' : '🌙'}
+                                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
                             </button>
                         )}
                         {hydrated ? (
@@ -140,7 +148,7 @@ export default function RootLayout({ children }) {
                                         onMouseEnter={e => { e.currentTarget.style.background = 'rgba(108,99,255,0.1)'; e.currentTarget.style.color = 'var(--accent-primary)'; }}
                                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                                     >
-                                        👤 {user.full_name}
+                                        <User size={16} style={{ marginRight: 2 }} /> {user.full_name}
                                     </a>
                                     <button onClick={handleLogout} className="btn btn-outline btn-sm">
                                         Logout

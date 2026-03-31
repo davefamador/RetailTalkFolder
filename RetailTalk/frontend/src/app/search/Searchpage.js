@@ -1,7 +1,8 @@
 'use client';
 
-import { searchProducts, getStoredUser, getStoredAdmin, buyProduct, addToCart, addToWishlist, removeFromWishlist, checkWishlist } from '../../lib/api';
+import { searchProducts, getStoredUser, getStoredAdmin } from '../../lib/api';
 import { useState, useEffect } from 'react';
+import ProductDetailModal from '../components/ProductDetailModal';
 
 export default function SearchPage() {
     const [query, setQuery] = useState('');
@@ -9,30 +10,50 @@ export default function SearchPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [user, setUser] = useState(null);
+    const [hydrated, setHydrated] = useState(false);
 
-    // Modal state for purchasing
+    // Modal state
     const [selectedProduct, setSelectedProduct] = useState(null);
-    const [quantity, setQuantity] = useState(1);
-    const [purchased, setPurchased] = useState(false);
-    const [purchaseError, setPurchaseError] = useState('');
-    const [purchaseType, setPurchaseType] = useState('delivery');
-    const [cartMessage, setCartMessage] = useState({ type: '', text: '' });
-    const [inWishlist, setInWishlist] = useState(false);
-    const [wishlistLoading, setWishlistLoading] = useState(false);
 
     // Voice-to-text state
     const [isListening, setIsListening] = useState(false);
     const [voiceSupported, setVoiceSupported] = useState(true);
     const [voiceError, setVoiceError] = useState('');
 
+    // Roles that are NOT allowed to use search
+    const restrictedRoles = ['manager', 'seller', 'delivery'];
+
     // Load user on mount
     useEffect(() => {
-        setUser(getStoredUser() || getStoredAdmin());
+        const storedUser = getStoredUser();
+        const storedAdmin = getStoredAdmin();
+        setUser(storedUser || storedAdmin);
+        setHydrated(true);
         // Check if any voice input is possible (Speech API or MediaRecorder)
         const hasSpeechAPI = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
         const hasMediaRecorder = !!(window.MediaRecorder && navigator.mediaDevices?.getUserMedia);
         setVoiceSupported(hasSpeechAPI || hasMediaRecorder);
     }, []);
+
+    // Block restricted roles from accessing search
+    if (hydrated && user && restrictedRoles.includes(user.role)) {
+        return (
+            <div className="page" style={{ textAlign: 'center', paddingTop: 120 }}>
+                <div style={{ fontSize: '4rem', marginBottom: 20 }}>🔒</div>
+                <h2 style={{ fontSize: '1.6rem', fontWeight: 800, marginBottom: 12 }}>Access Restricted</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 28, maxWidth: 400, margin: '0 auto 28px' }}>
+                    The search feature is only available for buyers and admins.
+                </p>
+                <a
+                    href="/"
+                    className="btn btn-primary"
+                    style={{ padding: '12px 32px', borderRadius: 12 }}
+                >
+                    Go Back Home
+                </a>
+            </div>
+        );
+    }
 
     const handleVoiceSearch = async () => {
         if (isListening) return;
@@ -152,57 +173,12 @@ export default function SearchPage() {
         }
     };
 
-    const openProduct = async (product) => {
+    const openProduct = (product) => {
         setSelectedProduct(product);
-        setQuantity(1);
-        setPurchased(false);
-        setPurchaseError('');
-        setCartMessage({ type: '', text: '' });
-        setInWishlist(false);
-        if (user && user.role === 'buyer') {
-            try {
-                const res = await checkWishlist(product.id);
-                setInWishlist(res.in_wishlist);
-            } catch (_) {}
-        }
-    };
-
-    const handleWishlistToggle = async () => {
-        if (!selectedProduct || wishlistLoading) return;
-        setWishlistLoading(true);
-        try {
-            if (inWishlist) {
-                await removeFromWishlist(selectedProduct.id);
-                setInWishlist(false);
-            } else {
-                await addToWishlist(selectedProduct.id);
-                setInWishlist(true);
-            }
-        } catch (err) {
-            console.error('Wishlist error:', err);
-        } finally {
-            setWishlistLoading(false);
-        }
     };
 
     const closeModal = () => {
         setSelectedProduct(null);
-        setPurchased(false);
-    };
-
-    const handlePurchase = async () => {
-        if (!user) {
-            setPurchaseError('Please log in to purchase items.');
-            return;
-        }
-        setPurchaseError('');
-
-        try {
-            await buyProduct(selectedProduct.id, quantity, purchaseType);
-            setPurchased(true);
-        } catch (err) {
-            setPurchaseError(err.message || 'Failed to complete purchase. Check stock availability.');
-        }
     };
 
     const getLabelClass = (label) => {
@@ -308,7 +284,7 @@ export default function SearchPage() {
                         </div>
                     ) : (
                         <div className="product-grid">
-                            {results.results.filter(p => !p.stock || p.stock > 0).map((product) => (
+                            {results.results.filter(p => p.stock === undefined || p.stock === null || p.stock > 0).map((product) => (
                                 <div
                                     key={product.id}
                                     className="card product-card"
@@ -376,217 +352,11 @@ export default function SearchPage() {
             )}
 
             {/* ===== PRODUCT DETAIL MODAL ===== */}
-            {selectedProduct && (
-                <div
-                    onClick={closeModal}
-                    style={{
-                        position: 'fixed', inset: 0, zIndex: 1000,
-                        background: 'rgba(0, 0, 0, 0.6)',
-                        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: 24,
-                        animation: 'fadeIn 0.2s ease',
-                    }}
-                >
-                    <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                            background: 'rgba(26, 26, 46, 0.85)',
-                            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: 20,
-                            maxWidth: 500, width: '100%',
-                            boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
-                            animation: 'slideUp 0.3s ease',
-                            position: 'relative',
-                        }}
-                    >
-                        <button
-                            onClick={closeModal}
-                            style={{
-                                position: 'absolute', top: 16, right: 16, zIndex: 10,
-                                width: 32, height: 32, borderRadius: '50%',
-                                background: 'rgba(255,255,255,0.1)', border: 'none',
-                                color: 'var(--text-secondary)', cursor: 'pointer',
-                            }}
-                        >✕</button>
-
-                        {purchased ? (
-                            <div style={{ padding: 40, textAlign: 'center' }}>
-                                <div style={{ fontSize: '3rem', marginBottom: 16 }}>✅</div>
-                                <h2>Purchase Confirmed!</h2>
-                                <p style={{ color: 'var(--text-secondary)' }}>
-                                    You bought {quantity}x {selectedProduct.title}
-                                </p>
-                            </div>
-                        ) : (
-                            <div style={{ padding: 32 }}>
-                                <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: 16, paddingRight: 32 }}>
-                                    {selectedProduct.title}
-                                </h2>
-
-                                    <div style={{ marginBottom: 24 }}>
-                                        {selectedProduct.image_url && (
-                                            <div style={{ height: 200, borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
-                                                <img
-                                                    src={selectedProduct.image_url}
-                                                    alt={selectedProduct.title}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                    onError={(e) => { e.target.style.display = 'none'; }}
-                                                />
-                                            </div>
-                                        )}
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                                            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-secondary)' }}>
-                                                PHP {parseFloat(selectedProduct.price).toFixed(2)}
-                                            </div>
-                                            {user && user.role === 'buyer' && (
-                                                <button
-                                                    onClick={handleWishlistToggle}
-                                                    disabled={wishlistLoading}
-                                                    title={inWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'}
-                                                    style={{
-                                                        width: 40, height: 40, borderRadius: '50%', border: 'none',
-                                                        cursor: wishlistLoading ? 'not-allowed' : 'pointer',
-                                                        background: inWishlist ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)',
-                                                        color: inWishlist ? '#ef4444' : 'var(--text-muted)',
-                                                        fontSize: '1.2rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                        transition: 'all 0.25s ease',
-                                                        transform: wishlistLoading ? 'scale(0.9)' : 'scale(1)',
-                                                    }}
-                                                    onMouseEnter={e => { if (!wishlistLoading) e.currentTarget.style.transform = 'scale(1.15)'; }}
-                                                    onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                                >
-                                                    {inWishlist ? '❤️' : '🤍'}
-                                                </button>
-                                            )}
-                                        </div>
-                                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: 12 }}>
-                                            {selectedProduct.description}
-                                        </p>
-                                    </div>
-
-                                <div style={{
-                                    background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16,
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                                        <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Quantity:</span>
-                                        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}>
-                                            <button
-                                                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                                                style={{ width: 36, height: 36, background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
-                                            >−</button>
-                                            <span style={{ width: 44, textAlign: 'center', fontWeight: 'bold' }}>{quantity}</span>
-                                            <button
-                                                onClick={() => setQuantity(quantity + 1)}
-                                                style={{ width: 36, height: 36, background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}
-                                            >+</button>
-                                        </div>
-                                    </div>
-
-                                    {purchaseError && (
-                                        <div style={{
-                                            background: 'rgba(239, 68, 68, 0.1)',
-                                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                                            color: '#ef4444',
-                                            padding: '10px 14px',
-                                            borderRadius: 8,
-                                            marginBottom: 14,
-                                            fontSize: '0.85rem'
-                                        }}>
-                                            {purchaseError}
-                                        </div>
-                                    )}
-
-                                    {user && user.role !== 'seller' && user.role !== 'admin' && (
-                                        <>
-                                            {/* Walk-in / Delivery selector */}
-                                            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPurchaseType('delivery')}
-                                                    style={{
-                                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                        borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                                                        background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-                                                        color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                    }}
-                                                >
-                                                    Delivery
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPurchaseType('walkin')}
-                                                    style={{
-                                                        flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                        borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
-                                                        background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
-                                                        color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
-                                                        cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                    }}
-                                                >
-                                                    Walk-in
-                                                </button>
-                                            </div>
-                                            {purchaseType === 'delivery' && (
-                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-                                                    + PHP 90.00 delivery fee per department store
-                                                </p>
-                                            )}
-                                            <div style={{ display: 'flex', gap: 8 }}>
-                                                <button
-                                                    className="btn"
-                                                    onClick={async () => {
-                                                        try {
-                                                            setCartMessage({ type: '', text: '' });
-                                                            await addToCart(selectedProduct.id, quantity);
-                                                            setCartMessage({ type: 'success', text: `Added ${quantity}x to cart!` });
-                                                        } catch (err) {
-                                                            setCartMessage({ type: 'error', text: err.message });
-                                                        }
-                                                    }}
-                                                    style={{
-                                                        flex: 1, padding: '12px', fontSize: '0.9rem',
-                                                        fontWeight: 700, borderRadius: 10,
-                                                        background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.4)',
-                                                        color: '#818cf8', cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    Add to Cart
-                                                </button>
-                                                <button
-                                                    className="btn btn-success"
-                                                    onClick={handlePurchase}
-                                                    style={{ flex: 1, padding: '12px', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}
-                                                >
-                                                    Buy — PHP {(parseFloat(selectedProduct.price) * quantity).toFixed(2)}
-                                                </button>
-                                            </div>
-                                            {cartMessage.text && (
-                                                <div style={{
-                                                    marginTop: 8, padding: '8px 14px', borderRadius: 8, fontSize: '0.82rem',
-                                                    fontWeight: 600, textAlign: 'center',
-                                                    background: cartMessage.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                    border: `1px solid ${cartMessage.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                                                    color: cartMessage.type === 'success' ? '#10b981' : '#ef4444',
-                                                }}>
-                                                    {cartMessage.text}
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                    {!user && (
-                                        <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                                            Please log in to purchase items.
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            )}
+            <ProductDetailModal
+                product={selectedProduct}
+                user={user}
+                onClose={closeModal}
+            />
 
             {/* Voice pulse animation */}
             <style jsx>{`

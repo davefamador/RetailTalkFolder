@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getWishlist, removeFromWishlist, getStoredUser } from '../../lib/api';
+import { Heart, Package } from 'lucide-react';
 
 export default function Wishlistpage() {
     const [items, setItems] = useState([]);
@@ -54,7 +55,7 @@ export default function Wishlistpage() {
     return (
         <div className="page" style={{ maxWidth: 900 }}>
             <div className="page-header">
-                <h1>❤️ My Wishlist</h1>
+                <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Heart size={28} /> My Wishlist</h1>
                 <p style={{ color: 'var(--text-muted)' }}>
                     {items.length} item{items.length !== 1 ? 's' : ''} saved
                 </p>
@@ -112,7 +113,7 @@ export default function Wishlistpage() {
                                                 width: '100%', height: '100%', display: 'flex',
                                                 alignItems: 'center', justifyContent: 'center',
                                                 color: 'var(--text-muted)', fontSize: '2rem',
-                                            }}>📦</div>
+                                            }}><Package size={32} /></div>
                                         )}
                                     </div>
                                 </a>

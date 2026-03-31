@@ -10,46 +10,48 @@
   --bg-card-hover: #1e1e35;
   --bg-glass: rgba(26, 26, 46, 0.7);
 
-  --text-primary: #f0f0f5;
-  --text-secondary: #8888a0;
-  --text-muted: #5a5a72;
+  /* Enhanced text colors for better contrast (WCAG AA: 4.5:1) */
+  --text-primary: #f5f5f7;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
 
   --accent-primary: #6c63ff;
   --accent-primary-hover: #7f78ff;
-  --accent-secondary: #00d4aa;
-  --accent-danger: #ff4757;
-  --accent-warning: #ffa502;
+  --accent-secondary: #10b981;
+  --accent-danger: #ef4444;
+  --accent-warning: #f59e0b;
   --accent-success: #10b981;
 
   --gradient-primary: linear-gradient(135deg, #6c63ff 0%, #3b82f6 100%);
-  --gradient-success: linear-gradient(135deg, #00d4aa 0%, #10b981 100%);
-  --gradient-danger: linear-gradient(135deg, #ff4757 0%, #ef4444 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
 
-  --label-exact: #00d4aa;
+  --label-exact: #10b981;
   --label-substitute: #6c63ff;
-  --label-complement: #ffa502;
-  --label-irrelevant: #ff4757;
+  --label-complement: #f59e0b;
+  --label-irrelevant: #ef4444;
 
-  --border-color: #2a2a3e;
-  --glass-border: rgba(255, 255, 255, 0.06);
+  --border-color: #2d2d44;
+  --glass-border: rgba(255, 255, 255, 0.08);
   --glass-bg: rgba(26, 26, 46, 0.5);
   --border-radius: 12px;
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   --shadow-glow: 0 0 30px rgba(108, 99, 255, 0.15);
-  --theme-toggle-bg: rgba(255, 255, 255, 0.08);
+  --theme-toggle-bg: rgba(255, 255, 255, 0.1);
 }
 
 /* --- LIGHT MODE --- */
 [data-theme="light"] {
-  --bg-primary: #f8f9fa;
+  --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
   --bg-card: #ffffff;
   --bg-card-hover: #f1f5f9;
-  --bg-glass: rgba(255, 255, 255, 0.8);
+  --bg-glass: rgba(255, 255, 255, 0.9);
 
-  --text-primary: #1e293b;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
+  /* Enhanced contrast for light mode (WCAG AA: 4.5:1) */
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
 
   --accent-primary: #6c63ff;
   --accent-primary-hover: #5a52d5;
@@ -67,12 +69,12 @@
   --label-complement: #d97706;
   --label-irrelevant: #dc2626;
 
-  --border-color: #e2e8f0;
-  --glass-border: rgba(0, 0, 0, 0.05);
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-  --shadow-glow: 0 10px 30px rgba(108, 99, 255, 0.15);
-  --theme-toggle-bg: rgba(0, 0, 0, 0.05);
+  --border-color: #e5e7eb;
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 10px 30px rgba(108, 99, 255, 0.12);
+  --theme-toggle-bg: rgba(0, 0, 0, 0.06);
 }
 
 
@@ -257,9 +259,14 @@ a:hover {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+.btn:disabled:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 /* --- Cards --- */

@@ -293,8 +293,13 @@ export async function adminBanUser(userId, isBanned) {
     });
 }
 
-export async function adminGetTransactions(search = '') {
-    return apiFetch(`/admin/transactions?search=${encodeURIComponent(search)}`);
+export async function adminGetTransactions(search = '', type = '', status = '', dateRange = '', specificDate = '') {
+    let url = `/admin/transactions?search=${encodeURIComponent(search)}`;
+    if (type) url += `&txn_type=${encodeURIComponent(type)}`;
+    if (status) url += `&status=${encodeURIComponent(status)}`;
+    if (dateRange) url += `&date_range=${encodeURIComponent(dateRange)}`;
+    if (specificDate) url += `&specific_date=${encodeURIComponent(specificDate)}`;
+    return apiFetch(url);
 }
 
 export async function adminGetReports() {
@@ -471,6 +476,26 @@ export async function adminRejectRemoval(productId) {
     return apiFetch(`/admin/products/${productId}/reject-removal`, { method: 'PUT' });
 }
 
+// --- Admin: Deliveries Management ---
+export async function adminGetDeliveriesStats() {
+    return apiFetch('/admin/deliveries/stats');
+}
+
+// --- Admin: Restock Requests ---
+export async function adminCreateRestockRequest(data) {
+    return apiFetch('/admin/restock-request', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function adminGetRestockRequests(departmentId = '', status = '') {
+    let url = '/admin/restock-requests?';
+    if (departmentId) url += `department_id=${encodeURIComponent(departmentId)}&`;
+    if (status) url += `status=${encodeURIComponent(status)}&`;
+    return apiFetch(url);
+}
+
 // --- Buyer: Cancel Order ---
 export async function cancelOrder(transactionId) {
     return apiFetch(`/transactions/buyer/cancel/${transactionId}`, { method: 'PUT' });
@@ -507,6 +532,10 @@ export async function managerRegisterStaff(data) {
 
 export async function managerGetStaffDetail(userId) {
     return apiFetch(`/manager/staff/${userId}/detail`);
+}
+
+export async function managerRemoveStaff(userId) {
+    return apiFetch(`/manager/staff/${userId}/remove`, { method: 'DELETE' });
 }
 
 export async function managerGetRestockRequests(status = 'pending_manager') {

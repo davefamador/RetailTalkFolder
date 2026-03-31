@@ -2,6 +2,7 @@
 
 import { getTransactionHistory, getStoredUser, buyerConfirmWalkin, cancelOrder } from '../../lib/api';
 import { useState, useEffect } from 'react';
+import { Package, ShoppingCart, Truck } from 'lucide-react';
 
 export default function OrdersPage() {
     const [transactions, setTransactions] = useState([]);
@@ -133,7 +134,7 @@ export default function OrdersPage() {
                         <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             onError={e => e.target.style.display = 'none'} />
                     ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '1.2rem' }}>📦</div>
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}><Package size={24} /></div>
                     )}
                 </div>
 
@@ -154,7 +155,7 @@ export default function OrdersPage() {
                                     padding: '2px 8px', borderRadius: 10, fontSize: '0.68rem', fontWeight: 600,
                                     background: walkin ? 'rgba(251,191,36,0.12)' : 'rgba(59,130,246,0.12)',
                                     color: walkin ? '#f59e0b' : '#3b82f6',
-                                }}>{walkin ? '🛒 Walk-in' : '🚚 Delivery'}</span>
+                                }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{walkin ? <><ShoppingCart size={12} /> Walk-in</> : <><Truck size={12} /> Delivery</>}</span></span>
                                 {/* Status badge */}
                                 <span style={{
                                     padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
@@ -171,8 +172,8 @@ export default function OrdersPage() {
                         }} />
                     </div>
                     {t.delivery_user_name && (
-                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                            🚚 {t.delivery_user_name}
+                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Truck size={12} /> {t.delivery_user_name}
                         </p>
                     )}
                 </div>
@@ -238,7 +239,7 @@ export default function OrdersPage() {
     return (
         <div className="page">
             <div className="page-header">
-                <h1>📦 My Orders</h1>
+                <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Package size={28} /> My Orders</h1>
                 <p>Track your orders and verify walk-in pickups</p>
             </div>
 
@@ -260,9 +261,9 @@ export default function OrdersPage() {
             {/* Order Type Filter */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {[
-                    { key: 'all', label: '📋 All', count: myBuyerTxns.length },
-                    { key: 'delivery', label: '🚚 Delivery', count: deliveryOrders.length },
-                    { key: 'walkin', label: '🛒 Walk-in', count: walkinOrders.length },
+                    { key: 'all', label: 'All', count: myBuyerTxns.length },
+                    { key: 'delivery', label: 'Delivery', count: deliveryOrders.length },
+                    { key: 'walkin', label: 'Walk-in', count: walkinOrders.length },
                 ].map(f => (
                     <button key={f.key} onClick={() => setOrderFilter(f.key)} style={{
                         padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
@@ -372,7 +373,7 @@ export default function OrdersPage() {
                                         padding: 16, borderRadius: 10, background: 'rgba(59,130,246,0.08)',
                                         border: '1px solid rgba(59,130,246,0.2)', marginBottom: 16,
                                     }}>
-                                        <h4 style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem' }}>🚚 Delivery Man Info</h4>
+                                        <h4 style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}><Truck size={16} /> Delivery Man Info</h4>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
                                             <span style={{ color: 'var(--text-muted)' }}>Name</span>
                                             <span style={{ fontWeight: 600 }}>{selectedOrder.delivery_user_name}</span>
