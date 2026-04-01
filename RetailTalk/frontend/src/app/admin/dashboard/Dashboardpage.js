@@ -14,6 +14,7 @@ import {
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminRegisterManager,
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
     adminGetDeliveriesStats,
+    getBalance, withdraw, getSVFHistory, searchProducts,
 } from '../../../lib/api';
 // â”€â”€ Line Chart Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220, prefix = 'PHP ' }) {
@@ -334,6 +335,15 @@ export default function AdminDashboard() {
     // Transactions filter state
     const [txnTypeFilter, setTxnTypeFilter] = useState('all');
     const [txnStatusFilter, setTxnStatusFilter] = useState('all');
+    // Admin balance & withdraw state
+    const [adminBalance, setAdminBalance] = useState(0);
+    const [svfHistory, setSvfHistory] = useState([]);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [withdrawLoading, setWithdrawLoading] = useState(false);
+    // Admin search state
+    const [adminSearchQuery, setAdminSearchQuery] = useState('');
+    const [adminSearchResults, setAdminSearchResults] = useState(null);
+    const [adminSearchLoading, setAdminSearchLoading] = useState(false);
     useEffect(() => {
         const stored = getStoredAdmin();
         if (!stored || stored.role !== 'admin') {
@@ -343,9 +353,43 @@ export default function AdminDashboard() {
         setAdmin(stored);
         setAuthChecked(true);
         loadDashboard();
+        loadAdminBalance();
     }, []);
     const loadDashboard = async () => {
         try { setStats(await adminGetDashboard()); } catch (e) { console.error(e); }
+    };
+    const loadAdminBalance = async () => {
+        try {
+            const b = await getBalance();
+            setAdminBalance(b.balance || 0);
+        } catch (e) { console.error(e); }
+    };
+    const loadSvfHistory = async () => {
+        try { setSvfHistory(await getSVFHistory()); } catch (e) { console.error(e); }
+    };
+    const handleWithdraw = async () => {
+        const amt = parseFloat(withdrawAmount);
+        if (!amt || amt <= 0) { setMessage({ type: 'error', text: 'Enter a valid amount' }); return; }
+        if (amt > adminBalance) { setMessage({ type: 'error', text: 'Insufficient balance' }); return; }
+        setWithdrawLoading(true);
+        try {
+            const res = await withdraw(amt);
+            setAdminBalance(res.balance || 0);
+            setWithdrawAmount('');
+            setMessage({ type: 'success', text: `Successfully withdrew ₱${amt.toFixed(2)}` });
+            loadSvfHistory();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setWithdrawLoading(false); }
+    };
+    const handleAdminSearch = async (e) => {
+        e.preventDefault();
+        if (!adminSearchQuery.trim()) return;
+        setAdminSearchLoading(true);
+        try {
+            const res = await searchProducts(adminSearchQuery, 20, true);
+            setAdminSearchResults(res);
+        } catch (err) { setMessage({ type: 'error', text: err.message }); }
+        finally { setAdminSearchLoading(false); }
     };
     const loadUsers = async (search = '') => {
         try { setUsers(await adminGetUsers(search)); } catch (e) { console.error(e); }
@@ -372,6 +416,7 @@ export default function AdminDashboard() {
         if (activeTab === 'pending') { loadPending(); loadPendingRemovals(); }
         if (activeTab === 'departments') loadDepartments();
         if (activeTab === 'deliveries') loadDeliveries();
+        if (activeTab === 'withdraw') { loadAdminBalance(); loadSvfHistory(); }
     }, [activeTab, authChecked]);
     const loadPending = async () => {
         try { setPendingProducts(await adminGetPendingProducts()); } catch (e) { console.error(e); }
@@ -552,7 +597,7 @@ export default function AdminDashboard() {
         {
             label: 'Analytics', items: [
                 { id: 'reports', icon: TrendingUp, label: 'Reports' },
-                { id: 'search', icon: Search, label: 'Search', href: '/search' },
+                { id: 'search', icon: Search, label: 'Search' },
             ]
         },
     ];
@@ -731,21 +776,20 @@ export default function AdminDashboard() {
                         </h2>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            background: 'var(--admin-hover)', border: '1px solid var(--admin-border)',
-                            borderRadius: 8, padding: '6px 14px',
-                        }}>
-                            <Search size={14} style={{ color: 'var(--admin-text-muted)' }} />
-                            <input
-                                type="text"
-                                placeholder="Search..."
-                                style={{
-                                    background: 'transparent', border: 'none', outline: 'none',
-                                    color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif',
-                                    fontSize: '0.82rem', width: 160,
-                                }}
-                            />
+                        <div
+                            onClick={() => setActiveTab('withdraw')}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                background: isDark ? 'rgba(99,102,241,0.1)' : 'rgba(99,102,241,0.08)',
+                                border: '1px solid rgba(99,102,241,0.2)',
+                                borderRadius: 8, padding: '6px 14px',
+                                cursor: 'pointer', transition: 'all 0.2s',
+                            }}
+                        >
+                            <DollarSign size={14} style={{ color: '#6366f1' }} />
+                            <span style={{ color: '#6366f1', fontWeight: 700, fontSize: '0.85rem', fontFamily: 'Inter, sans-serif' }}>
+                                ₱{adminBalance.toFixed(2)}
+                            </span>
                         </div>
                         <div style={{
                             display: 'flex', alignItems: 'center', gap: 6,
@@ -1108,14 +1152,21 @@ export default function AdminDashboard() {
                                                                 }}>
                                                                     {selectedDeptDetail.products.map(prod => {
                                                                         const prodImg = prod.images && prod.images.length > 0 ? prod.images[0] : null;
-                                                                        const isLowStock = prod.stock < 5;
+                                                                        const isLowStock = prod.stock <= 5;
                                                                         return (
-                                                                            <div key={prod.id} style={{
+                                                                            <div key={prod.id}
+                                                                                onClick={() => handleLowStockClick({ ...prod, seller_name: selectedDeptDetail.department.name })}
+                                                                                style={{
                                                                                 padding: 12, borderRadius: 10,
                                                                                 background: 'var(--admin-card-bg)',
                                                                                 border: `1px solid ${isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'}`,
                                                                                 display: 'flex', gap: 10, alignItems: 'center',
-                                                                            }}>
+                                                                                cursor: 'pointer',
+                                                                                transition: 'all 0.15s',
+                                                                            }}
+                                                                            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.borderColor = isLowStock ? '#ef4444' : 'var(--admin-accent)'; }}
+                                                                            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'; }}
+                                                                            >
                                                                                 <div style={{
                                                                                     width: 44, height: 44, borderRadius: 8, overflow: 'hidden',
                                                                                     background: 'var(--admin-hover)', flexShrink: 0,
@@ -1154,30 +1205,45 @@ export default function AdminDashboard() {
                                                     {selectedDeptDetail.pending_restocks && selectedDeptDetail.pending_restocks.length > 0 && (
                                                         <>
                                                             <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                                <ClipboardList size={16} /> Pending Restocks ({selectedDeptDetail.pending_restocks.length})
+                                                                <ClipboardList size={16} /> Restock Requests ({selectedDeptDetail.pending_restocks.length})
                                                             </h3>
                                                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-                                                                {selectedDeptDetail.pending_restocks.map(r => (
-                                                                    <div key={r.id} style={{
-                                                                        padding: 12, borderRadius: 10,
-                                                                        background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
-                                                                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                                                                    }}>
-                                                                        <div>
-                                                                            <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>{r.product_title}</p>
-                                                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>
-                                                                                By: {r.requested_by} | Qty: {r.requested_quantity} | Stock: {r.current_stock}
-                                                                            </p>
-                                                                        </div>
-                                                                        <span style={{
-                                                                            padding: '3px 10px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 600,
-                                                                            background: r.status === 'approved_manager' ? 'rgba(59,130,246,0.12)' : 'rgba(251,191,36,0.12)',
-                                                                            color: r.status === 'approved_manager' ? '#3b82f6' : '#fbbf24',
+                                                                {selectedDeptDetail.pending_restocks.map(r => {
+                                                                    const statusConfig = {
+                                                                        pending_manager: { label: 'Pending Approval', bg: 'rgba(251,191,36,0.12)', color: '#fbbf24' },
+                                                                        approved_manager: { label: 'To Be Delivered', bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
+                                                                        accepted_delivery: { label: 'In Delivery', bg: 'rgba(139,92,246,0.12)', color: '#8b5cf6' },
+                                                                        in_transit: { label: 'In Transit', bg: 'rgba(14,165,233,0.12)', color: '#0ea5e9' },
+                                                                    };
+                                                                    const cfg = statusConfig[r.status] || { label: r.status, bg: 'rgba(148,163,184,0.12)', color: '#94a3b8' };
+                                                                    const isAdmin = r.requested_by_role === 'admin';
+                                                                    const qty = r.approved_quantity || r.requested_quantity;
+                                                                    return (
+                                                                        <div key={r.id} style={{
+                                                                            padding: 12, borderRadius: 10,
+                                                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                                                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                                                         }}>
-                                                                            {r.status === 'approved_manager' ? 'To Be Delivered' : 'Pending'}
-                                                                        </span>
-                                                                    </div>
-                                                                ))}
+                                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                                <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 2 }}>{r.product_title}</p>
+                                                                                <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>
+                                                                                    By: {r.requested_by}
+                                                                                    {isAdmin && <span style={{ marginLeft: 4, padding: '1px 6px', borderRadius: 4, fontSize: '0.65rem', fontWeight: 700, background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>Admin</span>}
+                                                                                    {' '}| Qty: {qty} | Stock: {r.current_stock}
+                                                                                </p>
+                                                                                {(r.status === 'accepted_delivery' || r.status === 'in_transit') && r.delivery_user_name && (
+                                                                                    <p style={{ fontSize: '0.72rem', color: '#8b5cf6', marginTop: 2 }}>
+                                                                                        Deliveryman: {r.delivery_user_name}
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                            <span style={{
+                                                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 600,
+                                                                                background: cfg.bg, color: cfg.color, flexShrink: 0, whiteSpace: 'nowrap',
+                                                                            }}>{cfg.label}</span>
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         </>
                                                     )}
@@ -1237,20 +1303,20 @@ export default function AdminDashboard() {
                                                                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                                                     cursor: 'pointer', transition: 'all 0.15s',
                                                                 }}
-                                                                onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                                                                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--admin-border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                                                                onClick={async () => {
-                                                                    setStaffDetailLoading(true);
-                                                                    setSelectedStaffDetail(null);
-                                                                    try {
-                                                                        const detail = await adminGetUserDetail(s.id);
-                                                                        setSelectedStaffDetail({ ...detail, staff_info: s });
-                                                                    } catch (e) {
-                                                                        setMessage({ type: 'error', text: 'Failed to load staff details' });
-                                                                    } finally {
-                                                                        setStaffDetailLoading(false);
-                                                                    }
-                                                                }}
+                                                                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                                                                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--admin-border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                                                    onClick={async () => {
+                                                                        setStaffDetailLoading(true);
+                                                                        setSelectedStaffDetail(null);
+                                                                        try {
+                                                                            const detail = await adminGetUserDetail(s.id);
+                                                                            setSelectedStaffDetail({ ...detail, staff_info: s });
+                                                                        } catch (e) {
+                                                                            setMessage({ type: 'error', text: 'Failed to load staff details' });
+                                                                        } finally {
+                                                                            setStaffDetailLoading(false);
+                                                                        }
+                                                                    }}
                                                                 >
                                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                                                         <div style={{
@@ -1301,11 +1367,13 @@ export default function AdminDashboard() {
                                                             ) : selectedStaffDetail ? (() => {
                                                                 const sd = selectedStaffDetail;
                                                                 const si = sd.staff_info || {};
-                                                                // Build line graph data from transactions
+                                                                // Filter to only transactions where this staff was the seller
+                                                                const sellerTxns = (sd.transactions || []).filter(t => t.role_in_txn === 'seller');
+                                                                // Build line graph data from seller transactions
                                                                 const txnsByMonth = {};
                                                                 const deliveriesByMonth = {};
                                                                 const walkinsByMonth = {};
-                                                                (sd.transactions || []).forEach(t => {
+                                                                sellerTxns.forEach(t => {
                                                                     try {
                                                                         const d = new Date(t.created_at);
                                                                         const key = d.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' });
@@ -1315,13 +1383,13 @@ export default function AdminDashboard() {
                                                                         } else {
                                                                             walkinsByMonth[key] = (walkinsByMonth[key] || 0) + 1;
                                                                         }
-                                                                    } catch {}
+                                                                    } catch { }
                                                                 });
                                                                 const lineData = Object.entries(txnsByMonth)
                                                                     .map(([date, count]) => ({ date, count, deliveries: deliveriesByMonth[date] || 0, walkins: walkinsByMonth[date] || 0 }))
                                                                     .slice(-8);
-                                                                const totalDeliveries = (sd.transactions || []).filter(t => t.purchase_type === 'delivery').length;
-                                                                const totalWalkins = (sd.transactions || []).filter(t => t.purchase_type !== 'delivery').length;
+                                                                const totalDeliveries = sellerTxns.filter(t => t.purchase_type === 'delivery').length;
+                                                                const totalWalkins = sellerTxns.filter(t => t.purchase_type !== 'delivery').length;
                                                                 return (
                                                                     <>
                                                                         <button onClick={() => { setSelectedStaffDetail(null); }} style={{
@@ -1357,7 +1425,7 @@ export default function AdminDashboard() {
                                                                                 background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
                                                                                 textAlign: 'center',
                                                                             }}>
-                                                                                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#6366f1' }}>{(sd.transactions || []).length}</p>
+                                                                                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#6366f1' }}>{sellerTxns.length}</p>
                                                                                 <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem', textTransform: 'uppercase' }}>Total Orders</p>
                                                                             </div>
                                                                             <div style={{
@@ -1403,11 +1471,11 @@ export default function AdminDashboard() {
                                                                             </div>
                                                                         </div>
                                                                         {/* Recent transactions */}
-                                                                        {sd.transactions && sd.transactions.length > 0 && (
+                                                                        {sellerTxns.length > 0 && (
                                                                             <>
                                                                                 <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Recent Transactions</h3>
                                                                                 <div style={{ maxHeight: 220, overflowY: 'auto', paddingRight: 4 }}>
-                                                                                    {sd.transactions.slice(0, 15).map(t => (
+                                                                                    {sellerTxns.slice(0, 15).map(t => (
                                                                                         <div key={t.id} style={{
                                                                                             padding: '10px 12px', borderRadius: 8,
                                                                                             border: '1px solid var(--admin-border)', marginBottom: 6,
@@ -1928,99 +1996,99 @@ export default function AdminDashboard() {
                         const walkinStatuses = ['pending_walkin', 'inwork', 'ready', 'picked_up', 'completed', 'cancelled'];
                         const availableStatuses = txnTypeFilter === 'delivery' ? deliveryStatuses : txnTypeFilter === 'walkin' ? walkinStatuses : [...new Set([...deliveryStatuses, ...walkinStatuses])];
                         return (
-                        <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                                <div>
-                                    <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Transactions</h1>
-                                    <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>All platform transactions</p>
+                            <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                    <div>
+                                        <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Transactions</h1>
+                                        <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>All platform transactions</p>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <input
+                                            type="text" placeholder="Search..."
+                                            value={txnSearch} onChange={e => setTxnSearch(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && loadTransactions(txnSearch)}
+                                            style={{
+                                                width: 200, padding: '10px 14px', borderRadius: 10,
+                                                background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                                color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif',
+                                            }}
+                                        />
+                                        <button className="btn btn-primary btn-sm" onClick={() => loadTransactions(txnSearch)}>Search</button>
+                                    </div>
                                 </div>
-                                <div style={{ display: 'flex', gap: 8 }}>
-                                    <input
-                                        type="text" placeholder="Search..."
-                                        value={txnSearch} onChange={e => setTxnSearch(e.target.value)}
-                                        onKeyDown={e => e.key === 'Enter' && loadTransactions(txnSearch)}
-                                        style={{
-                                            width: 200, padding: '10px 14px', borderRadius: 10,
-                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
-                                            color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif',
-                                        }}
-                                    />
-                                    <button className="btn btn-primary btn-sm" onClick={() => loadTransactions(txnSearch)}>Search</button>
-                                </div>
-                            </div>
-                            {/* Filter Buttons */}
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Type:</span>
-                                {[{ key: 'all', label: 'All' }, { key: 'delivery', label: 'Delivery' }, { key: 'walkin', label: 'Walk-in' }].map(f => (
-                                    <button key={f.key} onClick={() => { setTxnTypeFilter(f.key); setTxnStatusFilter('all'); }} style={{
-                                        padding: '6px 14px', borderRadius: 8, border: '1px solid',
-                                        borderColor: txnTypeFilter === f.key ? 'var(--admin-accent)' : 'var(--admin-border)',
-                                        background: txnTypeFilter === f.key ? 'var(--admin-active-bg)' : 'transparent',
-                                        color: txnTypeFilter === f.key ? 'var(--admin-active-text)' : 'var(--admin-text-secondary)',
-                                        fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
-                                        transition: 'all 0.15s',
-                                    }}>{f.label}</button>
-                                ))}
-                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginLeft: 12, marginRight: 4 }}>Status:</span>
-                                <select
-                                    value={txnStatusFilter}
-                                    onChange={e => setTxnStatusFilter(e.target.value)}
-                                    style={{
-                                        padding: '6px 12px', borderRadius: 8,
-                                        border: '1px solid var(--admin-border)',
-                                        background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
-                                        fontSize: '0.78rem', fontFamily: 'Inter, sans-serif', cursor: 'pointer',
-                                    }}
-                                >
-                                    <option value="all">All Statuses</option>
-                                    {availableStatuses.map(s => (
-                                        <option key={s} value={s}>{statusLabels[s] || s}</option>
+                                {/* Filter Buttons */}
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Type:</span>
+                                    {[{ key: 'all', label: 'All' }, { key: 'delivery', label: 'Delivery' }, { key: 'walkin', label: 'Walk-in' }].map(f => (
+                                        <button key={f.key} onClick={() => { setTxnTypeFilter(f.key); setTxnStatusFilter('all'); }} style={{
+                                            padding: '6px 14px', borderRadius: 8, border: '1px solid',
+                                            borderColor: txnTypeFilter === f.key ? 'var(--admin-accent)' : 'var(--admin-border)',
+                                            background: txnTypeFilter === f.key ? 'var(--admin-active-bg)' : 'transparent',
+                                            color: txnTypeFilter === f.key ? 'var(--admin-active-text)' : 'var(--admin-text-secondary)',
+                                            fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                            transition: 'all 0.15s',
+                                        }}>{f.label}</button>
                                     ))}
-                                </select>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginLeft: 12, marginRight: 4 }}>Status:</span>
+                                    <select
+                                        value={txnStatusFilter}
+                                        onChange={e => setTxnStatusFilter(e.target.value)}
+                                        style={{
+                                            padding: '6px 12px', borderRadius: 8,
+                                            border: '1px solid var(--admin-border)',
+                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
+                                            fontSize: '0.78rem', fontFamily: 'Inter, sans-serif', cursor: 'pointer',
+                                        }}
+                                    >
+                                        <option value="all">All Statuses</option>
+                                        {availableStatuses.map(s => (
+                                            <option key={s} value={s}>{statusLabels[s] || s}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredTxns.map(t => {
+                                                const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                const sLabel = statusLabels[t.status] || t.status;
+                                                const isDelivery = t.purchase_type === 'delivery';
+                                                return (
+                                                    <tr key={t.id}>
+                                                        <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                        <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
+                                                        <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
+                                                        <td>{t.quantity || 1}</td>
+                                                        <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
+                                                        <td>
+                                                            <span style={{
+                                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                                background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
+                                                            }}>{sLabel}</span>
+                                                        </td>
+                                                        <td>
+                                                            <span style={{
+                                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                                background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
+                                                                color: isDelivery ? '#3b82f6' : '#f59e0b', whiteSpace: 'nowrap',
+                                                            }}>{isDelivery ? <><Truck size={14} /> Delivery</> : <><Store size={14} /> Walk-in</>}</span>
+                                                        </td>
+                                                        <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
+                                                            {new Date(t.created_at).toLocaleString()}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                    {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
+                                </div>
                             </div>
-                            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredTxns.map(t => {
-                                            const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
-                                            const sLabel = statusLabels[t.status] || t.status;
-                                            const isDelivery = t.purchase_type === 'delivery';
-                                            return (
-                                                <tr key={t.id}>
-                                                    <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                    <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
-                                                    <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
-                                                    <td>{t.quantity || 1}</td>
-                                                    <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
-                                                    <td>
-                                                        <span style={{
-                                                            padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                            background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
-                                                        }}>{sLabel}</span>
-                                                    </td>
-                                                    <td>
-                                                        <span style={{
-                                                            padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                            background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
-                                                            color: isDelivery ? '#3b82f6' : '#f59e0b', whiteSpace: 'nowrap',
-                                                        }}>{isDelivery ? <><Truck size={14} /> Delivery</> : <><Store size={14} /> Walk-in</>}</span>
-                                                    </td>
-                                                    <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                        {new Date(t.created_at).toLocaleString()}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                                {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
-                            </div>
-                        </div>
                         );
                     })()}
                     {/* ===== PRODUCTS TAB ===== */}
@@ -2139,174 +2207,160 @@ export default function AdminDashboard() {
                     })()}
                     {/* ===== INVENTORY TAB ===== */}
                     {activeTab === 'inventory' && (() => {
-                        const lowStockProducts = products.filter(p => p.stock <= 5);
+                        const outOfStock = products.filter(p => p.stock === 0);
+                        const lowStockProducts = products.filter(p => p.stock > 0 && p.stock <= 5);
+                        const healthyStock = products.filter(p => p.stock > 5);
+                        const maxStock = Math.max(...products.map(p => p.stock), 1);
                         const filtered = products.filter(p => {
                             if (!inventorySearch) return true;
                             const q = inventorySearch.toLowerCase();
-                            return p.title.toLowerCase().includes(q) || p.seller_name.toLowerCase().includes(q);
+                            return p.title.toLowerCase().includes(q) || (p.seller_name || '').toLowerCase().includes(q);
                         });
+                        // Group by store
                         const storeGroups = {};
                         filtered.forEach(p => {
                             const store = p.seller_name || 'Independent';
                             if (!storeGroups[store]) storeGroups[store] = [];
                             storeGroups[store].push(p);
                         });
+
                         return (
                             <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                                     <div>
-                                        <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Inventory</h1>
+                                        <h1 style={{ fontSize: '1.5rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 10 }}>
+                                            <ClipboardList size={22} /> Stock Management
+                                        </h1>
                                         <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>
-                                            {products.length} products across {new Set(products.map(p => p.seller_name)).size} stores
+                                            Monitor stock levels and restock products
                                         </p>
                                     </div>
                                     <input
                                         type="text"
-                                        placeholder="Search by store or product name..."
+                                        placeholder="Search products or stores..."
                                         value={inventorySearch}
                                         onChange={e => setInventorySearch(e.target.value)}
                                         style={{
-                                            width: 280, padding: '10px 14px', borderRadius: 10,
+                                            width: 260, padding: '10px 14px', borderRadius: 10,
                                             background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
                                             color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif',
                                         }}
                                     />
                                 </div>
-                                {/* Low Stock Alerts Section */}
-                                {lowStockProducts.length > 0 && (
-                                    <div style={{ marginBottom: 28 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                                            <AlertTriangle size={18} style={{ color: '#ef4444' }} />
-                                            <h2 style={{ fontSize: '1.05rem', fontWeight: 700 }}>Low Stock Alerts</h2>
-                                            <span style={{
-                                                display: 'inline-block', padding: '3px 10px', borderRadius: 12,
-                                                fontSize: '0.75rem', fontWeight: 600,
-                                                background: 'rgba(239,68,68,0.1)', color: '#ef4444',
-                                            }}>{lowStockProducts.length}</span>
-                                        </div>
-                                        <div style={{
-                                            maxHeight: 420,
-                                            overflowY: 'auto',
-                                            display: 'grid',
-                                            gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                                            gap: 12,
-                                            paddingRight: 4,
-                                        }}>
-                                            {lowStockProducts.map(p => (
-                                                <div
-                                                    key={p.id}
-                                                    onClick={() => handleLowStockClick(p)}
-                                                    style={{
-                                                        background: 'var(--admin-card-bg)', border: '2px solid var(--admin-border)',
-                                                        borderRadius: 12, padding: 16, cursor: p.department_id ? 'pointer' : 'default',
-                                                        transition: 'all 0.2s', position: 'relative',
-                                                        borderColor: p.stock === 0 ? '#ef4444' : '#f59e0b',
-                                                    }}
-                                                    onMouseEnter={e => {
-                                                        if (p.department_id) {
-                                                            e.currentTarget.style.transform = 'translateY(-2px)';
-                                                            e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)';
-                                                        }
-                                                    }}
-                                                    onMouseLeave={e => {
-                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                        e.currentTarget.style.boxShadow = 'none';
-                                                    }}
-                                                >
-                                                    <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 4, lineHeight: 1.3 }}>{p.title}</p>
-                                                    <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem', marginBottom: 8 }}><Store size={14} /> {p.seller_name}</p>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                        <span style={{ color: p.stock === 0 ? '#ef4444' : '#f59e0b', fontWeight: 700, fontSize: '0.9rem' }}>
-                                                            {p.stock === 0 ? 'Out of Stock' : `${p.stock} left`}
-                                                        </span>
-                                                        <span style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem' }}>PHP {p.price.toFixed(2)}</span>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
+
+                                {/* Stock Health Summary Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 28 }}>
+                                    <div className="card" style={{ padding: 18, textAlign: 'center', borderLeft: '4px solid #6366f1' }}>
+                                        <div style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Total Products</div>
+                                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#6366f1' }}>{products.length}</div>
                                     </div>
-                                )}
-                                {/* Full Product List grouped by store */}
-                                {Object.entries(storeGroups).map(([storeName, storeProducts]) => (
-                                    <div key={storeName} style={{ marginBottom: 24 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                                            <span style={{ fontSize: '1.2rem' }}><Store size={14} /></span>
-                                            <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{storeName}</h2>
-                                            <span style={{
-                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.75rem', fontWeight: 600,
-                                                background: 'rgba(139,92,246,0.1)', color: '#8b5cf6',
-                                            }}>{storeProducts.length} product{storeProducts.length !== 1 ? 's' : ''}</span>
-                                        </div>
-                                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                            <table className="data-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Created</th><th>Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {storeProducts.map(p => (
-                                                        <tr key={p.id}>
-                                                            <td style={{ fontWeight: 500 }}>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="text" defaultValue={p.title}
-                                                                        onChange={e => setEditProductData({ ...editProductData, title: e.target.value })}
-                                                                        style={{ width: 180, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : p.title}
-                                                            </td>
-                                                            <td>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="number" defaultValue={p.price} step="0.01"
-                                                                        onChange={e => setEditProductData({ ...editProductData, price: parseFloat(e.target.value) })}
-                                                                        style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : <span style={{ fontWeight: 600 }}>PHP {p.price.toFixed(2)}</span>}
-                                                            </td>
-                                                            <td>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="number" defaultValue={p.stock}
-                                                                        onChange={e => setEditProductData({ ...editProductData, stock: parseInt(e.target.value) })}
-                                                                        style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>}
-                                                            </td>
-                                                            <td>
-                                                                {editProductId === p.id ? (
-                                                                    <select defaultValue={p.is_active.toString()}
-                                                                        onChange={e => setEditProductData({ ...editProductData, is_active: e.target.value === 'true' })}
-                                                                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }}>
-                                                                        <option value="true">Active</option>
-                                                                        <option value="false">Inactive</option>
-                                                                    </select>
+                                    <div className="card" style={{ padding: 18, textAlign: 'center', borderLeft: '4px solid #ef4444' }}>
+                                        <div style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Out of Stock</div>
+                                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ef4444' }}>{outOfStock.length}</div>
+                                    </div>
+                                    <div className="card" style={{ padding: 18, textAlign: 'center', borderLeft: '4px solid #f59e0b' }}>
+                                        <div style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Low Stock</div>
+                                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#f59e0b' }}>{lowStockProducts.length}</div>
+                                    </div>
+                                    <div className="card" style={{ padding: 18, textAlign: 'center', borderLeft: '4px solid #10b981' }}>
+                                        <div style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Healthy</div>
+                                        <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#10b981' }}>{healthyStock.length}</div>
+                                    </div>
+                                </div>
+
+                                {/* Products grouped by Store */}
+                                {Object.entries(storeGroups).map(([storeName, storeProducts]) => {
+                                    const storeLowCount = storeProducts.filter(p => p.stock <= 5).length;
+                                    return (
+                                        <div key={storeName} style={{ marginBottom: 28 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                                                <Store size={18} style={{ color: 'var(--admin-accent)' }} />
+                                                <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{storeName}</h2>
+                                                <span style={{
+                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.75rem', fontWeight: 600,
+                                                    background: 'rgba(139,92,246,0.1)', color: '#8b5cf6',
+                                                }}>{storeProducts.length} product{storeProducts.length !== 1 ? 's' : ''}</span>
+                                                {storeLowCount > 0 && (
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                        background: 'rgba(239,68,68,0.1)', color: '#ef4444',
+                                                    }}>{storeLowCount} low</span>
+                                                )}
+                                            </div>
+                                            <div style={{
+                                                display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                                                gap: 12,
+                                            }}>
+                                                {storeProducts.map(p => {
+                                                    const isLow = p.stock <= 5;
+                                                    const isOut = p.stock === 0;
+                                                    const stockPct = maxStock > 0 ? (p.stock / maxStock) * 100 : 0;
+                                                    const barColor = isOut ? '#ef4444' : isLow ? '#f59e0b' : '#10b981';
+                                                    const prodImg = p.images && p.images.length > 0 ? p.images[0] : null;
+                                                    return (
+                                                        <div
+                                                            key={p.id}
+                                                            onClick={() => handleLowStockClick(p)}
+                                                            style={{
+                                                                background: 'var(--admin-card-bg)',
+                                                                borderRadius: 12, overflow: 'hidden',
+                                                                border: `1px solid ${isOut ? 'rgba(239,68,68,0.4)' : isLow ? 'rgba(245,158,11,0.4)' : 'var(--admin-border)'}`,
+                                                                cursor: 'pointer', transition: 'all 0.2s',
+                                                            }}
+                                                            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.12)'; }}
+                                                            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+                                                        >
+                                                            {/* Product Image */}
+                                                            <div style={{ width: '100%', height: 120, background: 'var(--admin-hover)', overflow: 'hidden', position: 'relative' }}>
+                                                                {prodImg ? (
+                                                                    <img src={prodImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
                                                                 ) : (
-                                                                    <span style={{
-                                                                        padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                                        background: p.is_active ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                                        color: p.is_active ? '#10b981' : '#ef4444',
-                                                                    }}>
-                                                                        {p.is_active ? 'Active' : 'Inactive'}
-                                                                    </span>
-                                                                )}
-                                                            </td>
-                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                                {new Date(p.created_at).toLocaleDateString()}
-                                                            </td>
-                                                            <td>
-                                                                {editProductId === p.id ? (
-                                                                    <div style={{ display: 'flex', gap: 4 }}>
-                                                                        <button className="btn btn-success btn-sm" onClick={() => handleUpdateProduct(p.id)} style={{ padding: '4px 8px' }}>Yes</button>
-                                                                        <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(null); setEditProductData({}); }} style={{ padding: '4px 8px' }}>No</button>
+                                                                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--admin-text-muted)' }}>
+                                                                        <Package size={32} />
                                                                     </div>
-                                                                ) : (
-                                                                    <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
-                                                                        style={{ fontSize: '0.75rem' }}>Edit</button>
                                                                 )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                                                {/* Stock badge overlay */}
+                                                                <span style={{
+                                                                    position: 'absolute', top: 8, right: 8,
+                                                                    padding: '3px 8px', borderRadius: 8, fontSize: '0.68rem', fontWeight: 700,
+                                                                    background: isOut ? 'rgba(239,68,68,0.9)' : isLow ? 'rgba(245,158,11,0.9)' : 'rgba(16,185,129,0.9)',
+                                                                    color: '#fff', backdropFilter: 'blur(4px)',
+                                                                }}>{isOut ? 'Out of Stock' : isLow ? `${p.stock} left` : `${p.stock} in stock`}</span>
+                                                            </div>
+                                                            {/* Product Details */}
+                                                            <div style={{ padding: '12px 14px' }}>
+                                                                <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                    {p.title}
+                                                                </p>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                                                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--admin-accent)' }}>PHP {p.price.toFixed(2)}</span>
+                                                                </div>
+                                                                {/* Stock bar */}
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                                                    <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--admin-hover)', overflow: 'hidden' }}>
+                                                                        <div style={{
+                                                                            width: `${Math.max(stockPct, 3)}%`, height: '100%', borderRadius: 3,
+                                                                            background: barColor, transition: 'width 0.4s ease',
+                                                                        }} />
+                                                                    </div>
+                                                                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: barColor, minWidth: 24 }}>{p.stock}</span>
+                                                                </div>
+                                                                {/* Action hint */}
+                                                                <div style={{
+                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                                                    padding: '6px 0', borderTop: '1px solid var(--admin-border)',
+                                                                    color: '#8b5cf6', fontSize: '0.75rem', fontWeight: 600,
+                                                                }}>
+                                                                    <Package size={13} /> Request Restock
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                                 {products.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No products found</p></div>}
                             </div>
                         );
@@ -2550,6 +2604,345 @@ export default function AdminDashboard() {
                             ) : (
                                 <div className="loading-container"><div className="spinner" style={{ width: 40, height: 40 }}></div><p>Loading deliveries...</p></div>
                             )}
+                        </div>
+                    )}
+                    {/* ===== SEARCH TAB ===== */}
+                    {activeTab === 'search' && (
+                        <div>
+                            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 20 }}>NLP Search Engine</h1>
+                            <form onSubmit={handleAdminSearch} style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
+                                <input
+                                    type="text"
+                                    placeholder="Search products... (e.g. affordable blue Nike shoes under 2000)"
+                                    value={adminSearchQuery}
+                                    onChange={e => setAdminSearchQuery(e.target.value)}
+                                    style={{
+                                        flex: 1, padding: '12px 16px', borderRadius: 10,
+                                        background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                        color: 'var(--admin-text)', fontSize: '0.9rem', fontFamily: 'Inter, sans-serif',
+                                        outline: 'none',
+                                    }}
+                                />
+                                <button type="submit" disabled={adminSearchLoading} style={{
+                                    padding: '12px 24px', borderRadius: 10,
+                                    background: 'linear-gradient(135deg, #6366f1, #818cf8)',
+                                    color: '#fff', border: 'none', fontWeight: 700, fontSize: '0.9rem',
+                                    cursor: adminSearchLoading ? 'not-allowed' : 'pointer',
+                                    fontFamily: 'Inter, sans-serif', opacity: adminSearchLoading ? 0.7 : 1,
+                                }}>
+                                    {adminSearchLoading ? 'Searching...' : 'Search'}
+                                </button>
+                            </form>
+                            {adminSearchLoading && (
+                                <div style={{ textAlign: 'center', padding: 40, color: 'var(--admin-text-muted)' }}>
+                                    <div className="spinner" style={{ width: 36, height: 36, margin: '0 auto 12px' }} />
+                                    <p>AI is analyzing products...</p>
+                                </div>
+                            )}
+                            {adminSearchResults && !adminSearchLoading && (
+                                <div>
+                                    {/* NLP Pipeline Info */}
+                                    <div style={{
+                                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                                        gap: 12, marginBottom: 20,
+                                    }}>
+                                        <div style={{
+                                            padding: 14, borderRadius: 10,
+                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                        }}>
+                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Detected Intents</p>
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                {(adminSearchResults.detected_intents || []).map((intent, i) => (
+                                                    <span key={i} style={{
+                                                        padding: '3px 10px', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600,
+                                                        background: 'rgba(99,102,241,0.15)', color: '#818cf8',
+                                                    }}>{intent}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div style={{
+                                            padding: 14, borderRadius: 10,
+                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                        }}>
+                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Extracted Slots</p>
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                {Object.entries(adminSearchResults.extracted_slots || {}).map(([key, val]) => (
+                                                    <span key={key} style={{
+                                                        padding: '3px 10px', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600,
+                                                        background: 'rgba(16,185,129,0.12)', color: '#10b981',
+                                                    }}>{key}: {val}</span>
+                                                ))}
+                                                {Object.keys(adminSearchResults.extracted_slots || {}).length === 0 && (
+                                                    <span style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>None</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div style={{
+                                            padding: 14, borderRadius: 10,
+                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                        }}>
+                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Rewritten Query</p>
+                                            <p style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--admin-text)' }}>
+                                                {adminSearchResults.rewritten_query || adminSearchResults.query || '—'}
+                                            </p>
+                                        </div>
+                                        <div style={{
+                                            padding: 14, borderRadius: 10,
+                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                        }}>
+                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Applied Filters</p>
+                                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                                {Object.entries(adminSearchResults.applied_filters || {}).map(([key, val]) => (
+                                                    <span key={key} style={{
+                                                        padding: '3px 10px', borderRadius: 6, fontSize: '0.78rem', fontWeight: 600,
+                                                        background: 'rgba(245,158,11,0.12)', color: '#f59e0b',
+                                                    }}>{key}: {val}</span>
+                                                ))}
+                                                {Object.keys(adminSearchResults.applied_filters || {}).length === 0 && (
+                                                    <span style={{ fontSize: '0.78rem', color: 'var(--admin-text-muted)' }}>None</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p style={{ color: 'var(--admin-text-muted)', marginBottom: 16, fontSize: '0.85rem' }}>
+                                        Found {adminSearchResults.total_results} results for &quot;{adminSearchResults.query}&quot;
+                                    </p>
+                                    {adminSearchResults.total_results === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: 40, color: 'var(--admin-text-muted)' }}>
+                                            <Search size={32} style={{ marginBottom: 8, opacity: 0.4 }} />
+                                            <p>No products found. Try a different search term.</p>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                                            {adminSearchResults.results.map((product) => (
+                                                <div key={product.id} style={{
+                                                    borderRadius: 14, overflow: 'hidden',
+                                                    background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                                    transition: 'all 0.2s',
+                                                }}>
+                                                    {product.image_url && (
+                                                        <div style={{ height: 160, overflow: 'hidden', background: 'var(--admin-hover)' }}>
+                                                            <img src={product.image_url} alt={product.title}
+                                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                                onError={e => e.target.style.display = 'none'} />
+                                                        </div>
+                                                    )}
+                                                    <div style={{ padding: 14 }}>
+                                                        {/* ESCI Labels */}
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                                            <span style={{
+                                                                padding: '3px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700,
+                                                                background: product.relevance_label === 'Exact' ? 'rgba(76,175,80,0.15)' :
+                                                                    product.relevance_label === 'Substitute' ? 'rgba(255,193,7,0.15)' :
+                                                                    product.relevance_label === 'Complement' ? 'rgba(33,150,243,0.15)' : 'rgba(244,67,54,0.15)',
+                                                                color: product.relevance_label === 'Exact' ? '#4caf50' :
+                                                                    product.relevance_label === 'Substitute' ? '#ffc107' :
+                                                                    product.relevance_label === 'Complement' ? '#2196f3' : '#f44336',
+                                                            }}>{product.relevance_label}</span>
+                                                            <span style={{
+                                                                fontSize: '0.72rem', fontWeight: 600,
+                                                                padding: '3px 8px', borderRadius: 6,
+                                                                background: 'rgba(255,255,255,0.06)', color: 'var(--admin-text-secondary)',
+                                                            }}>Score: {(product.relevance_score * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                        {/* ESCI Probabilities */}
+                                                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+                                                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(76,175,80,0.12)', color: '#4caf50' }}>E: {(product.exact_prob * 100).toFixed(1)}%</span>
+                                                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(255,193,7,0.12)', color: '#ffc107' }}>S: {(product.substitute_prob * 100).toFixed(1)}%</span>
+                                                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(33,150,243,0.12)', color: '#2196f3' }}>C: {(product.complement_prob * 100).toFixed(1)}%</span>
+                                                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: 4, background: 'rgba(244,67,54,0.12)', color: '#f44336' }}>I: {(product.irrelevant_prob * 100).toFixed(1)}%</span>
+                                                        </div>
+                                                        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 6 }}>{product.title}</h3>
+                                                        {product.description && (
+                                                            <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem', marginBottom: 8, lineHeight: 1.4 }}>
+                                                                {product.description.slice(0, 100)}{product.description.length > 100 ? '...' : ''}
+                                                            </p>
+                                                        )}
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#6366f1' }}>₱{product.price.toFixed(2)}</span>
+                                                            <span style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)' }}>Stock: {product.stock ?? '—'}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            {!adminSearchResults && !adminSearchLoading && (
+                                <div style={{ textAlign: 'center', padding: 60, color: 'var(--admin-text-muted)' }}>
+                                    <Search size={48} style={{ marginBottom: 12, opacity: 0.3 }} />
+                                    <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 6 }}>Search products with NLP</p>
+                                    <p style={{ fontSize: '0.85rem' }}>View ESCI classifications, relevance scores, detected intents, and extracted slots</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {/* ===== WITHDRAW TAB ===== */}
+                    {activeTab === 'withdraw' && (
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+                                <button onClick={() => setActiveTab('dashboard')} style={{
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                    background: 'none', border: '1px solid var(--admin-border)',
+                                    cursor: 'pointer', color: 'var(--admin-text-secondary)',
+                                    fontSize: '0.82rem', fontWeight: 600, padding: '6px 14px',
+                                    borderRadius: 8, fontFamily: 'Inter, sans-serif',
+                                }}>
+                                    <X size={14} /> Back
+                                </button>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Admin Wallet</h1>
+                            </div>
+                            {/* Balance Card */}
+                            <div style={{
+                                background: 'linear-gradient(135deg, #6366f1, #818cf8)',
+                                borderRadius: 16, padding: '28px 32px', marginBottom: 24,
+                                color: '#fff', position: 'relative', overflow: 'hidden',
+                            }}>
+                                <div style={{ position: 'absolute', top: -20, right: -20, width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
+                                <p style={{ fontSize: '0.85rem', opacity: 0.8, marginBottom: 6 }}>Available Balance</p>
+                                <p style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 16 }}>₱{adminBalance.toFixed(2)}</p>
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                    <input
+                                        type="number"
+                                        placeholder="Amount to withdraw"
+                                        value={withdrawAmount}
+                                        onChange={e => setWithdrawAmount(e.target.value)}
+                                        style={{
+                                            flex: 1, padding: '10px 14px', borderRadius: 10,
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            background: 'rgba(255,255,255,0.15)', color: '#fff',
+                                            fontSize: '0.9rem', fontFamily: 'Inter, sans-serif',
+                                            outline: 'none',
+                                        }}
+                                    />
+                                    <button
+                                        onClick={handleWithdraw}
+                                        disabled={withdrawLoading}
+                                        style={{
+                                            padding: '10px 24px', borderRadius: 10,
+                                            background: '#fff', color: '#6366f1',
+                                            border: 'none', fontWeight: 700, fontSize: '0.9rem',
+                                            cursor: withdrawLoading ? 'not-allowed' : 'pointer',
+                                            opacity: withdrawLoading ? 0.7 : 1,
+                                            fontFamily: 'Inter, sans-serif',
+                                        }}
+                                    >
+                                        {withdrawLoading ? 'Processing...' : 'Withdraw'}
+                                    </button>
+                                </div>
+                            </div>
+                            {/* Transaction History */}
+                            <div style={{
+                                background: 'var(--admin-card-bg)', borderRadius: 14,
+                                border: '1px solid var(--admin-border)', overflow: 'hidden',
+                            }}>
+                                <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--admin-border)' }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Transaction History</h3>
+                                </div>
+                                {svfHistory.length === 0 ? (
+                                    <div style={{ padding: 40, textAlign: 'center', color: 'var(--admin-text-muted)' }}>
+                                        <DollarSign size={32} style={{ marginBottom: 8, opacity: 0.4 }} />
+                                        <p>No transactions yet</p>
+                                    </div>
+                                ) : (
+                                    <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                                        {svfHistory.map((entry, i) => {
+                                            const isRestock = entry.transaction_type === 'restock_payment';
+                                            const meta = entry.metadata || {};
+                                            return (
+                                                <div key={entry.id || i} style={{
+                                                    padding: isRestock ? '16px 24px' : '14px 24px',
+                                                    borderBottom: i < svfHistory.length - 1 ? '1px solid var(--admin-border)' : 'none',
+                                                    ...(isRestock ? { background: 'rgba(139,92,246,0.04)' } : {}),
+                                                }}>
+                                                    {isRestock ? (
+                                                        /* Restock Payment Entry */
+                                                        <div>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                                    <div style={{
+                                                                        width: 36, height: 36, borderRadius: 10,
+                                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                        background: 'rgba(139,92,246,0.12)',
+                                                                    }}>
+                                                                        <Package size={16} style={{ color: '#8b5cf6' }} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p style={{ fontWeight: 700, fontSize: '0.88rem', color: '#8b5cf6' }}>Restock Payment</p>
+                                                                        <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.72rem' }}>
+                                                                            {new Date(entry.created_at).toLocaleString('en-PH', {
+                                                                                month: 'short', day: 'numeric', year: 'numeric',
+                                                                                hour: '2-digit', minute: '2-digit',
+                                                                            })}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                                <p style={{ fontWeight: 700, fontSize: '0.95rem', color: '#ef4444' }}>
+                                                                    -₱{entry.amount.toFixed(2)}
+                                                                </p>
+                                                            </div>
+                                                            <div style={{
+                                                                padding: '10px 14px', borderRadius: 8,
+                                                                background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                                                fontSize: '0.8rem',
+                                                            }}>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                                    <span style={{ color: 'var(--admin-text-muted)' }}>Item</span>
+                                                                    <span style={{ fontWeight: 600 }}>{meta.product_title || 'Product'}</span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                                    <span style={{ color: 'var(--admin-text-muted)' }}>Qty Restocked</span>
+                                                                    <span style={{ fontWeight: 600 }}>{meta.quantity || '—'}</span>
+                                                                </div>
+                                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                                    <span style={{ color: 'var(--admin-text-muted)' }}>Deliveryman</span>
+                                                                    <span style={{ fontWeight: 600, color: '#8b5cf6' }}>{meta.delivery_user_name || 'Unknown'}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        /* Regular Deposit/Withdrawal Entry */
+                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                                <div style={{
+                                                                    width: 36, height: 36, borderRadius: 10,
+                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                    background: entry.transaction_type === 'deposit'
+                                                                        ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                                                                }}>
+                                                                    {entry.transaction_type === 'deposit' ? (
+                                                                        <TrendingUp size={16} style={{ color: '#10b981' }} />
+                                                                    ) : (
+                                                                        <Download size={16} style={{ color: '#ef4444', transform: 'rotate(180deg)' }} />
+                                                                    )}
+                                                                </div>
+                                                                <div>
+                                                                    <p style={{ fontWeight: 600, fontSize: '0.88rem', textTransform: 'capitalize' }}>
+                                                                        {entry.transaction_type}
+                                                                    </p>
+                                                                    <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem' }}>
+                                                                        {new Date(entry.created_at).toLocaleString('en-PH', {
+                                                                            month: 'short', day: 'numeric', year: 'numeric',
+                                                                            hour: '2-digit', minute: '2-digit',
+                                                                        })}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <p style={{
+                                                                fontWeight: 700, fontSize: '0.95rem',
+                                                                color: entry.transaction_type === 'deposit' ? '#10b981' : '#ef4444',
+                                                            }}>
+                                                                {entry.transaction_type === 'deposit' ? '+' : '-'}₱{entry.amount.toFixed(2)}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

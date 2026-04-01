@@ -293,17 +293,68 @@ export default function OrdersPage() {
                 </div>
             )}
 
-            {/* All orders */}
-            <div className="card" style={{ marginBottom: 24 }}>
-                <h3 style={{ marginBottom: 16 }}>Order Status</h3>
-                {filteredOrders.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No orders yet. Start shopping!</p>
-                ) : (
-                    <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-                        {filteredOrders.map(t => renderOrderCard(t))}
-                    </div>
-                )}
-            </div>
+            {/* Active vs History toggle */}
+            {(() => {
+                const activeStatuses = ['pending', 'approved', 'ondeliver', 'pending_walkin', 'inwork', 'ready', 'picked_up'];
+                const historyStatuses = ['delivered', 'completed', 'cancelled', 'undelivered'];
+                const activeOrders = filteredOrders.filter(t => activeStatuses.includes(t.status));
+                const historyOrders = filteredOrders.filter(t => historyStatuses.includes(t.status))
+                    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+
+                return (
+                    <>
+                        {/* Active Orders */}
+                        <div className="card" style={{ marginBottom: 24 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <ShoppingCart size={18} /> Active Orders
+                                    <span style={{
+                                        fontSize: '0.75rem', fontWeight: 700,
+                                        padding: '2px 10px', borderRadius: 12,
+                                        background: 'rgba(59,130,246,0.12)', color: '#3b82f6',
+                                    }}>{activeOrders.length}</span>
+                                </h3>
+                            </div>
+                            {activeOrders.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: 40 }}>
+                                    <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
+                                    <p style={{ color: 'var(--text-muted)' }}>No active orders right now</p>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Start shopping to see your orders here!</p>
+                                </div>
+                            ) : (
+                                <div style={{ maxHeight: 500, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+                                    {activeOrders.map(t => renderOrderCard(t))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Purchase History */}
+                        <div className="card" style={{ marginBottom: 24 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    📋 Purchase History
+                                    <span style={{
+                                        fontSize: '0.75rem', fontWeight: 700,
+                                        padding: '2px 10px', borderRadius: 12,
+                                        background: 'rgba(16,185,129,0.12)', color: '#10b981',
+                                    }}>{historyOrders.length}</span>
+                                </h3>
+                            </div>
+                            {historyOrders.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: 40 }}>
+                                    <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
+                                    <p style={{ color: 'var(--text-muted)' }}>No purchase history yet</p>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Completed and cancelled orders will appear here</p>
+                                </div>
+                            ) : (
+                                <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+                                    {historyOrders.map(t => renderOrderCard(t))}
+                                </div>
+                            )}
+                        </div>
+                    </>
+                );
+            })()}
 
             {/* Order Detail Modal */}
             {selectedOrder && (() => {

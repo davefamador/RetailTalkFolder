@@ -65,6 +65,7 @@ class SVFEntry(BaseModel):
     user_id: str
     transaction_type: str
     amount: float
+    metadata: Optional[dict] = None
     created_at: str
 
 
@@ -386,6 +387,7 @@ async def get_svf_history(current_user: dict = Depends(get_current_user)):
             user_id=row["user_id"],
             transaction_type=row["transaction_type"],
             amount=float(row["amount"]),
+            metadata=row.get("metadata"),
             created_at=row["created_at"],
         )
         for row in (result.data or [])

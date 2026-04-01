@@ -206,7 +206,6 @@ export default function ReportsContent() {
                         <MetricCard label="Gross Merchandise Value" value={`₱${gmv.toFixed(2)}`} subtitle="Total sales including commissions" color="#10b981" icon="💎" />
                         <MetricCard label="Net Revenue (90%)" value={`₱${netRevenue.toFixed(2)}`} subtitle="Earnings after 10% commission" color="#6366f1" icon="💵" />
                         <MetricCard label="Average Order Value" value={`₱${aov.toFixed(2)}`} subtitle={`Across ${totalOrders} order${totalOrders !== 1 ? 's' : ''}`} color="#f59e0b" icon="📊" />
-                        <MetricCard label="Platform Commission" value={`₱${totalCommission.toFixed(2)}`} subtitle="10% of GMV retained by RetailTalk" color="#ef4444" icon="🏦" />
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
                         <ComparisonCard label="Today vs Yesterday" current={todaySales} previous={yesterdaySales} pctChange={pctChange(todaySales, yesterdaySales)} />

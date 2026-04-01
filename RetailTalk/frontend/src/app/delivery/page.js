@@ -162,29 +162,69 @@ export default function DeliveryPage() {
         );
     }
 
-    // Bar chart component
-    const BarChart = ({ data, valueKey = 'amount' }) => {
+    // Line chart component (right = newest, left = oldest)
+    const LineChart = ({ data, valueKey = 'amount' }) => {
         if (!data || data.length === 0) return <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No data yet</p>;
-        const maxVal = Math.max(...data.map(d => d[valueKey] || 0), 1);
+        // Take last 14 items, reversed so index 0 = oldest (leftmost), last = newest (rightmost)
+        const chartData = data.slice(0, 14).reverse();
+        const maxVal = Math.max(...chartData.map(d => d[valueKey] || 0), 1);
+        const svgW = 560, svgH = 140, padX = 10, padY = 20;
+        const plotW = svgW - padX * 2, plotH = svgH - padY * 2;
+        const points = chartData.map((d, i) => ({
+            x: padX + (chartData.length > 1 ? (i / (chartData.length - 1)) * plotW : plotW / 2),
+            y: padY + plotH - ((d[valueKey] || 0) / maxVal) * plotH,
+            val: d[valueKey] || 0,
+            date: d.date?.slice(-5) || '',
+        }));
+        // Build smooth SVG path
+        let linePath = '';
+        if (points.length === 1) {
+            linePath = `M${points[0].x},${points[0].y}`;
+        } else {
+            linePath = `M${points[0].x},${points[0].y}`;
+            for (let i = 1; i < points.length; i++) {
+                const cpx = (points[i - 1].x + points[i].x) / 2;
+                linePath += ` C${cpx},${points[i - 1].y} ${cpx},${points[i].y} ${points[i].x},${points[i].y}`;
+            }
+        }
+        // Area fill path (fill under the line)
+        const areaPath = linePath + ` L${points[points.length - 1].x},${padY + plotH} L${points[0].x},${padY + plotH} Z`;
+        const gradId = `lineGrad_${valueKey}`;
         return (
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120, padding: '10px 0' }}>
-                {data.slice(0, 14).reverse().map((d, i) => {
-                    const h = Math.max(((d[valueKey] || 0) / maxVal) * 100, 4);
-                    return (
-                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                            <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>
-                                {valueKey === 'amount' ? `₱${d[valueKey]}` : d[valueKey]}
-                            </span>
-                            <div style={{
-                                width: '100%', height: `${h}%`, borderRadius: 4, minHeight: 4,
-                                background: 'linear-gradient(to top, var(--accent-primary), rgba(108,99,255,0.4))',
-                            }} />
-                            <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: 40 }}>
-                                {d.date?.slice(-5)}
-                            </span>
-                        </div>
-                    );
-                })}
+            <div style={{ position: 'relative', width: '100%' }}>
+                <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', height: 'auto' }} preserveAspectRatio="xMidYMid meet">
+                    <defs>
+                        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="rgba(108,99,255,0.35)" />
+                            <stop offset="100%" stopColor="rgba(108,99,255,0.02)" />
+                        </linearGradient>
+                    </defs>
+                    {/* Grid lines */}
+                    {[0, 0.25, 0.5, 0.75, 1].map((frac, i) => (
+                        <line key={i} x1={padX} y1={padY + plotH * (1 - frac)} x2={padX + plotW} y2={padY + plotH * (1 - frac)}
+                            stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+                    ))}
+                    {/* Area fill */}
+                    <path d={areaPath} fill={`url(#${gradId})`} />
+                    {/* Line */}
+                    <path d={linePath} fill="none" stroke="var(--accent-primary, #6c63ff)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                    {/* Data points */}
+                    {points.map((p, i) => (
+                        <g key={i}>
+                            <circle cx={p.x} cy={p.y} r="4" fill="var(--accent-primary, #6c63ff)" stroke="#1a1a2e" strokeWidth="2" />
+                            {/* Value label */}
+                            <text x={p.x} y={p.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize="8" fontWeight="600" fontFamily="Inter, sans-serif">
+                                {valueKey === 'amount' ? `₱${p.val}` : p.val}
+                            </text>
+                        </g>
+                    ))}
+                    {/* X-axis labels */}
+                    {points.map((p, i) => (
+                        <text key={`lbl-${i}`} x={p.x} y={svgH - 2} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="7" fontFamily="Inter, sans-serif">
+                            {p.date}
+                        </text>
+                    ))}
+                </svg>
             </div>
         );
     };
@@ -345,13 +385,13 @@ export default function DeliveryPage() {
                                 {/* Earnings graph */}
                                 <div className="card" style={{ padding: 20, marginBottom: 16 }}>
                                     <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Earnings ({graphPeriod})</h4>
-                                    <BarChart data={earnings[graphPeriod]} valueKey="amount" />
+                                    <LineChart data={earnings[graphPeriod]} valueKey="amount" />
                                 </div>
 
                                 {/* Delivery count graph */}
                                 <div className="card" style={{ padding: 20 }}>
                                     <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Deliveries Count ({graphPeriod})</h4>
-                                    <BarChart data={earnings[`${graphPeriod}_delivery_count`]} valueKey="count" />
+                                    <LineChart data={earnings[`${graphPeriod}_delivery_count`]} valueKey="count" />
                                 </div>
                             </>
                         )}
@@ -492,7 +532,7 @@ export default function DeliveryPage() {
                                                             }}>{RESTOCK_STATUS_LABEL[r.status] || r.status}</span>
                                                         </div>
                                                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.approved_quantity || r.requested_quantity}
+                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.quantity || r.approved_quantity || r.requested_quantity}
                                                         </p>
                                                         {r.notes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>Note: {r.notes}</p>}
                                                     </div>
@@ -527,7 +567,7 @@ export default function DeliveryPage() {
                                                             }}>Approved</span>
                                                         </div>
                                                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.approved_quantity || r.requested_quantity}
+                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.quantity || r.approved_quantity || r.requested_quantity}
                                                         </p>
                                                         {r.notes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>Note: {r.notes}</p>}
                                                         {r.manager_notes && <p style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 4 }}>Manager: {r.manager_notes}</p>}

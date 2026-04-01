@@ -224,9 +224,11 @@ async def modify_restock_delivery(
 
 @router.put("/{request_id}/deliver")
 async def complete_restock_delivery(request_id: str, delivery_user: dict = Depends(require_delivery)):
-    """Mark restock as delivered and increment product stock."""
+    """Mark restock as delivered and increment product stock. Deduct ₱90 delivery fee from admin."""
     sb = get_supabase()
     user_id = delivery_user["sub"]
+
+    RESTOCK_DELIVERY_FEE = 90.00
 
     restock = sb.table("restock_requests").select("*").eq("id", request_id).eq(
         "delivery_user_id", user_id
@@ -238,8 +240,11 @@ async def complete_restock_delivery(request_id: str, delivery_user: dict = Depen
     r = restock.data[0]
     qty = r.get("approved_quantity") or r["requested_quantity"]
 
+    # Get product info for metadata
+    product = sb.table("products").select("stock, title").eq("id", r["product_id"]).execute()
+    product_title = product.data[0].get("title", "Product") if product.data else "Product"
+
     # Increment product stock
-    product = sb.table("products").select("stock").eq("id", r["product_id"]).execute()
     if product.data:
         new_stock = int(product.data[0]["stock"]) + qty
         sb.table("products").update({"stock": new_stock}).eq("id", r["product_id"]).execute()
@@ -250,7 +255,54 @@ async def complete_restock_delivery(request_id: str, delivery_user: dict = Depen
         "delivered_at": datetime.now(timezone.utc).isoformat(),
     }).eq("id", request_id).execute()
 
-    return {"message": f"Restock delivered. {qty} units added to product stock."}
+    # Get delivery person name
+    delivery_user_info = sb.table("users").select("full_name").eq("id", user_id).execute()
+    delivery_name = delivery_user_info.data[0]["full_name"] if delivery_user_info.data else "Deliveryman"
+
+    # Get admin user
+    admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
+    if admin_user.data:
+        admin_id = admin_user.data[0]["id"]
+
+        # Deduct ₱90 from admin balance
+        admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+        if admin_bal.data:
+            new_admin_bal = float(admin_bal.data[0]["balance"]) - RESTOCK_DELIVERY_FEE
+            sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
+
+        # Record admin SVF deduction with metadata
+        sb.table("stored_value").insert({
+            "user_id": admin_id,
+            "transaction_type": "restock_payment",
+            "amount": RESTOCK_DELIVERY_FEE,
+            "metadata": {
+                "restock_request_id": request_id,
+                "product_title": product_title,
+                "quantity": qty,
+                "delivery_user_name": delivery_name,
+                "delivery_user_id": user_id,
+            },
+        }).execute()
+
+    # Credit ₱90 to delivery person's balance
+    del_bal = sb.table("user_balances").select("balance").eq("user_id", user_id).execute()
+    if del_bal.data:
+        new_del_bal = float(del_bal.data[0]["balance"]) + RESTOCK_DELIVERY_FEE
+        sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", user_id).execute()
+
+    # Record delivery person SVF deposit
+    sb.table("stored_value").insert({
+        "user_id": user_id,
+        "transaction_type": "restock_earning",
+        "amount": RESTOCK_DELIVERY_FEE,
+        "metadata": {
+            "restock_request_id": request_id,
+            "product_title": product_title,
+            "quantity": qty,
+        },
+    }).execute()
+
+    return {"message": f"Restock delivered. {qty} units added to product stock. ₱{RESTOCK_DELIVERY_FEE:.2f} delivery fee processed."}
 
 
 @router.get("/delivery-history")

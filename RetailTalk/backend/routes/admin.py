@@ -1032,25 +1032,33 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
             # Sort by revenue descending
             department_products.sort(key=lambda x: x["total_revenue"], reverse=True)
 
-    # Pending restock requests for this department
+    # Pending restock requests for this department (include in-delivery)
     pending_restocks = []
     restock_result = sb.table("restock_requests").select(
         "*, products(title, images, stock)"
-    ).eq("department_id", dept_id).in_("status", ["pending_manager", "approved_manager"]).order("created_at", desc=True).limit(20).execute()
+    ).eq("department_id", dept_id).in_("status", ["pending_manager", "approved_manager", "accepted_delivery", "in_transit"]).order("created_at", desc=True).limit(20).execute()
     if restock_result.data:
         rs_staff_ids = set(r["staff_id"] for r in restock_result.data)
-        rs_users = sb.table("users").select("id, full_name").in_("id", list(rs_staff_ids)).execute() if rs_staff_ids else None
-        rs_names = {u["id"]: u["full_name"] for u in (rs_users.data or [])} if rs_users else {}
+        # Also collect delivery user IDs
+        rs_delivery_ids = set(r["delivery_user_id"] for r in restock_result.data if r.get("delivery_user_id"))
+        all_user_ids = rs_staff_ids | rs_delivery_ids
+        rs_users = sb.table("users").select("id, full_name, role").in_("id", list(all_user_ids)).execute() if all_user_ids else None
+        rs_user_map = {u["id"]: {"name": u["full_name"], "role": u.get("role", "")} for u in (rs_users.data or [])} if rs_users else {}
         for r in restock_result.data:
             prod_info = r.get("products") or {}
+            requester = rs_user_map.get(r["staff_id"], {"name": "Unknown", "role": ""})
+            delivery_info = rs_user_map.get(r.get("delivery_user_id", ""), {"name": "", "role": ""})
             pending_restocks.append({
                 "id": r["id"],
                 "product_title": prod_info.get("title", ""),
                 "product_images": prod_info.get("images", []),
                 "current_stock": int(prod_info.get("stock", 0)),
                 "requested_quantity": r["requested_quantity"],
+                "approved_quantity": r.get("approved_quantity"),
                 "status": r["status"],
-                "requested_by": rs_names.get(r["staff_id"], "Unknown"),
+                "requested_by": requester["name"],
+                "requested_by_role": requester["role"],
+                "delivery_user_name": delivery_info["name"],
                 "created_at": r["created_at"],
             })
 
