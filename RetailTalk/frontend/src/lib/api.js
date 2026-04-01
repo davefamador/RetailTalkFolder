@@ -681,3 +681,7 @@ export async function checkWishlist(productId) {
 export async function getSellerWishlistReport() {
     return apiFetch('/wishlist/seller-report');
 }
+
+export async function getAdminWishlistReport() {
+    return apiFetch('/wishlist/admin-report');
+}

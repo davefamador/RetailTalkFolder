@@ -15,6 +15,7 @@ export default function SellerReportsPage() {
     const [products, setProducts] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [wishlistReport, setWishlistReport] = useState(null);
+    const [wishlistError, setWishlistError] = useState(false);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('financials');
     const [trendPeriod, setTrendPeriod] = useState('daily');
@@ -30,7 +31,7 @@ export default function SellerReportsPage() {
             const [prods, txns, wlReport] = await Promise.all([
                 getMyProducts(),
                 getTransactionHistory(),
-                getSellerWishlistReport().catch(() => null),
+                getSellerWishlistReport().catch((err) => { console.error('Wishlist report error:', err); setWishlistError(true); return null; }),
             ]);
             setProducts(prods);
             setTransactions(txns);
@@ -400,13 +401,29 @@ export default function SellerReportsPage() {
             {/* ═══ WISHLIST ANALYTICS ═══ */}
             {activeTab === 'wishlist' && (
                 <div>
+                    {wishlistError && (
+                        <div style={{
+                            padding: '12px 16px', marginBottom: 16, borderRadius: 8,
+                            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                            color: '#ef4444', fontSize: '0.85rem',
+                        }}>
+                            Failed to load wishlist analytics. Please try refreshing the page.
+                        </div>
+                    )}
+
                     {/* Wishlist Metric Cards */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
                         <MetricCard
                             label="Total Wishlists"
                             value={wishlistReport?.total_wishlists ?? 0}
                             subtitle="Times your products were wishlisted"
                             color="#ef4444" icon="❤️"
+                        />
+                        <MetricCard
+                            label="Unique Buyers"
+                            value={wishlistReport?.unique_buyers ?? 0}
+                            subtitle="Buyers who saved your products"
+                            color="#8b5cf6" icon="👥"
                         />
                         <MetricCard
                             label="Total Products"
@@ -437,24 +454,34 @@ export default function SellerReportsPage() {
                                             <span style={{
                                                 width: 28, height: 28, borderRadius: '50%',
                                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                fontSize: '0.8rem', fontWeight: 700,
+                                                fontSize: '0.8rem', fontWeight: 700, flexShrink: 0,
                                                 background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--border-color)',
                                                 color: i < 3 ? '#fff' : 'var(--text-secondary)',
                                             }}>{i + 1}</span>
 
                                             {/* Product image */}
-                                            {prod.image_url && (
-                                                <div style={{
-                                                    width: 36, height: 36, borderRadius: 8, overflow: 'hidden',
-                                                    border: '1px solid var(--border-color)', flexShrink: 0,
-                                                }}>
+                                            <div style={{
+                                                width: 36, height: 36, borderRadius: 8, overflow: 'hidden',
+                                                border: '1px solid var(--border-color)', flexShrink: 0,
+                                                background: 'var(--bg-secondary)',
+                                            }}>
+                                                {prod.image_url ? (
                                                     <img src={prod.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                </div>
-                                            )}
+                                                ) : (
+                                                    <div style={{
+                                                        width: '100%', height: '100%', display: 'flex',
+                                                        alignItems: 'center', justifyContent: 'center',
+                                                        color: 'var(--text-muted)', fontSize: '0.7rem',
+                                                    }}>📦</div>
+                                                )}
+                                            </div>
 
                                             {/* Product info + bar */}
-                                            <div style={{ flex: 1 }}>
-                                                <p style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9rem' }}>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <p style={{
+                                                    fontWeight: 600, marginBottom: 4, fontSize: '0.9rem',
+                                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                }}>
                                                     {prod.title || 'Untitled'}
                                                 </p>
                                                 <div style={{ height: 6, borderRadius: 3, background: 'var(--border-color)', overflow: 'hidden' }}>
@@ -468,7 +495,7 @@ export default function SellerReportsPage() {
                                             </div>
 
                                             {/* Count */}
-                                            <div style={{ textAlign: 'right', minWidth: 60 }}>
+                                            <div style={{ textAlign: 'right', minWidth: 60, flexShrink: 0 }}>
                                                 <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>
                                                     {prod.wishlist_count} ❤️
                                                 </p>

@@ -10,11 +10,11 @@ import {
     createProduct, uploadProductImage,
     getManagerDeliveryOrders, managerUpdateDeliveryOrderStatus,
     getManagerWalkinOrders, managerUpdateWalkinOrderStatus,
-    managerRequestProductRemoval,
+    managerRequestProductRemoval, getSellerWishlistReport,
 } from '../../../lib/api';
 import {
     LayoutDashboard, Users, Package, ShoppingCart, Truck, Tag,
-    CreditCard, Search, TrendingUp, LogOut, Trash2,
+    CreditCard, Search, TrendingUp, LogOut, Trash2, Heart,
 } from 'lucide-react';
 import SearchContent from '../../components/SearchContent';
 import ReportsContent from '../../components/ReportsContent';
@@ -215,6 +215,10 @@ export default function ManagerDashboard() {
     // Staff removal
     const [removeStaffLoading, setRemoveStaffLoading] = useState(false);
 
+    // Wishlist analytics
+    const [wishlistReport, setWishlistReport] = useState(null);
+    const [wishlistLoading, setWishlistLoading] = useState(false);
+
     // Restock approve/reject inline forms
     const [approveId, setApproveId] = useState(null);
     const [approveData, setApproveData] = useState({ approved_quantity: '', manager_notes: '' });
@@ -266,6 +270,11 @@ export default function ManagerDashboard() {
     const loadMgrWalkinOrders = async () => {
         try { setMgrWalkinOrders(await getManagerWalkinOrders()); } catch (e) { console.error(e); }
     };
+    const loadWishlistReport = async () => {
+        setWishlistLoading(true);
+        try { setWishlistReport(await getSellerWishlistReport()); } catch (e) { console.error(e); }
+        finally { setWishlistLoading(false); }
+    };
     const handleMgrWalkinStatusUpdate = async (txnId, status) => {
         setWalkinOrderLoading(true);
         try {
@@ -299,6 +308,7 @@ export default function ManagerDashboard() {
         if (activeTab === 'transactions') loadMgrTransactions();
         if (activeTab === 'delivery_orders') loadMgrDeliveryOrders();
         if (activeTab === 'walkin_orders') loadMgrWalkinOrders();
+        if (activeTab === 'wishlist') loadWishlistReport();
     }, [activeTab, authChecked]);
 
     useEffect(() => {
@@ -443,6 +453,7 @@ export default function ManagerDashboard() {
         { id: 'delivery_orders', icon: Truck, label: 'Delivery Orders' },
         { id: 'products', icon: Tag, label: 'Products' },
         { id: 'transactions', icon: CreditCard, label: 'Transactions' },
+        { id: 'wishlist', icon: Heart, label: 'Wishlist' },
         { id: 'divider' },
         { id: 'search', icon: Search, label: 'Search' },
         { id: 'reports', icon: TrendingUp, label: 'Reports' },
@@ -1449,6 +1460,86 @@ export default function ManagerDashboard() {
                 })()}
 
                 {/* ===== TRANSACTIONS TAB ===== */}
+                {/* ═══ WISHLIST ANALYTICS ═══ */}
+                {activeTab === 'wishlist' && (
+                    <div>
+                        <div style={{ marginBottom: 24 }}>
+                            <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Wishlist Analytics</h1>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>See which buyers saved your products</p>
+                        </div>
+
+                        {wishlistLoading ? (
+                            <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                                <div className="spinner" style={{ width: 40, height: 40 }} />
+                            </div>
+                        ) : (
+                            <>
+                                {/* Metric Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
+                                    <StatCard icon="❤️" label="Total Wishlists" value={wishlistReport?.total_wishlists ?? 0} color="#ef4444" />
+                                    <StatCard icon="👥" label="Unique Buyers" value={wishlistReport?.unique_buyers ?? 0} color="#8b5cf6" />
+                                    <StatCard icon="📦" label="Total Products" value={wishlistReport?.total_products ?? 0} color="#6366f1" />
+                                    <StatCard icon="📊" label="Wishlists / Product" value={wishlistReport?.wishlist_per_product?.toFixed(2) ?? '0.00'} color="#f59e0b" />
+                                </div>
+
+                                {/* Wishlist by Product */}
+                                <div className="card">
+                                    <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Wishlist by Product</h3>
+                                    {(!wishlistReport?.products || wishlistReport.products.length === 0) ? (
+                                        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>No wishlist data yet</p>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                            {wishlistReport.products.map((prod, i) => {
+                                                const maxCount = wishlistReport.products[0]?.wishlist_count || 1;
+                                                return (
+                                                    <div key={prod.product_id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <span style={{
+                                                            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            fontSize: '0.8rem', fontWeight: 700,
+                                                            background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--border-color)',
+                                                            color: i < 3 ? '#fff' : 'var(--text-secondary)',
+                                                        }}>{i + 1}</span>
+
+                                                        <div style={{
+                                                            width: 36, height: 36, borderRadius: 8, overflow: 'hidden', flexShrink: 0,
+                                                            border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
+                                                        }}>
+                                                            {prod.image_url ? (
+                                                                <img src={prod.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                            ) : (
+                                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.7rem' }}>📦</div>
+                                                            )}
+                                                        </div>
+
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <p style={{ fontWeight: 600, marginBottom: 4, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                {prod.title || 'Untitled'}
+                                                            </p>
+                                                            <div style={{ height: 6, borderRadius: 3, background: 'var(--border-color)', overflow: 'hidden' }}>
+                                                                <div style={{
+                                                                    height: '100%', borderRadius: 3,
+                                                                    width: `${maxCount > 0 ? (prod.wishlist_count / maxCount) * 100 : 0}%`,
+                                                                    background: 'linear-gradient(90deg, #ef4444, #f59e0b)',
+                                                                    transition: 'width 0.5s ease',
+                                                                }} />
+                                                            </div>
+                                                        </div>
+
+                                                        <div style={{ textAlign: 'right', minWidth: 50, flexShrink: 0 }}>
+                                                            <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{prod.wishlist_count}</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'transactions' && (
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>

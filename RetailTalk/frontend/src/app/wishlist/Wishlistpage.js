@@ -77,7 +77,7 @@ export default function Wishlistpage() {
                     </a>
                 </div>
             ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
                     {items.map(item => {
                         const inStock = item.stock > 0;
                         return (
@@ -85,7 +85,7 @@ export default function Wishlistpage() {
                                 key={item.id}
                                 className="card"
                                 style={{
-                                    display: 'flex', gap: 16, padding: 16,
+                                    display: 'flex', flexDirection: 'column', padding: 0,
                                     transition: 'transform 0.2s, box-shadow 0.2s',
                                     cursor: 'pointer', position: 'relative',
                                     overflow: 'hidden',
@@ -100,10 +100,11 @@ export default function Wishlistpage() {
                                 }}
                             >
                                 {/* Image */}
-                                <a href={`/products/${item.product_id}`} style={{ textDecoration: 'none', flexShrink: 0 }}>
+                                <a href={`/products/${item.product_id}`} style={{ textDecoration: 'none', display: 'block' }}>
                                     <div style={{
-                                        width: 120, height: 120, borderRadius: 12, overflow: 'hidden',
-                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                        width: '100%', height: 180, overflow: 'hidden',
+                                        background: 'var(--bg-secondary)',
+                                        borderBottom: '1px solid var(--border-color)',
                                     }}>
                                         {item.image_url ? (
                                             <img src={item.image_url} alt={item.title}
@@ -112,14 +113,14 @@ export default function Wishlistpage() {
                                             <div style={{
                                                 width: '100%', height: '100%', display: 'flex',
                                                 alignItems: 'center', justifyContent: 'center',
-                                                color: 'var(--text-muted)', fontSize: '2rem',
-                                            }}><Package size={32} /></div>
+                                                color: 'var(--text-muted)',
+                                            }}><Package size={40} /></div>
                                         )}
                                     </div>
                                 </a>
 
                                 {/* Info */}
-                                <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ padding: 16, flex: 1 }}>
                                     <a href={`/products/${item.product_id}`}
                                         style={{ textDecoration: 'none', color: 'inherit' }}>
                                         <h3 style={{
@@ -160,15 +161,19 @@ export default function Wishlistpage() {
                                 </div>
 
                                 {/* Actions */}
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
+                                <div style={{
+                                    display: 'flex', gap: 8, padding: '12px 16px',
+                                    borderTop: '1px solid var(--border-color)',
+                                }}>
                                     <button
                                         onClick={(e) => { e.stopPropagation(); handleRemove(item.product_id); }}
                                         disabled={removing === item.product_id}
                                         style={{
+                                            flex: 1,
                                             background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
                                             color: '#ef4444', padding: '8px 14px', borderRadius: 10,
                                             cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem',
-                                            transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: 6,
+                                            transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                                         }}
                                         onMouseEnter={e => {
                                             e.currentTarget.style.background = 'rgba(239,68,68,0.2)';
@@ -185,6 +190,7 @@ export default function Wishlistpage() {
                                     <a href={`/products/${item.product_id}`}
                                         className="btn btn-primary btn-sm"
                                         style={{
+                                            flex: 1, textAlign: 'center',
                                             padding: '8px 14px', fontSize: '0.8rem',
                                             borderRadius: 10, textDecoration: 'none',
                                         }}>

@@ -4,7 +4,7 @@ import {
     LayoutDashboard, Users, Store, Truck, Clock, CreditCard,
     Box, ClipboardList, TrendingUp, Search, LogOut, Timer, CalendarDays,
     ShoppingCart, DollarSign, ShoppingBag, Briefcase, UserCheck,
-    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download,
+    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download, Heart,
 } from 'lucide-react';
 import {
     getStoredAdmin, adminLogout, adminGetDashboard, adminGetUsers,
@@ -15,6 +15,7 @@ import {
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
     adminGetDeliveriesStats,
     getBalance, withdraw, getSVFHistory, searchProducts,
+    getAdminWishlistReport,
 } from '../../../lib/api';
 // â”€â”€ Line Chart Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220, prefix = 'PHP ' }) {
@@ -344,6 +345,9 @@ export default function AdminDashboard() {
     const [adminSearchQuery, setAdminSearchQuery] = useState('');
     const [adminSearchResults, setAdminSearchResults] = useState(null);
     const [adminSearchLoading, setAdminSearchLoading] = useState(false);
+    // Wishlist analytics state
+    const [wishlistReport, setWishlistReport] = useState(null);
+    const [wishlistLoading, setWishlistLoading] = useState(false);
     useEffect(() => {
         const stored = getStoredAdmin();
         if (!stored || stored.role !== 'admin') {
@@ -391,6 +395,11 @@ export default function AdminDashboard() {
         } catch (err) { setMessage({ type: 'error', text: err.message }); }
         finally { setAdminSearchLoading(false); }
     };
+    const loadWishlistReport = async () => {
+        setWishlistLoading(true);
+        try { setWishlistReport(await getAdminWishlistReport()); } catch (e) { console.error(e); }
+        finally { setWishlistLoading(false); }
+    };
     const loadUsers = async (search = '') => {
         try { setUsers(await adminGetUsers(search)); } catch (e) { console.error(e); }
     };
@@ -417,6 +426,7 @@ export default function AdminDashboard() {
         if (activeTab === 'departments') loadDepartments();
         if (activeTab === 'deliveries') loadDeliveries();
         if (activeTab === 'withdraw') { loadAdminBalance(); loadSvfHistory(); }
+        if (activeTab === 'wishlist') loadWishlistReport();
     }, [activeTab, authChecked]);
     const loadPending = async () => {
         try { setPendingProducts(await adminGetPendingProducts()); } catch (e) { console.error(e); }
@@ -597,6 +607,7 @@ export default function AdminDashboard() {
         {
             label: 'Analytics', items: [
                 { id: 'reports', icon: TrendingUp, label: 'Reports' },
+                { id: 'wishlist', icon: Heart, label: 'Wishlist' },
                 { id: 'search', icon: Search, label: 'Search' },
             ]
         },
@@ -1157,15 +1168,15 @@ export default function AdminDashboard() {
                                                                             <div key={prod.id}
                                                                                 onClick={() => handleLowStockClick({ ...prod, seller_name: selectedDeptDetail.department.name })}
                                                                                 style={{
-                                                                                padding: 12, borderRadius: 10,
-                                                                                background: 'var(--admin-card-bg)',
-                                                                                border: `1px solid ${isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'}`,
-                                                                                display: 'flex', gap: 10, alignItems: 'center',
-                                                                                cursor: 'pointer',
-                                                                                transition: 'all 0.15s',
-                                                                            }}
-                                                                            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.borderColor = isLowStock ? '#ef4444' : 'var(--admin-accent)'; }}
-                                                                            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'; }}
+                                                                                    padding: 12, borderRadius: 10,
+                                                                                    background: 'var(--admin-card-bg)',
+                                                                                    border: `1px solid ${isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'}`,
+                                                                                    display: 'flex', gap: 10, alignItems: 'center',
+                                                                                    cursor: 'pointer',
+                                                                                    transition: 'all 0.15s',
+                                                                                }}
+                                                                                onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.borderColor = isLowStock ? '#ef4444' : 'var(--admin-accent)'; }}
+                                                                                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = isLowStock ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'; }}
                                                                             >
                                                                                 <div style={{
                                                                                     width: 44, height: 44, borderRadius: 8, overflow: 'hidden',
@@ -2734,10 +2745,10 @@ export default function AdminDashboard() {
                                                                 padding: '3px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700,
                                                                 background: product.relevance_label === 'Exact' ? 'rgba(76,175,80,0.15)' :
                                                                     product.relevance_label === 'Substitute' ? 'rgba(255,193,7,0.15)' :
-                                                                    product.relevance_label === 'Complement' ? 'rgba(33,150,243,0.15)' : 'rgba(244,67,54,0.15)',
+                                                                        product.relevance_label === 'Complement' ? 'rgba(33,150,243,0.15)' : 'rgba(244,67,54,0.15)',
                                                                 color: product.relevance_label === 'Exact' ? '#4caf50' :
                                                                     product.relevance_label === 'Substitute' ? '#ffc107' :
-                                                                    product.relevance_label === 'Complement' ? '#2196f3' : '#f44336',
+                                                                        product.relevance_label === 'Complement' ? '#2196f3' : '#f44336',
                                                             }}>{product.relevance_label}</span>
                                                             <span style={{
                                                                 fontSize: '0.72rem', fontWeight: 600,
@@ -2775,6 +2786,193 @@ export default function AdminDashboard() {
                                     <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 6 }}>Search products with NLP</p>
                                     <p style={{ fontSize: '0.85rem' }}>View ESCI classifications, relevance scores, detected intents, and extracted slots</p>
                                 </div>
+                            )}
+                        </div>
+                    )}
+                    {/* ===== WISHLIST ANALYTICS TAB ===== */}
+                    {activeTab === 'wishlist' && (
+                        <div>
+                            <div style={{ marginBottom: 24 }}>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Wishlist Analytics</h1>
+                                <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>Platform-wide wishlist insights across all stores</p>
+                            </div>
+
+                            {wishlistLoading ? (
+                                <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                                    <div className="spinner" style={{ width: 40, height: 40 }} />
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Metric Cards */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+                                        {[
+                                            { label: 'Total Wishlists', value: wishlistReport?.total_wishlists ?? 0, icon: '❤️', color: '#ef4444' },
+                                            { label: 'Unique Buyers', value: wishlistReport?.unique_buyers ?? 0, icon: '👥', color: '#8b5cf6' },
+                                            { label: 'Products Wishlisted', value: wishlistReport?.total_products_wishlisted ?? 0, icon: '📦', color: '#6366f1' },
+                                            { label: 'Avg / Product', value: wishlistReport?.wishlists_per_product?.toFixed(2) ?? '0.00', icon: '📊', color: '#f59e0b' },
+                                        ].map(m => (
+                                            <div key={m.label} className="card" style={{ position: 'relative', overflow: 'hidden' }}>
+                                                <div style={{ position: 'absolute', top: -6, right: -6, fontSize: '2.5rem', opacity: 0.07 }}>{m.icon}</div>
+                                                <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem', marginBottom: 6 }}>{m.label}</p>
+                                                <p style={{ fontSize: '1.5rem', fontWeight: 700, color: m.color }}>{m.value}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20, marginBottom: 24 }}>
+                                        {/* Wishlist by Store */}
+                                        <div className="card">
+                                            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Wishlist by Store</h3>
+                                            {(!wishlistReport?.by_store || wishlistReport.by_store.length === 0) ? (
+                                                <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
+                                            ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                    {wishlistReport.by_store.map((s, i) => {
+                                                        const maxC = wishlistReport.by_store[0]?.wishlist_count || 1;
+                                                        return (
+                                                            <div key={s.store} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                                <span style={{
+                                                                    width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                    fontSize: '0.7rem', fontWeight: 700,
+                                                                    background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--admin-border)',
+                                                                    color: i < 3 ? '#fff' : 'var(--admin-text-secondary)',
+                                                                }}>{i + 1}</span>
+                                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                                    <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.store}</p>
+                                                                    <div style={{ height: 5, borderRadius: 3, background: 'var(--admin-border)', overflow: 'hidden' }}>
+                                                                        <div style={{ height: '100%', borderRadius: 3, width: `${(s.wishlist_count / maxC) * 100}%`, background: 'linear-gradient(90deg, #6366f1, #8b5cf6)', transition: 'width 0.5s' }} />
+                                                                    </div>
+                                                                </div>
+                                                                <span style={{ fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>{s.wishlist_count}</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Most Active Buyers */}
+                                        <div className="card">
+                                            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Most Active Buyers</h3>
+                                            {(!wishlistReport?.top_buyers || wishlistReport.top_buyers.length === 0) ? (
+                                                <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
+                                            ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                    {wishlistReport.top_buyers.map((b, i) => (
+                                                        <div key={b.buyer_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: i < wishlistReport.top_buyers.length - 1 ? '1px solid var(--admin-border)' : 'none' }}>
+                                                            <span style={{
+                                                                width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+                                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                                fontSize: '0.7rem', fontWeight: 700,
+                                                                background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--admin-border)',
+                                                                color: i < 3 ? '#fff' : 'var(--admin-text-secondary)',
+                                                            }}>{i + 1}</span>
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <p style={{ fontWeight: 600, fontSize: '0.85rem' }}>{b.buyer_name}</p>
+                                                                <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.75rem' }}>{b.buyer_email}</p>
+                                                            </div>
+                                                            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#ef4444', flexShrink: 0 }}>{b.wishlist_count} items</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Top Wishlisted Products */}
+                                    <div className="card" style={{ marginBottom: 24 }}>
+                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Top Wishlisted Products</h3>
+                                        {(!wishlistReport?.top_products || wishlistReport.top_products.length === 0) ? (
+                                            <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
+                                        ) : (
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table className="data-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>#</th>
+                                                            <th>Product</th>
+                                                            <th>Store</th>
+                                                            <th style={{ textAlign: 'right' }}>Wishlists</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {wishlistReport.top_products.map((prod, i) => (
+                                                            <tr key={prod.product_id}>
+                                                                <td>
+                                                                    <span style={{
+                                                                        width: 24, height: 24, borderRadius: '50%',
+                                                                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                                                        fontSize: '0.75rem', fontWeight: 700,
+                                                                        background: i === 0 ? '#ef4444' : i === 1 ? '#f59e0b' : i === 2 ? '#6366f1' : 'var(--admin-border)',
+                                                                        color: i < 3 ? '#fff' : 'var(--admin-text-secondary)',
+                                                                    }}>{i + 1}</span>
+                                                                </td>
+                                                                <td>
+                                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                                        <div style={{
+                                                                            width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
+                                                                            border: '1px solid var(--admin-border)', background: 'var(--admin-bg)',
+                                                                        }}>
+                                                                            {prod.image_url ? (
+                                                                                <img src={prod.image_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                                            ) : (
+                                                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: 'var(--admin-text-muted)' }}>📦</div>
+                                                                            )}
+                                                                        </div>
+                                                                        <span style={{ fontWeight: 600 }}>{prod.title}</span>
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ color: 'var(--admin-text-muted)' }}>{prod.store}</td>
+                                                                <td style={{ textAlign: 'right', fontWeight: 700 }}>{prod.wishlist_count}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Recent Wishlist Activity */}
+                                    <div className="card">
+                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Recent Wishlist Activity</h3>
+                                        {(!wishlistReport?.recent_activity || wishlistReport.recent_activity.length === 0) ? (
+                                            <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No activity yet</p>
+                                        ) : (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                                                {wishlistReport.recent_activity.map((a, i) => (
+                                                    <div key={i} style={{
+                                                        display: 'flex', alignItems: 'center', gap: 12,
+                                                        padding: '10px 0',
+                                                        borderBottom: i < wishlistReport.recent_activity.length - 1 ? '1px solid var(--admin-border)' : 'none',
+                                                    }}>
+                                                        <div style={{
+                                                            width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
+                                                            border: '1px solid var(--admin-border)', background: 'var(--admin-bg)',
+                                                        }}>
+                                                            {a.product_image ? (
+                                                                <img src={a.product_image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                            ) : (
+                                                                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: 'var(--admin-text-muted)' }}>📦</div>
+                                                            )}
+                                                        </div>
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <p style={{ fontSize: '0.85rem' }}>
+                                                                <span style={{ fontWeight: 600 }}>{a.buyer_name}</span>
+                                                                <span style={{ color: 'var(--admin-text-muted)' }}> wishlisted </span>
+                                                                <span style={{ fontWeight: 600 }}>{a.product_title}</span>
+                                                            </p>
+                                                            <p style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)' }}>{a.store}</p>
+                                                        </div>
+                                                        <span style={{ fontSize: '0.72rem', color: 'var(--admin-text-muted)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                                                            {new Date(a.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
                             )}
                         </div>
                     )}
