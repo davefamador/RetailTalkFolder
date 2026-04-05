@@ -215,6 +215,81 @@ function HorizontalBarChart({ data, labelKey, valueKey, title, color = '#8b5cf6'
         </div>
     );
 }
+// ── Vertical Bar Chart (for monthly data) ────────────────
+function VerticalBarChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220, prefix = 'PHP ' }) {
+    const canvasRef = useRef(null);
+    useEffect(() => {
+        if (!canvasRef.current || !data || data.length === 0) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = canvas.parentElement.clientWidth;
+        const h = canvas.height = height;
+        ctx.clearRect(0, 0, w, h);
+        const padding = { top: 24, right: 20, bottom: 50, left: 70 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+        const maxVal = Math.max(...data.map(d => d[valueKey]), 1);
+        // Grid lines
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartH * i / 4);
+            ctx.strokeStyle = 'rgba(136,136,160,0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+            ctx.fillStyle = 'rgba(136,136,160,0.5)';
+            ctx.font = '11px Inter, system-ui';
+            ctx.textAlign = 'right';
+            ctx.fillText(prefix + (maxVal * (4 - i) / 4).toFixed(0), padding.left - 8, y + 4);
+        }
+        // Bars
+        const barGap = 6;
+        const barWidth = Math.max((chartW - barGap * (data.length + 1)) / data.length, 8);
+        const totalBarsWidth = data.length * barWidth + (data.length + 1) * barGap;
+        const offsetX = padding.left + (chartW - totalBarsWidth) / 2 + barGap;
+        data.forEach((d, i) => {
+            const barH = (d[valueKey] / maxVal) * chartH;
+            const x = offsetX + i * (barWidth + barGap);
+            const y = padding.top + chartH - barH;
+            // Bar gradient
+            const grad = ctx.createLinearGradient(x, y, x, padding.top + chartH);
+            grad.addColorStop(0, color);
+            grad.addColorStop(1, color + '60');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            const r = Math.min(4, barWidth / 2);
+            ctx.moveTo(x, padding.top + chartH);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.lineTo(x + barWidth - r, y);
+            ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + r);
+            ctx.lineTo(x + barWidth, padding.top + chartH);
+            ctx.closePath();
+            ctx.fill();
+        });
+        // X labels
+        ctx.fillStyle = 'rgba(136,136,160,0.6)';
+        ctx.font = '10px Inter, system-ui';
+        ctx.textAlign = 'center';
+        data.forEach((d, i) => {
+            const x = offsetX + i * (barWidth + barGap) + barWidth / 2;
+            const label = d[labelKey].length > 7 ? d[labelKey].slice(-7) : d[labelKey];
+            ctx.save();
+            ctx.translate(x, h - 5);
+            ctx.rotate(-0.4);
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+        });
+    }, [data, labelKey, valueKey, color, height]);
+    return (
+        <div>
+            <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--admin-text-secondary)' }}>{title}</h4>
+            {(!data || data.length === 0) ? (
+                <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem' }}>No data yet</p>
+            ) : (
+                <canvas ref={canvasRef} style={{ width: '100%', height }} />
+            )}
+        </div>
+    );
+}
 // â”€â”€ Donut/Ring Chart (for order type breakdown) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DonutChart({ data, title, size = 140 }) {
     const canvasRef = useRef(null);
@@ -285,6 +360,9 @@ export default function AdminDashboard() {
     const [stats, setStats] = useState(null);
     const [users, setUsers] = useState([]);
     const [userSearch, setUserSearch] = useState('');
+    const [userRoleFilter, setUserRoleFilter] = useState('');
+    const [userDateFrom, setUserDateFrom] = useState('');
+    const [userDateTo, setUserDateTo] = useState('');
     const [transactions, setTransactions] = useState([]);
     const [txnSearch, setTxnSearch] = useState('');
     const [reports, setReports] = useState(null);
@@ -400,8 +478,8 @@ export default function AdminDashboard() {
         try { setWishlistReport(await getAdminWishlistReport()); } catch (e) { console.error(e); }
         finally { setWishlistLoading(false); }
     };
-    const loadUsers = async (search = '') => {
-        try { setUsers(await adminGetUsers(search)); } catch (e) { console.error(e); }
+    const loadUsers = async (search = '', role = '') => {
+        try { setUsers(await adminGetUsers(search, role)); } catch (e) { console.error(e); }
     };
     const loadTransactions = async (search = '') => {
         try { setTransactions(await adminGetTransactions(search)); } catch (e) { console.error(e); }
@@ -417,7 +495,7 @@ export default function AdminDashboard() {
     };
     useEffect(() => {
         if (!authChecked) return;
-        if (activeTab === 'users') loadUsers();
+        if (activeTab === 'users') loadUsers('', userRoleFilter);
         if (activeTab === 'transactions') loadTransactions();
         if (activeTab === 'reports') loadReports();
         if (activeTab === 'products') loadProducts();
@@ -494,7 +572,7 @@ export default function AdminDashboard() {
         try {
             await adminBanUser(userId, ban);
             setMessage({ type: 'success', text: `User ${ban ? 'banned' : 'unbanned'}` });
-            loadUsers(userSearch);
+            loadUsers(userSearch, userRoleFilter);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
     const handleApproveRemoval = async (productId) => {
@@ -630,20 +708,20 @@ export default function AdminDashboard() {
         '--admin-hover': 'rgba(255,255,255,0.04)',
         '--admin-accent': '#6366f1',
     } : {
-        '--admin-bg': '#f5f5f5',
-        '--admin-sidebar-bg': '#ffffff',
-        '--admin-header-bg': '#ffffff',
+        '--admin-bg': '#eaecf0',
+        '--admin-sidebar-bg': '#f8f9fb',
+        '--admin-header-bg': '#f8f9fb',
         '--admin-card-bg': '#ffffff',
-        '--admin-border': '#e5e7eb',
-        '--admin-text': '#1f2937',
-        '--admin-text-secondary': '#4b5563',
-        '--admin-text-muted': '#9ca3af',
-        '--admin-sidebar-text': '#6b7280',
-        '--admin-active-bg': 'rgba(99,102,241,0.08)',
-        '--admin-active-text': '#4f46e5',
-        '--admin-section-label': '#9ca3af',
-        '--admin-hover': 'rgba(0,0,0,0.03)',
-        '--admin-accent': '#4f46e5',
+        '--admin-border': '#d1d5db',
+        '--admin-text': '#111827',
+        '--admin-text-secondary': '#374151',
+        '--admin-text-muted': '#6b7280',
+        '--admin-sidebar-text': '#4b5563',
+        '--admin-active-bg': 'rgba(99,102,241,0.10)',
+        '--admin-active-text': '#4338ca',
+        '--admin-section-label': '#6b7280',
+        '--admin-hover': 'rgba(0,0,0,0.04)',
+        '--admin-accent': '#4338ca',
     };
     return (
         <div id="admin-dashboard" style={{ display: 'flex', minHeight: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text)', ...adminVars }}>
@@ -696,15 +774,7 @@ export default function AdminDashboard() {
                     justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
                     minHeight: 56,
                 }}>
-                    <div style={{
-                        width: 34, height: 34, borderRadius: 10,
-                        background: 'linear-gradient(135deg, #6366f1, #818cf8)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '0.9rem', fontWeight: 800, color: '#fff', flexShrink: 0,
-                        cursor: 'pointer',
-                    }} onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                        RT
-                    </div>
+                    <img src="/logo.png" alt="RetailTalk" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} style={{ width: 34, height: 34, borderRadius: 10, cursor: 'pointer', flexShrink: 0 }} />
                     {!sidebarCollapsed && (
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--admin-text)' }}>RetailTalk</div>
@@ -858,7 +928,7 @@ export default function AdminDashboard() {
                     {/* ===== USERS TAB ===== */}
                     {activeTab === 'users' && (
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                                 <div>
                                     <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>User Management</h1>
                                     <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>Manage all registered users</p>
@@ -867,15 +937,69 @@ export default function AdminDashboard() {
                                     <input
                                         type="text" placeholder="Search users..."
                                         value={userSearch} onChange={e => setUserSearch(e.target.value)}
-                                        onKeyDown={e => e.key === 'Enter' && loadUsers(userSearch)}
+                                        onKeyDown={e => e.key === 'Enter' && loadUsers(userSearch, userRoleFilter)}
                                         style={{
-                                            width: 240, padding: '10px 14px', borderRadius: 10,
+                                            width: 200, padding: '10px 14px', borderRadius: 10,
                                             background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
                                             color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif',
                                         }}
                                     />
-                                    <button className="btn btn-primary btn-sm" onClick={() => loadUsers(userSearch)}>Search</button>
+                                    <button className="btn btn-primary btn-sm" onClick={() => loadUsers(userSearch, userRoleFilter)}>Search</button>
                                 </div>
+                            </div>
+                            {/* Filters Row */}
+                            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)' }}>Role:</span>
+                                    <select
+                                        value={userRoleFilter}
+                                        onChange={e => { setUserRoleFilter(e.target.value); loadUsers(userSearch, e.target.value); }}
+                                        style={{
+                                            padding: '7px 12px', borderRadius: 8,
+                                            border: '1px solid var(--admin-border)',
+                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
+                                            fontSize: '0.8rem', fontFamily: 'Inter, sans-serif', cursor: 'pointer',
+                                        }}
+                                    >
+                                        <option value="">All Roles</option>
+                                        <option value="buyer">Buyer</option>
+                                        <option value="seller">Seller</option>
+                                        <option value="manager">Manager</option>
+                                        <option value="delivery">Delivery</option>
+
+                                    </select>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)' }}>Joined From:</span>
+                                    <input
+                                        type="date" value={userDateFrom} onChange={e => setUserDateFrom(e.target.value)}
+                                        style={{
+                                            padding: '6px 10px', borderRadius: 8,
+                                            border: '1px solid var(--admin-border)',
+                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
+                                            fontSize: '0.8rem', fontFamily: 'Inter, sans-serif',
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)' }}>To:</span>
+                                    <input
+                                        type="date" value={userDateTo} onChange={e => setUserDateTo(e.target.value)}
+                                        style={{
+                                            padding: '6px 10px', borderRadius: 8,
+                                            border: '1px solid var(--admin-border)',
+                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
+                                            fontSize: '0.8rem', fontFamily: 'Inter, sans-serif',
+                                        }}
+                                    />
+                                </div>
+                                {(userRoleFilter || userDateFrom || userDateTo) && (
+                                    <button onClick={() => { setUserRoleFilter(''); setUserDateFrom(''); setUserDateTo(''); loadUsers(userSearch, ''); }} style={{
+                                        padding: '6px 14px', borderRadius: 8, border: '1px solid var(--admin-border)',
+                                        background: 'transparent', color: 'var(--admin-text-secondary)',
+                                        fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                    }}>Reset Filters</button>
+                                )}
                             </div>
                             {/* Add Deliveryman Button */}
                             <button
@@ -900,7 +1024,21 @@ export default function AdminDashboard() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {users.map(u => (
+                                        {users.filter(u => u.role !== 'admin').filter(u => {
+                                            if (userDateFrom) {
+                                                const joined = new Date(u.created_at);
+                                                const from = new Date(userDateFrom);
+                                                from.setHours(0, 0, 0, 0);
+                                                if (joined < from) return false;
+                                            }
+                                            if (userDateTo) {
+                                                const joined = new Date(u.created_at);
+                                                const to = new Date(userDateTo);
+                                                to.setHours(23, 59, 59, 999);
+                                                if (joined > to) return false;
+                                            }
+                                            return true;
+                                        }).map(u => (
                                             <tr key={u.id} style={{ ...(u.is_banned ? { opacity: 0.5 } : {}), cursor: 'pointer', transition: 'background 0.15s' }}
                                                 onClick={() => handleUserClick(u.id)}
                                                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(108,99,255,0.06)'}
@@ -915,8 +1053,8 @@ export default function AdminDashboard() {
                                                     <span style={{
                                                         padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
                                                         textTransform: 'capitalize',
-                                                        background: u.role === 'seller' ? 'rgba(108,99,255,0.1)' : u.role === 'admin' ? 'rgba(239,68,68,0.1)' : u.role === 'delivery' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-                                                        color: u.role === 'seller' ? '#6366f1' : u.role === 'admin' ? '#ef4444' : u.role === 'delivery' ? '#3b82f6' : '#10b981',
+                                                        background: u.role === 'seller' ? 'rgba(108,99,255,0.1)' : u.role === 'admin' ? 'rgba(239,68,68,0.1)' : u.role === 'delivery' ? 'rgba(59,130,246,0.1)' : u.role === 'manager' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
+                                                        color: u.role === 'seller' ? '#6366f1' : u.role === 'admin' ? '#ef4444' : u.role === 'delivery' ? '#3b82f6' : u.role === 'manager' ? '#f59e0b' : '#10b981',
                                                     }}>
                                                         {u.role}
                                                     </span>
@@ -950,7 +1088,21 @@ export default function AdminDashboard() {
                                         ))}
                                     </tbody>
                                 </table>
-                                {users.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No users found</p></div>}
+                                {users.filter(u => {
+                                    if (userDateFrom) {
+                                        const joined = new Date(u.created_at);
+                                        const from = new Date(userDateFrom);
+                                        from.setHours(0, 0, 0, 0);
+                                        if (joined < from) return false;
+                                    }
+                                    if (userDateTo) {
+                                        const joined = new Date(u.created_at);
+                                        const to = new Date(userDateTo);
+                                        to.setHours(23, 59, 59, 999);
+                                        if (joined > to) return false;
+                                    }
+                                    return true;
+                                }).length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No users found</p></div>}
                             </div>
                         </div>
                     )}
@@ -2443,8 +2595,8 @@ export default function AdminDashboard() {
                                             />
                                         </div>
                                         <div className="card" style={{ padding: 24 }}>
-                                            <LineChart
-                                                data={[...(reports.monthly_income || [])].reverse().slice(-6)}
+                                            <VerticalBarChart
+                                                data={[...(reports.monthly_income || [])].reverse()}
                                                 labelKey="date" valueKey="income"
                                                 title="Monthly Revenue" color="#6366f1"
                                             />
@@ -2572,7 +2724,6 @@ export default function AdminDashboard() {
                                                         <th>Contact</th>
                                                         <th>Total Deliveries</th>
                                                         <th>Completed</th>
-                                                        <th>Avg Time</th>
                                                         <th>Action</th>
                                                     </tr>
                                                 </thead>
@@ -2584,7 +2735,6 @@ export default function AdminDashboard() {
                                                             <td>{dm.contact_number || 'N/A'}</td>
                                                             <td style={{ fontWeight: 600 }}>{dm.total_deliveries}</td>
                                                             <td><span style={{ background: 'rgba(16,185,129,0.15)', color: 'var(--accent-success)', padding: '4px 8px', borderRadius: 4, fontSize: '0.85rem' }}>{dm.completed_count}</span></td>
-                                                            <td>{dm.avg_delivery_time ? `${dm.avg_delivery_time.toFixed(1)}h` : 'N/A'}</td>
                                                             <td>
                                                                 <button
                                                                     onClick={() => setSelectedDeliveryman(dm)}
@@ -2753,7 +2903,7 @@ export default function AdminDashboard() {
                                                             <span style={{
                                                                 fontSize: '0.72rem', fontWeight: 600,
                                                                 padding: '3px 8px', borderRadius: 6,
-                                                                background: 'rgba(255,255,255,0.06)', color: 'var(--admin-text-secondary)',
+                                                                background: 'var(--admin-hover)', color: 'var(--admin-text-secondary)',
                                                             }}>Score: {(product.relevance_score * 100).toFixed(1)}%</span>
                                                         </div>
                                                         {/* ESCI Probabilities */}
@@ -3181,7 +3331,7 @@ export default function AdminDashboard() {
                             </div>
                         </div>
                         {/* Stats Grid */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 30 }}>
                             <div style={{ background: 'var(--admin-card-bg)', padding: 16, borderRadius: 12 }}>
                                 <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem', marginBottom: 6 }}>Total Deliveries</p>
                                 <p style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--admin-accent)' }}>{selectedDeliveryman.total_deliveries}</p>
@@ -3189,10 +3339,6 @@ export default function AdminDashboard() {
                             <div style={{ background: 'var(--admin-card-bg)', padding: 16, borderRadius: 12 }}>
                                 <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem', marginBottom: 6 }}>Completed</p>
                                 <p style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-success)' }}>{selectedDeliveryman.completed_count}</p>
-                            </div>
-                            <div style={{ background: 'var(--admin-card-bg)', padding: 16, borderRadius: 12 }}>
-                                <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem', marginBottom: 6 }}>Avg Time</p>
-                                <p style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-warning)' }}>{selectedDeliveryman.avg_delivery_time ? `${selectedDeliveryman.avg_delivery_time.toFixed(1)}h` : 'N/A'}</p>
                             </div>
                         </div>
                         <button
@@ -3303,59 +3449,77 @@ export default function AdminDashboard() {
                                 {/* Report Graphs */}
                                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}><TrendingUp size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />Reports</h3>
                                 <div style={{ marginBottom: 24 }}>
-                                    {/* Daily Bar Chart */}
+                                    {/* Daily Line Chart - 14 Days */}
                                     <div style={{
                                         padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)',
                                         border: '1px solid var(--admin-border)', marginBottom: 12,
                                     }}>
-                                        <h4 style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', marginBottom: 10 }}>Daily Activity (Last 14 Days)</h4>
-                                        {userDetail.report.daily.length === 0 ? (
-                                            <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>No data yet</p>
-                                        ) : (
-                                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100 }}>
-                                                {[...userDetail.report.daily].reverse().slice(0, 14).map((d, i) => {
-                                                    const max = Math.max(...userDetail.report.daily.map(x => x.amount), 1);
-                                                    const h = Math.max((d.amount / max) * 100, 4);
-                                                    return (
-                                                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                                            <span style={{ fontSize: '0.55rem', color: 'var(--admin-text-muted)' }}>PHP {d.amount}</span>
-                                                            <div style={{
-                                                                width: '100%', height: `${h}%`, borderRadius: 3, minHeight: 3,
-                                                                background: 'linear-gradient(to top, #6366f1, rgba(99,102,241,0.4))',
-                                                            }} />
-                                                            <span style={{ fontSize: '0.5rem', color: 'var(--admin-text-muted)' }}>{d.date.slice(-5)}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
+                                        {(() => {
+                                            // Build 14 days of data from 13 days ago to today, left to right
+                                            const dailyMap = {};
+                                            (userDetail.report.daily || []).forEach(d => { dailyMap[d.date] = d.amount; });
+                                            const days14 = [];
+                                            const today = new Date();
+                                            for (let i = 13; i >= 0; i--) {
+                                                const dt = new Date(today);
+                                                dt.setDate(today.getDate() - i);
+                                                const key = dt.toISOString().split('T')[0];
+                                                days14.push({ date: key, amount: dailyMap[key] || 0 });
+                                            }
+                                            return (
+                                                <LineChart
+                                                    data={days14}
+                                                    labelKey="date" valueKey="amount"
+                                                    title="Daily Activity (Last 14 Days)"
+                                                    color="#6366f1"
+                                                    height={180}
+                                                    prefix="PHP "
+                                                />
+                                            );
+                                        })()}
                                     </div>
-                                    {/* Monthly Bar Chart */}
+                                    {/* Monthly Bar Chart - All 12 Months */}
                                     <div style={{
                                         padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)',
                                         border: '1px solid var(--admin-border)',
                                     }}>
-                                        <h4 style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', marginBottom: 10 }}>Monthly Activity</h4>
-                                        {userDetail.report.monthly.length === 0 ? (
-                                            <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>No data yet</p>
-                                        ) : (
-                                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 100 }}>
-                                                {[...userDetail.report.monthly].reverse().slice(0, 6).map((d, i) => {
-                                                    const max = Math.max(...userDetail.report.monthly.map(x => x.amount), 1);
-                                                    const h = Math.max((d.amount / max) * 100, 4);
-                                                    return (
-                                                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                                            <span style={{ fontSize: '0.6rem', color: 'var(--admin-text-muted)' }}>PHP {d.amount}</span>
-                                                            <div style={{
-                                                                width: '100%', height: `${h}%`, borderRadius: 4, minHeight: 4,
-                                                                background: 'linear-gradient(to top, #f59e0b, rgba(245,158,11,0.4))',
-                                                            }} />
-                                                            <span style={{ fontSize: '0.6rem', color: 'var(--admin-text-muted)' }}>{d.date}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
+                                        {(() => {
+                                            // Build all 12 months for the current year, Jan to Dec
+                                            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                            const monthlyMap = {};
+                                            (userDetail.report.monthly || []).forEach(d => { monthlyMap[d.date] = d.amount; });
+                                            const year = new Date().getFullYear();
+                                            const months12 = monthNames.map((name, idx) => {
+                                                const key = `${year}-${String(idx + 1).padStart(2, '0')}`;
+                                                return { month: name, amount: monthlyMap[key] || 0 };
+                                            });
+                                            const maxVal = Math.max(...months12.map(m => m.amount), 1);
+                                            return (
+                                                <>
+                                                    <h4 style={{ fontSize: '0.85rem', color: 'var(--admin-text-secondary)', marginBottom: 10 }}>Monthly Activity ({year})</h4>
+                                                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120 }}>
+                                                        {months12.map((m, i) => {
+                                                            const h = maxVal > 0 ? Math.max((m.amount / maxVal) * 100, 3) : 3;
+                                                            return (
+                                                                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                                                                    <span style={{ fontSize: '0.5rem', color: 'var(--admin-text-muted)', whiteSpace: 'nowrap' }}>
+                                                                        {m.amount > 0 ? `₱${m.amount}` : ''}
+                                                                    </span>
+                                                                    <div style={{
+                                                                        width: '100%', height: `${h}%`, borderRadius: 4, minHeight: 3,
+                                                                        background: m.amount > 0
+                                                                            ? 'linear-gradient(to top, #f59e0b, rgba(245,158,11,0.5))'
+                                                                            : 'rgba(136,136,160,0.1)',
+                                                                        transition: 'height 0.3s ease',
+                                                                    }} />
+                                                                    <span style={{ fontSize: '0.6rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>{m.month}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                                 {/* Seller Products (if seller) */}

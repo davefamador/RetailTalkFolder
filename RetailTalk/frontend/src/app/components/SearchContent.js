@@ -185,7 +185,7 @@ export default function SearchContent() {
                     style={{
                         position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
                         width: 38, height: 38, borderRadius: '50%', border: 'none',
-                        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.08)',
+                        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'var(--theme-toggle-bg)',
                         color: isListening ? '#ef4444' : 'var(--text-muted)',
                         cursor: voiceSupported ? 'pointer' : 'not-allowed',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -246,7 +246,7 @@ export default function SearchContent() {
                                         <div style={{ marginBottom: 12 }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                                                 <span className={getLabelClass(product.relevance_label)}>{product.relevance_label}</span>
-                                                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4, background: 'var(--bg-secondary)', color: 'var(--text-secondary)', fontWeight: 600 }}>
                                                     Score: {(product.relevance_score * 100).toFixed(1)}%
                                                 </span>
                                             </div>
@@ -281,14 +281,14 @@ export default function SearchContent() {
                     backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
                 }}>
                     <div onClick={(e) => e.stopPropagation()} style={{
-                        background: 'rgba(26,26,46,0.85)', backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255,255,255,0.1)', borderRadius: 20,
+                        background: 'var(--bg-card)', backdropFilter: 'blur(20px)',
+                        border: '1px solid var(--border-color)', borderRadius: 20,
                         maxWidth: 500, width: '100%', boxShadow: '0 24px 80px rgba(0,0,0,0.5)', position: 'relative',
                     }}>
                         <button onClick={closeModal} style={{
                             position: 'absolute', top: 16, right: 16, zIndex: 10,
                             width: 32, height: 32, borderRadius: '50%',
-                            background: 'rgba(255,255,255,0.1)', border: 'none',
+                            background: 'var(--bg-secondary)', border: 'none',
                             color: 'var(--text-secondary)', cursor: 'pointer',
                         }}>✕</button>
 
@@ -311,13 +311,13 @@ export default function SearchContent() {
                                     <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-secondary)' }}>PHP {parseFloat(selectedProduct.price).toFixed(2)}</div>
                                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: 12 }}>{selectedProduct.description}</p>
                                 </div>
-                                <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16 }}>
+                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 12, padding: 16 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
                                         <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Quantity:</span>
-                                        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}>
-                                            <button onClick={() => setQuantity(Math.max(1, quantity - 1))} style={{ width: 36, height: 36, background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}>−</button>
+                                        <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+                                            <button onClick={() => setQuantity(Math.max(1, quantity - 1))} style={{ width: 36, height: 36, background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>−</button>
                                             <span style={{ width: 44, textAlign: 'center', fontWeight: 'bold' }}>{quantity}</span>
-                                            <button onClick={() => setQuantity(quantity + 1)} style={{ width: 36, height: 36, background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}>+</button>
+                                            <button onClick={() => setQuantity(quantity + 1)} style={{ width: 36, height: 36, background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>+</button>
                                         </div>
                                     </div>
                                     {purchaseError && (
@@ -330,15 +330,15 @@ export default function SearchContent() {
                                             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                                                 <button type="button" onClick={() => setPurchaseType('delivery')} style={{
                                                     flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                    borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                                                    background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                                    borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
+                                                    background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
                                                     color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
                                                     cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                                 }}>Delivery</button>
                                                 <button type="button" onClick={() => setPurchaseType('walkin')} style={{
                                                     flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                    borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
-                                                    background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                                    borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
+                                                    background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
                                                     color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
                                                     cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                                 }}>Walk-in</button>

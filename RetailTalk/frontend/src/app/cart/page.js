@@ -168,7 +168,7 @@ export default function CartPage() {
                                 {group.items.map(item => (
                                     <div key={item.id} style={{
                                         display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0',
-                                        borderTop: '1px solid rgba(255,255,255,0.06)',
+                                        borderTop: '1px solid var(--border-color)',
                                     }}>
                                         <div style={{
                                             width: 60, height: 60, borderRadius: 10, overflow: 'hidden',
@@ -211,8 +211,8 @@ export default function CartPage() {
                                     onClick={() => setPurchaseType('delivery')}
                                     style={{
                                         flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                        borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                                        background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                        borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
+                                        background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
                                         color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
                                         cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                     }}
@@ -224,8 +224,8 @@ export default function CartPage() {
                                     onClick={() => setPurchaseType('walkin')}
                                     style={{
                                         flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                        borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
-                                        background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                        borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
+                                        background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
                                         color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
                                         cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                     }}
@@ -269,7 +269,7 @@ export default function CartPage() {
                                 <span>Delivery Fee</span><span>PHP 0.00 (Walk-in)</span>
                             </div>
                             )}
-                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem' }}>
+                            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 12, marginTop: 8, display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.1rem' }}>
                                 <span>Grand Total</span>
                                 <span style={{ color: 'var(--accent-secondary)' }}>PHP {displayGrandTotal.toFixed(2)}</span>
                             </div>

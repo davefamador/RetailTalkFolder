@@ -231,7 +231,7 @@ export default function ReportsContent() {
                             <div style={{ position: 'relative', height: 200, padding: '0 4px' }}>
                                 <svg viewBox={`0 0 ${revenueSeries.length * 60} 180`} style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
                                     {[0, 0.25, 0.5, 0.75, 1].map(frac => (
-                                        <line key={frac} x1="0" y1={20 + (1 - frac) * 140} x2={revenueSeries.length * 60} y2={20 + (1 - frac) * 140} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                                        <line key={frac} x1="0" y1={20 + (1 - frac) * 140} x2={revenueSeries.length * 60} y2={20 + (1 - frac) * 140} stroke="var(--border-color)" strokeWidth="1" opacity="0.5" />
                                     ))}
                                     <polygon points={[...revenueSeries.map(([, v], i) => `${i * 60 + 30},${20 + (1 - v / maxRev) * 140}`), `${(revenueSeries.length - 1) * 60 + 30},160`, `30,160`].join(' ')} fill="url(#areaGradReport)" opacity="0.3" />
                                     <polyline points={revenueSeries.map(([, v], i) => `${i * 60 + 30},${20 + (1 - v / maxRev) * 140}`).join(' ')} fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />

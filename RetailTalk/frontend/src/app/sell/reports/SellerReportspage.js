@@ -195,7 +195,7 @@ export default function SellerReportsPage() {
                                     {/* Grid lines */}
                                     {[0, 0.25, 0.5, 0.75, 1].map(frac => (
                                         <line key={frac} x1="0" y1={20 + (1 - frac) * 140} x2={revenueSeries.length * 60} y2={20 + (1 - frac) * 140}
-                                            stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+                                            stroke="var(--border-color)" strokeWidth="1" opacity="0.5" />
                                     ))}
                                     {/* Area fill */}
                                     <polygon

@@ -345,12 +345,7 @@ export default function SellPage() {
                     borderBottom: '1px solid var(--border-color)',
                     display: 'flex', alignItems: 'center', gap: 10,
                 }}>
-                    <div style={{
-                        width: 40, height: 40, borderRadius: 10,
-                        background: 'var(--gradient-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '1.3rem', fontWeight: 800, color: '#fff',
-                    }}>RT</div>
+                    <img src="/logo.png" alt="RetailTalk" style={{ width: 40, height: 40, borderRadius: 10 }} />
                     <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>RetailTalk</div>
                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Seller</div>
@@ -1023,7 +1018,7 @@ export default function SellPage() {
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
                                 {filtered.map(order => {
-                                    const sc = deliveryColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                    const sc = deliveryColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -1137,7 +1132,7 @@ export default function SellPage() {
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
                                 {filtered.map(order => {
-                                    const sc = walkinColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                    const sc = walkinColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -1213,7 +1208,7 @@ export default function SellPage() {
                                         in_transit: { bg: 'rgba(108,99,255,0.1)', color: '#6366f1', label: 'In Transit' },
                                         delivered: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Delivered' },
                                     };
-                                    const sc = statusMap[req.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: req.status };
+                                    const sc = statusMap[req.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: req.status };
                                     const productImage = req.product_images && req.product_images.length > 0 ? req.product_images[0] : null;
                                     return (
                                         <div key={req.id} className="card" style={{ padding: 20 }}>

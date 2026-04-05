@@ -202,7 +202,7 @@ export default function DeliveryPage() {
                     {/* Grid lines */}
                     {[0, 0.25, 0.5, 0.75, 1].map((frac, i) => (
                         <line key={i} x1={padX} y1={padY + plotH * (1 - frac)} x2={padX + plotW} y2={padY + plotH * (1 - frac)}
-                            stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+                            stroke="var(--border-color)" opacity="0.5" strokeWidth="1" />
                     ))}
                     {/* Area fill */}
                     <path d={areaPath} fill={`url(#${gradId})`} />
@@ -213,14 +213,14 @@ export default function DeliveryPage() {
                         <g key={i}>
                             <circle cx={p.x} cy={p.y} r="4" fill="var(--accent-primary, #6c63ff)" stroke="#1a1a2e" strokeWidth="2" />
                             {/* Value label */}
-                            <text x={p.x} y={p.y - 10} textAnchor="middle" fill="rgba(255,255,255,0.7)" fontSize="8" fontWeight="600" fontFamily="Inter, sans-serif">
+                            <text x={p.x} y={p.y - 10} textAnchor="middle" fill="var(--text-secondary)" fontSize="8" fontWeight="600" fontFamily="Inter, sans-serif">
                                 {valueKey === 'amount' ? `₱${p.val}` : p.val}
                             </text>
                         </g>
                     ))}
                     {/* X-axis labels */}
                     {points.map((p, i) => (
-                        <text key={`lbl-${i}`} x={p.x} y={svgH - 2} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="7" fontFamily="Inter, sans-serif">
+                        <text key={`lbl-${i}`} x={p.x} y={svgH - 2} textAnchor="middle" fill="var(--text-muted)" fontSize="7" fontFamily="Inter, sans-serif">
                             {p.date}
                         </text>
                     ))}
@@ -590,7 +590,7 @@ export default function DeliveryPage() {
                                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                                     {[{ key: 'delivery', label: 'Product Delivery' }, { key: 'restock', label: 'Restock' }].map(f => (
                                         <button key={f.key} onClick={() => setHistoryFilter('history_' + f.key)} className="btn btn-sm" style={{
-                                            background: historyFilter === 'history_' + f.key ? 'rgba(108,99,255,0.2)' : 'rgba(255,255,255,0.05)',
+                                            background: historyFilter === 'history_' + f.key ? 'rgba(108,99,255,0.2)' : 'var(--bg-secondary)',
                                             color: historyFilter === 'history_' + f.key ? 'var(--accent-primary)' : 'var(--text-muted)',
                                             border: historyFilter === 'history_' + f.key ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
                                             fontWeight: 600,

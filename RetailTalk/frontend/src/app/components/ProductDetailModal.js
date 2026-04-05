@@ -155,9 +155,9 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                 <div
                     onClick={(e) => e.stopPropagation()}
                     style={{
-                        background: 'rgba(26, 26, 46, 0.85)',
+                        background: 'var(--bg-card)',
                         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255,255,255,0.1)',
+                        border: '1px solid var(--border-color)',
                         borderRadius: 20,
                         maxWidth: 720, width: '100%', maxHeight: '90vh',
                         overflow: 'auto',
@@ -200,13 +200,13 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                 style={{
                                     position: 'absolute', top: 16, right: 16, zIndex: 10,
                                     width: 36, height: 36, borderRadius: '50%',
-                                    background: 'rgba(255,255,255,0.1)', border: 'none',
+                                    background: 'var(--bg-secondary)', border: 'none',
                                     color: 'var(--text-secondary)', cursor: 'pointer',
                                     fontSize: '1.1rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
                                     transition: 'background 0.2s',
                                 }}
-                                onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.2)'}
-                                onMouseLeave={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                                onMouseEnter={(e) => e.target.style.background = 'rgba(108,99,255,0.15)'}
+                                onMouseLeave={(e) => e.target.style.background = 'var(--bg-secondary)'}
                             >✕</button>
 
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', position: 'relative' }}>
@@ -238,7 +238,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                                 <div key={i} onClick={() => setSelectedImage(i)} style={{
                                                     width: 52, height: 52, borderRadius: 8, overflow: 'hidden',
                                                     cursor: 'pointer',
-                                                    border: `2px solid ${i === selectedImage ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)'}`,
+                                                    border: `2px solid ${i === selectedImage ? 'var(--accent-primary)' : 'var(--border-color)'}`,
                                                 }}>
                                                     <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                                 </div>
@@ -293,7 +293,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                                 style={{
                                                     width: 38, height: 38, borderRadius: '50%', border: 'none',
                                                     cursor: wishlistLoading ? 'not-allowed' : 'pointer',
-                                                    background: inWishlist ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.08)',
+                                                    background: inWishlist ? 'rgba(239,68,68,0.15)' : 'var(--bg-secondary)',
                                                     color: inWishlist ? '#ef4444' : 'var(--text-muted)',
                                                     fontSize: '1.15rem', display: 'flex', alignItems: 'center', justifyContent: 'center',
                                                     transition: 'all 0.25s ease',
@@ -309,8 +309,8 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
 
                                     {/* Description */}
                                     <div style={{
-                                        padding: '14px 0', borderTop: '1px solid rgba(255,255,255,0.08)',
-                                        borderBottom: '1px solid rgba(255,255,255,0.08)',
+                                        padding: '14px 0', borderTop: '1px solid var(--border-color)',
+                                        borderBottom: '1px solid var(--border-color)',
                                         marginBottom: 20, flex: 1,
                                     }}>
                                         <p style={{
@@ -318,7 +318,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                             fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px',
                                         }}>Description</p>
                                         <p style={{
-                                            color: 'rgba(240,240,245,0.85)', lineHeight: 1.7, fontSize: '0.9rem',
+                                            color: 'var(--text-secondary)', lineHeight: 1.7, fontSize: '0.9rem',
                                         }}>
                                             {product.description || 'No description available'}
                                         </p>
@@ -326,23 +326,23 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
 
                                     {/* Quantity & Buy */}
                                     <div style={{
-                                        background: 'rgba(255,255,255,0.04)', borderRadius: 14,
+                                        background: 'var(--bg-secondary)', borderRadius: 14,
                                         padding: 16,
                                     }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
                                             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Qty:</span>
-                                            <div style={{ display: 'flex', alignItems: 'center', borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)' }}>
                                                 <button
                                                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
                                                     style={{
                                                         width: 36, height: 36, border: 'none', cursor: 'pointer',
-                                                        background: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)',
+                                                        background: 'var(--bg-primary)', color: 'var(--text-primary)',
                                                         fontSize: '1rem', fontWeight: 700,
                                                     }}
                                                 >−</button>
                                                 <span style={{
                                                     width: 44, textAlign: 'center', fontWeight: 700,
-                                                    fontSize: '0.95rem', background: 'rgba(255,255,255,0.03)',
+                                                    fontSize: '0.95rem', background: 'transparent',
                                                     height: 36, lineHeight: '36px',
                                                 }}>
                                                     {quantity}
@@ -351,7 +351,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                                     onClick={() => setQuantity(Math.min(stock || 999, quantity + 1))}
                                                     style={{
                                                         width: 36, height: 36, border: 'none', cursor: 'pointer',
-                                                        background: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)',
+                                                        background: 'var(--bg-primary)', color: 'var(--text-primary)',
                                                         fontSize: '1rem', fontWeight: 700,
                                                     }}
                                                 >+</button>
@@ -366,7 +366,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                         <div style={{
                                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                                             marginBottom: 14, paddingBottom: 14,
-                                            borderBottom: '1px solid rgba(255,255,255,0.06)',
+                                            borderBottom: '1px solid var(--border-color)',
                                         }}>
                                             <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                                                 {deliveryFee > 0 ? `Subtotal: PHP ${totalPrice} + PHP ${deliveryFee.toFixed(2)} delivery` : 'Total'}
@@ -399,8 +399,8 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                                         onClick={() => setPurchaseType('delivery')}
                                                         style={{
                                                             flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                            borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'rgba(255,255,255,0.1)',
-                                                            background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
+                                                            borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
+                                                            background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
                                                             color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
                                                             cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                                         }}
@@ -412,8 +412,8 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
                                                         onClick={() => setPurchaseType('walkin')}
                                                         style={{
                                                             flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                            borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'rgba(255,255,255,0.1)',
-                                                            background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.04)',
+                                                            borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
+                                                            background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
                                                             color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
                                                             cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
                                                         }}

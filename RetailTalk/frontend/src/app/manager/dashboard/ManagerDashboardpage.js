@@ -14,9 +14,8 @@ import {
 } from '../../../lib/api';
 import {
     LayoutDashboard, Users, Package, ShoppingCart, Truck, Tag,
-    CreditCard, Search, TrendingUp, LogOut, Trash2, Heart,
+    CreditCard, TrendingUp, LogOut, Trash2, Heart,
 } from 'lucide-react';
-import SearchContent from '../../components/SearchContent';
 import ReportsContent from '../../components/ReportsContent';
 
 // ── Line Chart Component ─────────────────────────────────
@@ -180,6 +179,8 @@ export default function ManagerDashboard() {
     const [mgrProductSearch, setMgrProductSearch] = useState('');
     const [mgrTransactions, setMgrTransactions] = useState([]);
     const [mgrTxnSearch, setMgrTxnSearch] = useState('');
+    const [mgrTxnTypeFilter, setMgrTxnTypeFilter] = useState('all');
+    const [mgrTxnStatusFilter, setMgrTxnStatusFilter] = useState('all');
 
     // Create product modal
     const [showCreateProduct, setShowCreateProduct] = useState(false);
@@ -455,7 +456,6 @@ export default function ManagerDashboard() {
         { id: 'transactions', icon: CreditCard, label: 'Transactions' },
         { id: 'wishlist', icon: Heart, label: 'Wishlist' },
         { id: 'divider' },
-        { id: 'search', icon: Search, label: 'Search' },
         { id: 'reports', icon: TrendingUp, label: 'Reports' },
     ];
 
@@ -473,12 +473,7 @@ export default function ManagerDashboard() {
                     borderBottom: '1px solid var(--border-color)',
                     display: 'flex', alignItems: 'center', gap: 10,
                 }}>
-                    <div style={{
-                        width: 40, height: 40, borderRadius: 10,
-                        background: 'var(--gradient-primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '1.3rem', fontWeight: 800, color: '#fff',
-                    }}>RT</div>
+                    <img src="/logo.png" alt="RetailTalk" style={{ width: 40, height: 40, borderRadius: 10 }} />
                     <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--text-primary)' }}>RetailTalk</div>
                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Manager</div>
@@ -536,9 +531,6 @@ export default function ManagerDashboard() {
                         }}>✕</button>
                     </div>
                 )}
-
-                {/* ===== SEARCH TAB (embedded) ===== */}
-                {activeTab === 'search' && <SearchContent />}
 
                 {/* ===== REPORTS TAB (embedded) ===== */}
                 {activeTab === 'reports' && <ReportsContent />}
@@ -864,7 +856,7 @@ export default function ManagerDashboard() {
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
                                 {filteredWalkin.map(order => {
-                                    const wc = walkinColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                    const wc = walkinColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -976,7 +968,7 @@ export default function ManagerDashboard() {
                         ) : (
                             <div style={{ display: 'grid', gap: 12 }}>
                                 {filteredDelivery.map(order => {
-                                    const sc = deliveryColors[order.status] || { bg: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)', label: order.status };
+                                    const sc = deliveryColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
                                     const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
                                     return (
                                         <div key={order.id} className="card" style={{ padding: 20 }}>
@@ -1540,20 +1532,52 @@ export default function ManagerDashboard() {
                     </div>
                 )}
 
-                {activeTab === 'transactions' && (
+                {activeTab === 'transactions' && (() => {
+                    const filteredTxns = mgrTransactions.filter(t => {
+                        if (mgrTxnTypeFilter !== 'all' && t.purchase_type !== mgrTxnTypeFilter) return false;
+                        if (mgrTxnStatusFilter !== 'all' && t.status !== mgrTxnStatusFilter) return false;
+                        return true;
+                    });
+                    const statusClr = {
+                        ondeliver: '#3b82f6', delivered: '#10b981', completed: '#10b981',
+                        undelivered: '#ef4444', cancelled: '#ef4444',
+                        pending_walkin: '#fbbf24', inwork: '#8b5cf6', ready: '#0ea5e9',
+                        picked_up: '#0ea5e9', pending: '#f59e0b', approved: '#10b981',
+                    };
+                    const allStatuses = [...new Set(mgrTransactions.map(t => t.status))].sort();
+                    return (
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Transactions</h1>
                                 <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>All department transactions</p>
                             </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <input type="text" placeholder="Search..."
-                                    value={mgrTxnSearch} onChange={e => setMgrTxnSearch(e.target.value)}
-                                    onKeyDown={e => e.key === 'Enter' && loadMgrTransactions(mgrTxnSearch)}
-                                    style={{ width: 220, padding: '10px 14px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif' }}
-                                />
-                                <button className="btn btn-primary btn-sm" onClick={() => loadMgrTransactions(mgrTxnSearch)}>Search</button>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <select
+                                    value={mgrTxnTypeFilter} onChange={e => setMgrTxnTypeFilter(e.target.value)}
+                                    style={{
+                                        padding: '10px 14px', borderRadius: 10,
+                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                    }}
+                                >
+                                    <option value="all">All Types</option>
+                                    <option value="walkin">Walk-in</option>
+                                    <option value="delivery">Delivery</option>
+                                </select>
+                                <select
+                                    value={mgrTxnStatusFilter} onChange={e => setMgrTxnStatusFilter(e.target.value)}
+                                    style={{
+                                        padding: '10px 14px', borderRadius: 10,
+                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                    }}
+                                >
+                                    <option value="all">All Statuses</option>
+                                    {allStatuses.map(s => (
+                                        <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -1564,47 +1588,40 @@ export default function ManagerDashboard() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {mgrTransactions.map(t => {
-                                        const statusClr = {
-                                            ondeliver: '#3b82f6', delivered: '#10b981', completed: '#10b981',
-                                            undelivered: '#ef4444', cancelled: '#ef4444',
-                                            pending_walkin: '#fbbf24', inwork: '#8b5cf6', ready: '#0ea5e9',
-                                            picked_up: '#0ea5e9',
-                                        };
-                                        return (
-                                            <tr key={t.id}>
-                                                <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.seller_name}</td>
-                                                <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
-                                                <td>{t.quantity}</td>
-                                                <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
-                                                <td>
-                                                    <span style={{
-                                                        padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                        textTransform: 'capitalize',
-                                                        background: t.purchase_type === 'walkin' ? 'rgba(251,191,36,0.1)' : 'rgba(59,130,246,0.1)',
-                                                        color: t.purchase_type === 'walkin' ? '#fbbf24' : '#3b82f6',
-                                                    }}>{t.purchase_type}</span>
-                                                </td>
-                                                <td>
-                                                    <span style={{
-                                                        padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                        background: `${statusClr[t.status] || '#94a3b8'}15`,
-                                                        color: statusClr[t.status] || '#94a3b8',
-                                                    }}>{t.status.replace('_', ' ')}</span>
-                                                </td>
-                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                    {new Date(t.created_at).toLocaleDateString()}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
+                                    {filteredTxns.map(t => (
+                                        <tr key={t.id}>
+                                            <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.seller_name}</td>
+                                            <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
+                                            <td>{t.quantity}</td>
+                                            <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
+                                            <td>
+                                                <span style={{
+                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                    textTransform: 'capitalize',
+                                                    background: t.purchase_type === 'walkin' ? 'rgba(251,191,36,0.1)' : 'rgba(59,130,246,0.1)',
+                                                    color: t.purchase_type === 'walkin' ? '#fbbf24' : '#3b82f6',
+                                                }}>{t.purchase_type}</span>
+                                            </td>
+                                            <td>
+                                                <span style={{
+                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                    background: `${statusClr[t.status] || '#94a3b8'}15`,
+                                                    color: statusClr[t.status] || '#94a3b8',
+                                                }}>{t.status.replace('_', ' ')}</span>
+                                            </td>
+                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                {new Date(t.created_at).toLocaleDateString()}
+                                            </td>
+                                        </tr>
+                                    ))}
                                 </tbody>
                             </table>
-                            {mgrTransactions.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
+                            {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
                         </div>
                     </div>
-                )}
+                    );
+                })()}
             </main>
 
             {/* ===== STAFF DETAIL SLIDE PANEL ===== */}

@@ -200,7 +200,7 @@ export default function ProductDetailPage() {
                                 disabled={wishlistLoading}
                                 title={wishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
                                 style={{
-                                    background: wishlisted ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)',
+                                    background: wishlisted ? 'rgba(239,68,68,0.15)' : 'var(--bg-secondary)',
                                     border: `1.5px solid ${wishlisted ? 'rgba(239,68,68,0.4)' : 'var(--border-color)'}`,
                                     borderRadius: 12, padding: '10px 12px', cursor: 'pointer',
                                     fontSize: '1.3rem', lineHeight: 1, transition: 'all 0.25s ease',
@@ -213,7 +213,7 @@ export default function ProductDetailPage() {
                                 }}
                                 onMouseLeave={e => {
                                     e.currentTarget.style.transform = wishlisted ? 'scale(1.1)' : 'scale(1)';
-                                    e.currentTarget.style.background = wishlisted ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.05)';
+                                    e.currentTarget.style.background = wishlisted ? 'rgba(239,68,68,0.15)' : 'var(--bg-secondary)';
                                 }}
                             >
                                 {wishlistLoading ? (

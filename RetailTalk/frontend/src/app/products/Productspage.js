@@ -182,8 +182,8 @@ export default function ProductsPage() {
                                 >
                                     <div style={{
                                         borderRadius: 14, overflow: 'hidden',
-                                        background: 'rgba(26,26,46,0.7)',
-                                        border: '1px solid rgba(255,255,255,0.08)',
+                                        background: 'var(--bg-card)',
+                                        border: '1px solid var(--border-color)',
                                         height: '100%',
                                     }}>
                                         <div style={{

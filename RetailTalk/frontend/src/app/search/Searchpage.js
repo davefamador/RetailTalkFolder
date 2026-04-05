@@ -220,7 +220,7 @@ export default function SearchPage() {
                         height: 38,
                         borderRadius: '50%',
                         border: 'none',
-                        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255,255,255,0.08)',
+                        background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'var(--theme-toggle-bg)',
                         color: isListening ? '#ef4444' : 'var(--text-muted)',
                         cursor: voiceSupported ? 'pointer' : 'not-allowed',
                         display: 'flex',
@@ -231,8 +231,8 @@ export default function SearchPage() {
                         animation: isListening ? 'voicePulse 1.2s ease-in-out infinite' : 'none',
                         opacity: voiceSupported ? 1 : 0.4,
                     }}
-                    onMouseEnter={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'rgba(255,255,255,0.15)'; }}
-                    onMouseLeave={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                    onMouseEnter={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'rgba(108,99,255,0.12)'; }}
+                    onMouseLeave={(e) => { if (!isListening && voiceSupported) e.currentTarget.style.background = 'var(--theme-toggle-bg)'; }}
                 >
                     🎤
                 </button>
@@ -311,7 +311,7 @@ export default function SearchPage() {
                                             </span>
                                             <span style={{
                                                 fontSize: '0.7rem', padding: '2px 8px', borderRadius: 4,
-                                                background: 'rgba(255, 255, 255, 0.08)',
+                                                background: 'var(--bg-secondary)',
                                                 color: 'var(--text-secondary)', fontWeight: 600,
                                             }}>
                                                 Score: {(product.relevance_score * 100).toFixed(1)}%

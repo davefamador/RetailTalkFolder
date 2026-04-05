@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getStoredUser } from '../lib/api';
+import { getStoredUser, getStoredAdmin } from '../lib/api';
 import {
     Search, ArrowRight, ExternalLink,
     Brain, Database, Layers, Sparkles, Target,
@@ -50,7 +50,19 @@ export default function HomePage() {
     ];
 
     useEffect(() => {
-        setUser(getStoredUser());
+        const storedUser = getStoredUser();
+        const storedAdmin = getStoredAdmin();
+        // Redirect staff roles away from landing page to their dashboards
+        if (storedAdmin && storedAdmin.role === 'admin') {
+            window.location.href = '/admin/dashboard';
+            return;
+        }
+        if (storedUser) {
+            if (storedUser.role === 'seller') { window.location.href = '/sell'; return; }
+            if (storedUser.role === 'manager') { window.location.href = '/manager/dashboard'; return; }
+            if (storedUser.role === 'delivery') { window.location.href = '/delivery'; return; }
+        }
+        setUser(storedUser);
         setHydrated(true);
     }, []);
 
