@@ -293,6 +293,10 @@ export async function adminBanUser(userId, isBanned) {
     });
 }
 
+export async function adminDeleteUser(userId) {
+    return apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
+}
+
 export async function adminGetTransactions(search = '', type = '', status = '', dateRange = '', specificDate = '') {
     let url = `/admin/transactions?search=${encodeURIComponent(search)}`;
     if (type) url += `&txn_type=${encodeURIComponent(type)}`;
@@ -658,6 +662,22 @@ export async function managerUpdateWalkinOrderStatus(transactionId, status) {
     });
 }
 
+// --- Manager Reassign ---
+export async function managerReassignOrder(transactionId, staffId) {
+    return apiFetch(`/transactions/manager/reassign/${transactionId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ staff_id: staffId }),
+    });
+}
+
+// --- Admin Create Product for Department ---
+export async function adminCreateProductForDept(deptId, product) {
+    return apiFetch(`/admin/departments/${deptId}/products`, {
+        method: 'POST',
+        body: JSON.stringify(product),
+    });
+}
+
 // --- Wishlist ---
 export async function getWishlist() {
     return apiFetch('/wishlist/');
@@ -684,4 +704,35 @@ export async function getSellerWishlistReport() {
 
 export async function getAdminWishlistReport() {
     return apiFetch('/wishlist/admin-report');
+}
+
+// --- Salary Management ---
+export async function adminGetSalaries() {
+    return apiFetch('/admin/salaries');
+}
+
+export async function adminSetSalary(userId, salary) {
+    return apiFetch(`/admin/salaries/set/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ salary }),
+    });
+}
+
+export async function adminPayAll() {
+    return apiFetch('/admin/salaries/pay-all', { method: 'POST' });
+}
+
+export async function adminPayStore(departmentId) {
+    return apiFetch(`/admin/salaries/pay-store/${departmentId}`, { method: 'POST' });
+}
+
+export async function adminPayIndividual(recipientId, amount) {
+    return apiFetch('/admin/salaries/pay-individual', {
+        method: 'POST',
+        body: JSON.stringify({ recipient_id: recipientId, amount }),
+    });
+}
+
+export async function getSalaryHistory() {
+    return apiFetch('/transactions/salary-history');
 }

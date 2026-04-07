@@ -148,15 +148,65 @@ async def list_staff(
 
     result = query.order("created_at", desc=True).execute()
 
+    all_staff_ids = [u["id"] for u in (result.data or [])]
+
+    # Batch-fetch completed transaction stats for all staff
+    staff_stats = {}
+    if all_staff_ids:
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        completed_statuses = ["completed", "delivered"]
+
+        # Fetch completed transactions for all staff (assigned or legacy seller_id)
+        txns = sb.table("product_transactions").select(
+            "assigned_staff_id, seller_id, status, quantity, purchase_type, created_at"
+        ).in_("status", completed_statuses).execute()
+
+        for t in (txns.data or []):
+            # Determine which staff this belongs to
+            staff_id = t.get("assigned_staff_id") or t.get("seller_id")
+            if staff_id not in all_staff_ids:
+                continue
+
+            if staff_id not in staff_stats:
+                staff_stats[staff_id] = {
+                    "total_completed_tasks": 0,
+                    "tasks_completed_today": 0,
+                    "walkin_items_today": 0,
+                    "delivery_items_today": 0,
+                }
+            stats = staff_stats[staff_id]
+            qty = int(t.get("quantity", 1))
+            purchase_type = t.get("purchase_type", "delivery")
+            stats["total_completed_tasks"] += 1
+
+            try:
+                dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+                day_key = dt.strftime("%Y-%m-%d")
+            except Exception:
+                day_key = t["created_at"][:10]
+
+            if day_key == today_str:
+                stats["tasks_completed_today"] += 1
+                if purchase_type == "walkin":
+                    stats["walkin_items_today"] += qty
+                else:
+                    stats["delivery_items_today"] += qty
+
     staff_list = []
     for u in (result.data or []):
+        uid = u["id"]
+        s = staff_stats.get(uid, {})
         staff_list.append({
-            "id": u["id"],
+            "id": uid,
             "email": u["email"],
             "full_name": u["full_name"],
             "role": u["role"],
             "is_banned": u.get("is_banned", False),
             "created_at": u["created_at"],
+            "total_completed_tasks": s.get("total_completed_tasks", 0),
+            "tasks_completed_today": s.get("tasks_completed_today", 0),
+            "walkin_items_today": s.get("walkin_items_today", 0),
+            "delivery_items_today": s.get("delivery_items_today", 0),
         })
 
     return staff_list
@@ -257,23 +307,42 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
         elif isinstance(u["user_contacts"], dict):
             contact = u["user_contacts"].get("contact_number", "")
 
-    # Transactions
-    sold = sb.table("product_transactions").select("*, products(title)").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
+    # Transactions — use assigned_staff_id for accuracy, fallback to seller_id for legacy
+    assigned_txns = sb.table("product_transactions").select("*, products(title, images)").eq(
+        "assigned_staff_id", user_id
+    ).order("created_at", desc=True).limit(100).execute()
 
-    transactions = []
+    legacy_txns = sb.table("product_transactions").select("*, products(title, images)").eq(
+        "seller_id", user_id
+    ).is_("assigned_staff_id", "null").order("created_at", desc=True).limit(100).execute()
+
+    # Merge and deduplicate
+    seen_ids = set()
+    all_txns = []
+    for t in (assigned_txns.data or []) + (legacy_txns.data or []):
+        if t["id"] not in seen_ids:
+            seen_ids.add(t["id"])
+            all_txns.append(t)
+    all_txns.sort(key=lambda x: x["created_at"], reverse=True)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    completed_statuses = ("completed", "delivered")
+
     daily_data = {}
     monthly_data = {}
-    for t in (sold.data or []):
+    completed_count = 0
+    total_items = 0
+    today_tasks = 0
+    walkin_items_today = 0
+    delivery_items_today = 0
+    products_handled = {}
+
+    for t in all_txns:
         amt = float(t["amount"])
-        transactions.append({
-            "id": t["id"],
-            "product_title": (t.get("products") or {}).get("title", ""),
-            "amount": amt,
-            "quantity": int(t.get("quantity", 1)),
-            "status": t["status"],
-            "purchase_type": t.get("purchase_type", "delivery"),
-            "created_at": t["created_at"],
-        })
+        qty = int(t.get("quantity", 1))
+        status = t["status"]
+        purchase_type = t.get("purchase_type", "delivery")
+        is_completed = status in completed_statuses
 
         try:
             dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
@@ -283,14 +352,52 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             day_key = t["created_at"][:10]
             month_key = t["created_at"][:7]
 
-        for data, key in [(daily_data, day_key), (monthly_data, month_key)]:
-            if key not in data:
-                data[key] = {"amount": 0, "count": 0}
-            data[key]["amount"] += amt
-            data[key]["count"] += 1
+        # Daily data with walk-in/delivery breakdown
+        if day_key not in daily_data:
+            daily_data[day_key] = {"amount": 0, "count": 0, "walkin_items": 0, "delivery_items": 0}
+        daily_data[day_key]["amount"] += amt
+        daily_data[day_key]["count"] += 1
+        if is_completed:
+            if purchase_type == "walkin":
+                daily_data[day_key]["walkin_items"] += qty
+            else:
+                daily_data[day_key]["delivery_items"] += qty
+
+        # Monthly data
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {"amount": 0, "count": 0}
+        monthly_data[month_key]["amount"] += amt
+        monthly_data[month_key]["count"] += 1
+
+        # Completion metrics
+        if is_completed:
+            completed_count += 1
+            total_items += qty
+            if day_key == today_str:
+                today_tasks += 1
+                if purchase_type == "walkin":
+                    walkin_items_today += qty
+                else:
+                    delivery_items_today += qty
+
+            # Track recent products handled
+            pid = t["product_id"]
+            prod_info = t.get("products") or {}
+            if pid not in products_handled:
+                products_handled[pid] = {
+                    "product_id": pid,
+                    "product_title": prod_info.get("title", ""),
+                    "product_image": ((prod_info.get("images") or [""])[0]) if prod_info.get("images") else "",
+                    "quantity_processed": 0,
+                    "last_handled": t["created_at"],
+                    "purchase_type": purchase_type,
+                }
+            products_handled[pid]["quantity_processed"] += qty
 
     daily = sorted(
-        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in daily_data.items()],
+        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"],
+          "walkin_items": v["walkin_items"], "delivery_items": v["delivery_items"]}
+         for k, v in daily_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:30]
 
@@ -298,6 +405,10 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
         [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in monthly_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:12]
+
+    recent_products_handled = sorted(
+        products_handled.values(), key=lambda x: x["last_handled"], reverse=True
+    )[:20]
 
     # Products
     prods = sb.table("products").select("id, title, price, stock, images, is_active, created_at").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
@@ -325,13 +436,18 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             "created_at": u["created_at"],
         },
         "report": {
-            "total_transactions": len(transactions),
-            "total_amount": round(sum(t["amount"] for t in transactions), 2),
+            "total_transactions": len(all_txns),
+            "total_amount": round(sum(float(t["amount"]) for t in all_txns), 2),
+            "total_completed_tasks": completed_count,
+            "total_items_processed": total_items,
+            "tasks_completed_today": today_tasks,
+            "walkin_items_today": walkin_items_today,
+            "delivery_items_today": delivery_items_today,
             "daily": daily,
             "monthly": monthly,
         },
-        "transactions": transactions[:50],
         "products": products,
+        "recent_products_handled": recent_products_handled,
     }
 
 
@@ -591,13 +707,19 @@ async def remove_staff(user_id: str, manager: dict = Depends(require_manager)):
     if user.get("role") != "seller":
         raise HTTPException(status_code=400, detail="Can only remove staff (seller) members")
 
-    # Unassign staff from department
-    sb.table("users").update({
-        "department_id": None,
-        "manager_id": None,
-    }).eq("id", user_id).execute()
+    # Delete only non-financial personal data.
+    # Financial records are preserved — their user FKs are set to NULL
+    # automatically via ON DELETE SET NULL (migration_v10).
+    sb.table("wishlist_items").delete().eq("buyer_id", user_id).execute()
+    sb.table("cart_items").delete().eq("buyer_id", user_id).execute()
+    sb.table("stored_value").delete().eq("user_id", user_id).execute()
+    sb.table("user_balances").delete().eq("user_id", user_id).execute()
+    sb.table("user_contacts").delete().eq("user_id", user_id).execute()
 
-    return {"message": f"Staff member '{user['full_name']}' has been removed from the department"}
+    # Permanently delete the user — DB cascades/nullifies all remaining FK references
+    sb.table("users").delete().eq("id", user_id).execute()
+
+    return {"message": f"Staff member '{user['full_name']}' has been permanently deleted"}
 
 
 # --- Product Removal Request ---

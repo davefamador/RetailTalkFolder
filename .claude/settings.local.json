@@ -16,7 +16,9 @@
       "mcp__claude_ai_Canva__generate-design",
       "Bash(npx next:*)",
       "WebFetch(domain:www.tryflint.com)",
-      "Bash(python3 \"C:\\\\Users\\\\loopy\\\\.claude\\\\plugins\\\\marketplaces\\\\ui-ux-pro-max-skill\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"AI search tool modern minimal dark landing page\" --design-system -p \"RetailTalk\")"
+      "Bash(python3 \"C:\\\\Users\\\\loopy\\\\.claude\\\\plugins\\\\marketplaces\\\\ui-ux-pro-max-skill\\\\.claude\\\\skills\\\\ui-ux-pro-max\\\\scripts\\\\search.py\" \"AI search tool modern minimal dark landing page\" --design-system -p \"RetailTalk\")",
+      "Bash(xargs grep:*)",
+      "Read(//c/Moi/Thesis/Code/RetailTalkFolder/NR>=1949 && NR<=1953 {printf \"%d: [%s]/**)"
     ],
     "deny": [],
     "ask": []

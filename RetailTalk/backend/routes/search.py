@@ -100,6 +100,7 @@ class SearchResponse(BaseModel):
     detected_intents: list[str] = []
     extracted_slots: dict = {}
     applied_filters: dict = {}
+    search_groups: list[dict] = []   # [{search_text, filters}, ...] for compound queries
 
 
 # =============================================================================
@@ -149,6 +150,87 @@ def _label_to_priority_weight(label: str) -> float:
     return (3 - priority) / 3
 
 
+def _run_search_pipeline(
+    search_text: str,
+    filters: dict,
+    original_query: str,
+    max_candidates: int,
+    include_complements: bool,
+    include_substitutes: bool,
+    show_all: bool,
+) -> list[SearchResultItem]:
+    """
+    Core search pipeline for a single search group.
+    Stages: BERT Embedding -> pgvector -> CrossEncoder -> ESCI -> Score Blending
+    """
+    query_embedding = bert_service.compute_embedding(search_text)
+
+    if filters:
+        raw_candidates = search_similar_products_filtered(
+            query_embedding, top_k=max_candidates,
+            price_min=filters.get("price_min"), price_max=filters.get("price_max"),
+            brand=filters.get("brand"), color=filters.get("color"),
+        )
+    else:
+        raw_candidates = search_similar_products(query_embedding, top_k=max_candidates)
+
+    print(f"[Search]   '{search_text}': {len(raw_candidates)} raw candidates")
+
+    MIN_SIMILARITY_THRESHOLD = 0.20
+    candidates = raw_candidates if show_all else [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
+    if not candidates:
+        return []
+
+    product_titles = [c["title"] for c in candidates]
+    if ranker_service._loaded:
+        raw_ranker_scores = ranker_service.rank(original_query, product_titles)
+        ranker_scores = ranker_service.normalize_scores(raw_ranker_scores)
+    else:
+        ranker_scores = [c["similarity"] for c in candidates]
+
+    product_embeddings = np.array([c["embedding"] for c in candidates])
+    if classifier_service._loaded:
+        classifications = classifier_service.classify_batch(query_embedding, product_embeddings)
+    else:
+        classifications = [{"label": "Exact", "confidence": 1.0, "class_id": 0,
+            "exact_prob": 1.0, "substitute_prob": 0.0, "complement_prob": 0.0, "irrelevant_prob": 0.0}
+            for _ in candidates]
+
+    if ranker_service._loaded:
+        w_r, w_c, w_s = 0.55, 0.05, 0.40
+    else:
+        w_r, w_c, w_s = 0.0, 0.05, 0.95
+
+    MIN_RANKER_SCORE = 0.30
+    scored = []
+    for idx, (cand, cls) in enumerate(zip(candidates, classifications)):
+        label = cls["label"]
+        r_score = float(ranker_scores[idx])
+        sim = float(cand["similarity"])
+        if not show_all and ranker_service._loaded and r_score < MIN_RANKER_SCORE:
+            continue
+        if not show_all and label == "Substitute" and not include_substitutes:
+            continue
+        if not show_all and label == "Complement" and not include_complements:
+            continue
+        rel = _compute_blended_score(r_score, _label_to_priority_weight(label), sim, w_r, w_c, w_s)
+        scored.append(SearchResultItem(
+            id=str(cand["id"]), title=cand["title"],
+            description=cand.get("description") or "",
+            price=float(cand["price"]),
+            image_url=_first_image(cand.get("images")),
+            seller_id=str(cand["seller_id"]),
+            similarity=round(sim, 4), ranker_score=round(r_score, 4),
+            relevance_score=round(rel, 4), relevance_label=label,
+            relevance_confidence=round(cls["confidence"], 4),
+            exact_prob=round(cls.get("exact_prob", 0.0), 4),
+            substitute_prob=round(cls.get("substitute_prob", 0.0), 4),
+            complement_prob=round(cls.get("complement_prob", 0.0), 4),
+            irrelevant_prob=round(cls.get("irrelevant_prob", 0.0), 4),
+        ))
+    return scored
+
+
 # =============================================================================
 #  Main Search Route
 # =============================================================================
@@ -162,223 +244,56 @@ async def search_products(
     show_all: bool = Query(default=False, description="Show all products without threshold filtering (admin mode)"),
 ):
     """
-    Product Search following the README architecture:
-
-    Stage 1: Intent Classification + Slot Extraction + BERT Embedding (parallel)
-    Stage 2: Query Rewriting (combines intent + slots → clean search text + filters)
-    Stage 3: Supabase Filter + pgvector Similarity + CrossEncoder Ranker (parallel)
-    Stage 4: ESCI Classifier (E/S/C/I with softmax probabilities)
-    Stage 5: Score Blending (0.5×R + 0.3×C + 0.2×S)
-    Stage 6: Final Ranked Results
+    Product Search with compound query support.
+    Splits compound queries (e.g. 'shoes under 300 and bags under 500')
+    into independent search groups, each with its own filters.
     """
-
     try:
-        # =================================================================
-        #  STAGE 1 & 2: Intent + Slot + Query Rewriting
-        #  The query_rewriter internally runs:
-        #    - Intent Classification (single_search, multi_search, filtered_search, free_form)
-        #    - Slot Extraction (PRODUCT, BRAND, COLOR, PRICE_MAX, etc.)
-        #    - Query Rewriting (produces clean search_text + structured filters)
-        # =================================================================
         rewritten = query_rewriter.process(q)
-        search_text = rewritten.search_text
-        filters = rewritten.filters
 
         print(f"[Search] Original query: '{q}'")
         print(f"[Search] Intents: {rewritten.intents}")
         print(f"[Search] Slots: {rewritten.slots}")
-        if rewritten.is_rewritten:
-            print(f"[Search] Rewritten to: '{search_text}' | Filters: {filters}")
+        print(f"[Search] Search groups: {len(rewritten.search_groups)}")
+        for i, g in enumerate(rewritten.search_groups):
+            print(f"[Search]   Group {i+1}: '{g.search_text}' | Filters: {g.filters}")
 
-        # =================================================================
-        #  Check if ML models are loaded
-        # =================================================================
         if not bert_service._loaded:
-            # Fallback: Simple text search without ML
-            print(f"[Search] ML models not loaded. Performing text-only search.")
-            return await _fallback_text_search(q, search_text, filters, max_results, rewritten)
+            return await _fallback_text_search(q, rewritten, max_results)
 
-        # =================================================================
-        #  STAGE 1 (continued): BERT Embedding
-        #  Encode the rewritten search text into a 768-dimensional vector
-        # =================================================================
-        query_embedding = bert_service.compute_embedding(search_text)
-
-        # =================================================================
-        #  STAGE 3: pgvector Similarity + Supabase Filters
-        #  Find top-K candidate products using cosine similarity
-        #  Apply structured filters from query rewriting
-        # =================================================================
-        if filters:
-            raw_candidates = search_similar_products_filtered(
-                query_embedding,
-                top_k=SEARCH_TOP_K_CANDIDATES,
-                price_min=filters.get("price_min"),
-                price_max=filters.get("price_max"),
-                brand=filters.get("brand"),
-                color=filters.get("color"),
+        # Run pipeline for each search group
+        all_results = []
+        for group in rewritten.search_groups:
+            group_results = _run_search_pipeline(
+                search_text=group.search_text,
+                filters=group.filters,
+                original_query=q,
+                max_candidates=SEARCH_TOP_K_CANDIDATES,
+                include_complements=include_complements,
+                include_substitutes=include_substitutes,
+                show_all=show_all,
             )
-        else:
-            raw_candidates = search_similar_products(
-                query_embedding,
-                top_k=SEARCH_TOP_K_CANDIDATES,
-            )
+            all_results.extend(group_results)
 
-        print(f"[Search] pgvector raw candidates: {len(raw_candidates)}")
-        if raw_candidates:
-            top_sims = sorted([c["similarity"] for c in raw_candidates], reverse=True)[:5]
-            print(f"[Search] Top similarities: {[round(s, 4) for s in top_sims]}")
+        # Deduplicate by product id (keep highest relevance score)
+        seen = {}
+        for r in all_results:
+            if r.id not in seen or r.relevance_score > seen[r.id].relevance_score:
+                seen[r.id] = r
 
-        # Apply minimum similarity threshold (skip in show_all mode for admin evaluation)
-        MIN_SIMILARITY_THRESHOLD = 0.20
-        if show_all:
-            candidates = raw_candidates
-        else:
-            candidates = [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
-
-        print(f"[Search] After threshold ({MIN_SIMILARITY_THRESHOLD}): {len(candidates)} candidates (show_all={show_all})")
-
-        if not candidates:
-            return SearchResponse(
-                query=q,
-                total_results=0,
-                results=[],
-                message="No products found matching your query.",
-                rewritten_query=search_text,
-                detected_intents=rewritten.intents,
-                extracted_slots=rewritten.slots,
-                applied_filters=filters,
-            )
-
-        # =================================================================
-        #  STAGE 3 (continued): CrossEncoder Re-Ranking
-        #  Score each (query, product_title) pair for pairwise relevance
-        # =================================================================
-        product_titles = [c["title"] for c in candidates]
-
-        if ranker_service._loaded:
-            raw_ranker_scores = ranker_service.rank(q, product_titles)
-            ranker_scores = ranker_service.normalize_scores(raw_ranker_scores)
-            # Log top ranker scores with titles for debugging
-            scored_pairs = sorted(zip(ranker_scores, product_titles), reverse=True)[:5]
-            print(f"[Search] Top ranker scores: {[(round(s, 4), t[:40]) for s, t in scored_pairs]}")
-        else:
-            # Fallback: use similarity as ranker score
-            ranker_scores = [c["similarity"] for c in candidates]
-
-        # =================================================================
-        #  STAGE 4: ESCI Classifier
-        #  Classify each (query, product) pair into E/S/C/I
-        #  Filter out products with irrelevant_prob > 10% or exact_prob < 80%
-        # =================================================================
-        product_embeddings = np.array([c["embedding"] for c in candidates])
-
-        if classifier_service._loaded:
-            classifications = classifier_service.classify_batch(query_embedding, product_embeddings)
-        else:
-            # Fallback: assume all are "Exact" with high confidence
-            classifications = [
-                {"label": "Exact", "confidence": 1.0, "class_id": 0,
-                 "exact_prob": 1.0, "substitute_prob": 0.0,
-                 "complement_prob": 0.0, "irrelevant_prob": 0.0}
-                for _ in candidates
-            ]
-
-        # =================================================================
-        #  STAGE 5: Score Blending
-        #  relevance_score = 0.4×R + 0.25×C + 0.35×S
-        #  Where: R=ranker, C=classifier_priority, S=similarity
-        # =================================================================
-
-        # Determine effective weights (adjust if ranker not loaded)
-        # NOTE: Classifier weight is reduced because the current ESCI model
-        # outputs near-uniform probabilities (~25% per class). The ranker
-        # (CrossEncoder) and pgvector similarity are far more reliable.
-        if ranker_service._loaded:
-            w_ranker = 0.55
-            w_classifier = 0.05
-            w_similarity = 0.40
-        else:
-            # No ranker — rely on similarity only
-            w_ranker = 0.0
-            w_classifier = 0.05
-            w_similarity = 0.95
-
-        # Build scored results, filtering by ranker score
-        scored_results: list[SearchResultItem] = []
-        MIN_RANKER_SCORE = 0.30  # Filter products the ranker considers clearly irrelevant
-
-        for idx, (candidate, classification) in enumerate(zip(candidates, classifications)):
-            label = classification["label"]
-            exact_prob = classification.get("exact_prob", 0.0)
-            irrelevant_prob = classification.get("irrelevant_prob", 0.0)
-
-            # Calculate blended relevance score
-            ranker_score = float(ranker_scores[idx])
-            similarity = float(candidate["similarity"])
-
-            # Filter by ranker score — the CrossEncoder sees actual text pairs
-            # so it can distinguish "dress" vs "Canned Goods" reliably
-            # (skip in show_all mode so admin can see all products with scores)
-            if not show_all and ranker_service._loaded and ranker_score < MIN_RANKER_SCORE:
-                continue
-
-            # Skip Substitutes/Complements if user requested (skip in show_all mode)
-            if not show_all and label == "Substitute" and not include_substitutes:
-                continue
-            if not show_all and label == "Complement" and not include_complements:
-                continue
-
-            # Calculate priority weight for classifier component
-            classifier_priority = _label_to_priority_weight(label)
-
-            relevance_score = _compute_blended_score(
-                ranker_score=ranker_score,
-                classifier_priority=classifier_priority,
-                similarity=similarity,
-                w_ranker=w_ranker,
-                w_classifier=w_classifier,
-                w_similarity=w_similarity,
-            )
-
-            scored_results.append(SearchResultItem(
-                id=str(candidate["id"]),
-                title=candidate["title"],
-                description=candidate.get("description") or "",
-                price=float(candidate["price"]),
-                image_url=_first_image(candidate.get("images")),
-                seller_id=str(candidate["seller_id"]),
-                # Scoring components
-                similarity=round(similarity, 4),
-                ranker_score=round(ranker_score, 4),
-                relevance_score=round(relevance_score, 4),
-                # ESCI classification
-                relevance_label=label,
-                relevance_confidence=round(classification["confidence"], 4),
-                exact_prob=round(exact_prob, 4),
-                substitute_prob=round(classification.get("substitute_prob", 0.0), 4),
-                complement_prob=round(classification.get("complement_prob", 0.0), 4),
-                irrelevant_prob=round(irrelevant_prob, 4),
-            ))
-
-        # =================================================================
-        #  STAGE 6: Final Ranked Results
-        #  Sort by relevance_score (highest first), limit to max_results
-        # =================================================================
-        scored_results.sort(key=lambda r: r.relevance_score, reverse=True)
-        final_results = scored_results[:max_results]
-
-        print(f"[Search] Final results: {len(final_results)} (after ranker filtering)")
+        final_results = sorted(seen.values(), key=lambda r: r.relevance_score, reverse=True)[:max_results]
+        print(f"[Search] Final results: {len(final_results)} (from {len(rewritten.search_groups)} group(s))")
 
         return SearchResponse(
             query=q,
             total_results=len(final_results),
             results=final_results,
             message="" if final_results else "No products found matching your query.",
-            rewritten_query=search_text,
+            rewritten_query=rewritten.search_text,
             detected_intents=rewritten.intents,
             extracted_slots=rewritten.slots,
-            applied_filters=filters,
+            applied_filters=rewritten.search_groups[0].filters if len(rewritten.search_groups) == 1 else {},
+            search_groups=[{"search_text": g.search_text, "filters": g.filters} for g in rewritten.search_groups],
         )
 
     except HTTPException:
@@ -395,56 +310,51 @@ async def search_products(
 
 async def _fallback_text_search(
     original_query: str,
-    search_text: str,
-    filters: dict,
-    max_results: int,
     rewritten,
+    max_results: int,
 ) -> SearchResponse:
     """Simple ILIKE text search fallback when ML models are not available."""
     sb = get_supabase()
+    all_results = []
 
-    qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
+    for group in rewritten.search_groups:
+        qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
+        qb = qb.or_(f"title.ilike.%{group.search_text}%,description.ilike.%{group.search_text}%")
+        if "price_max" in group.filters:
+            qb = qb.lte("price", group.filters["price_max"])
+        if "price_min" in group.filters:
+            qb = qb.gte("price", group.filters["price_min"])
+        response = qb.limit(max_results).execute()
 
-    # Apply text search
-    qb = qb.or_(f"title.ilike.%{search_text}%,description.ilike.%{search_text}%")
+        for p in response.data:
+            all_results.append(SearchResultItem(
+                id=str(p["id"]), title=p["title"],
+                description=p.get("description") or "",
+                price=float(p["price"]),
+                image_url=_first_image(p.get("images")),
+                seller_id=str(p["seller_id"]),
+                similarity=1.0, ranker_score=0.0, relevance_score=1.0,
+                relevance_label="Exact", relevance_confidence=1.0,
+                exact_prob=1.0, substitute_prob=0.0, complement_prob=0.0, irrelevant_prob=0.0,
+            ))
 
-    # Apply price filters
-    if "price_max" in filters:
-        qb = qb.lte("price", filters["price_max"])
-    if "price_min" in filters:
-        qb = qb.gte("price", filters["price_min"])
-
-    response = qb.limit(max_results).execute()
-
-    results = []
-    for p in response.data:
-        results.append(SearchResultItem(
-            id=str(p["id"]),
-            title=p["title"],
-            description=p.get("description") or "",
-            price=float(p["price"]),
-            image_url=_first_image(p.get("images")),
-            seller_id=str(p["seller_id"]),
-            similarity=1.0,
-            ranker_score=0.0,
-            relevance_score=1.0,
-            relevance_label="Exact",
-            relevance_confidence=1.0,
-            exact_prob=1.0,
-            substitute_prob=0.0,
-            complement_prob=0.0,
-            irrelevant_prob=0.0,
-        ))
+    # Deduplicate
+    seen = {}
+    for r in all_results:
+        if r.id not in seen or r.relevance_score > seen[r.id].relevance_score:
+            seen[r.id] = r
+    results = sorted(seen.values(), key=lambda r: r.relevance_score, reverse=True)[:max_results]
 
     return SearchResponse(
         query=original_query,
         total_results=len(results),
         results=results,
         message="" if results else "No products found.",
-        rewritten_query=search_text,
+        rewritten_query=rewritten.search_text,
         detected_intents=rewritten.intents,
         extracted_slots=rewritten.slots,
-        applied_filters=filters,
+        applied_filters=rewritten.search_groups[0].filters if len(rewritten.search_groups) == 1 else {},
+        search_groups=[{"search_text": g.search_text, "filters": g.filters} for g in rewritten.search_groups],
     )
 
 

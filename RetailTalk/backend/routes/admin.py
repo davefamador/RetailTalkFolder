@@ -223,6 +223,35 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
     return {"message": f"User {'banned' if req.is_banned else 'unbanned'} successfully"}
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
+    """Permanently delete a user and all their associated data."""
+    sb = get_supabase()
+
+    target = sb.table("users").select("role, id").eq("id", user_id).execute()
+    if not target.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.data[0].get("role") == "admin":
+        raise HTTPException(status_code=400, detail="Cannot delete an admin account")
+    if user_id == admin["sub"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    # Delete only non-financial personal data.
+    # Financial records (product_transactions, delivery_earnings, salary_payments,
+    # admin_withdrawals, products) are preserved — their user FKs are set to NULL
+    # automatically via ON DELETE SET NULL (migration_v10).
+    sb.table("wishlist_items").delete().eq("buyer_id", user_id).execute()
+    sb.table("cart_items").delete().eq("buyer_id", user_id).execute()
+    sb.table("stored_value").delete().eq("user_id", user_id).execute()
+    sb.table("user_balances").delete().eq("user_id", user_id).execute()
+    sb.table("user_contacts").delete().eq("user_id", user_id).execute()
+
+    # Finally delete the user — DB cascades/nullifies all remaining FK references
+    sb.table("users").delete().eq("id", user_id).execute()
+
+    return {"message": "User permanently deleted"}
+
+
 @router.get("/transactions", response_model=list[TransactionDetail])
 async def list_transactions(
     search: str = Query("", description="Search by buyer or seller name"),
@@ -613,18 +642,31 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
         elif isinstance(u["user_contacts"], dict):
             contact = u["user_contacts"].get("contact_number", "")
 
-    # 2. Transactions
-    bought = sb.table("product_transactions").select("*, products(title)").eq("buyer_id", user_id).order("created_at", desc=True).limit(50).execute()
-    sold = sb.table("product_transactions").select("*, products(title)").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
-    delivered = sb.table("product_transactions").select("*, products(title)").eq("delivery_user_id", user_id).order("created_at", desc=True).limit(50).execute()
+    # 2. Transactions — for sellers, also fetch by assigned_staff_id for full coverage
+    bought = sb.table("product_transactions").select("*, products(title, images)").eq("buyer_id", user_id).order("created_at", desc=True).limit(50).execute()
+    sold = sb.table("product_transactions").select("*, products(title, images)").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
+    delivered = sb.table("product_transactions").select("*, products(title, images)").eq("delivery_user_id", user_id).order("created_at", desc=True).limit(50).execute()
+
+    # For sellers, also fetch transactions assigned to them
+    assigned_txns_data = []
+    if u["role"] == "seller":
+        try:
+            assigned = sb.table("product_transactions").select("*, products(title, images)").eq(
+                "assigned_staff_id", user_id
+            ).order("created_at", desc=True).limit(100).execute()
+            assigned_txns_data = assigned.data or []
+        except Exception:
+            assigned_txns_data = []
 
     # Merge and deduplicate
-    all_txns = (bought.data or []) + (sold.data or []) + (delivered.data or [])
+    all_txns = (bought.data or []) + (sold.data or []) + (delivered.data or []) + assigned_txns_data
     seen = set()
     transactions = []
+    raw_txns = []  # Keep raw data for seller infographics
     for t in all_txns:
         if t["id"] not in seen:
             seen.add(t["id"])
+            raw_txns.append(t)
             transactions.append({
                 "id": t["id"],
                 "product_title": (t.get("products") or {}).get("title", ""),
@@ -635,11 +677,29 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
                 "created_at": t["created_at"],
             })
     transactions.sort(key=lambda x: x["created_at"], reverse=True)
+    raw_txns.sort(key=lambda x: x["created_at"], reverse=True)
 
     # 3. Report: daily/weekly/monthly breakdown
     daily_data = {}
     monthly_data = {}
-    for t in transactions:
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    completed_statuses = ("completed", "delivered")
+
+    # Seller-specific counters
+    completed_count = 0
+    total_items = 0
+    today_tasks = 0
+    walkin_items_today = 0
+    delivery_items_today = 0
+    products_handled = {}
+
+    for t in raw_txns:
+        amt = float(t["amount"])
+        qty = int(t.get("quantity", 1))
+        status = t["status"]
+        purchase_type = t.get("purchase_type", "delivery")
+        is_completed = status in completed_statuses
+
         try:
             dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
             day_key = dt.strftime("%Y-%m-%d")
@@ -649,17 +709,49 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
             month_key = t["created_at"][:7]
 
         if day_key not in daily_data:
-            daily_data[day_key] = {"amount": 0, "count": 0}
-        daily_data[day_key]["amount"] += t["amount"]
+            daily_data[day_key] = {"amount": 0, "count": 0, "walkin_items": 0, "delivery_items": 0}
+        daily_data[day_key]["amount"] += amt
         daily_data[day_key]["count"] += 1
+        if is_completed:
+            if purchase_type == "walkin":
+                daily_data[day_key]["walkin_items"] += qty
+            else:
+                daily_data[day_key]["delivery_items"] += qty
 
         if month_key not in monthly_data:
             monthly_data[month_key] = {"amount": 0, "count": 0}
-        monthly_data[month_key]["amount"] += t["amount"]
+        monthly_data[month_key]["amount"] += amt
         monthly_data[month_key]["count"] += 1
 
+        # Seller-specific metrics
+        if u["role"] == "seller" and is_completed:
+            completed_count += 1
+            total_items += qty
+            if day_key == today_str:
+                today_tasks += 1
+                if purchase_type == "walkin":
+                    walkin_items_today += qty
+                else:
+                    delivery_items_today += qty
+
+            # Track recent products handled
+            pid = t["product_id"]
+            prod_info = t.get("products") or {}
+            if pid not in products_handled:
+                products_handled[pid] = {
+                    "product_id": pid,
+                    "product_title": prod_info.get("title", ""),
+                    "product_image": ((prod_info.get("images") or [""])[0]) if prod_info.get("images") else "",
+                    "quantity_processed": 0,
+                    "last_handled": t["created_at"],
+                    "purchase_type": purchase_type,
+                }
+            products_handled[pid]["quantity_processed"] += qty
+
     daily = sorted(
-        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in daily_data.items()],
+        [{"date": k, "amount": round(v["amount"], 2), "count": v["count"],
+          "walkin_items": v["walkin_items"], "delivery_items": v["delivery_items"]}
+         for k, v in daily_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:30]
 
@@ -667,6 +759,10 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
         [{"date": k, "amount": round(v["amount"], 2), "count": v["count"]} for k, v in monthly_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:12]
+
+    recent_products_handled = sorted(
+        products_handled.values(), key=lambda x: x["last_handled"], reverse=True
+    )[:20] if u["role"] == "seller" else []
 
     # 4. SVF history
     svf = sb.table("stored_value").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
@@ -702,11 +798,17 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
         "report": {
             "total_transactions": len(transactions),
             "total_amount": round(sum(t["amount"] for t in transactions), 2),
+            "total_completed_tasks": completed_count,
+            "total_items_processed": total_items,
+            "tasks_completed_today": today_tasks,
+            "walkin_items_today": walkin_items_today,
+            "delivery_items_today": delivery_items_today,
             "daily": daily,
             "monthly": monthly,
         },
         "transactions": transactions[:50],
         "seller_products": seller_products,
+        "recent_products_handled": recent_products_handled,
         "svf_history": [
             {
                 "id": s["id"],
@@ -1162,6 +1264,78 @@ async def update_department(dept_id: str, req: DepartmentUpdateRequest, admin: d
     return {"message": "Department updated"}
 
 
+# --- Admin Create Product for Department ---
+
+class AdminCreateProductRequest(BaseModel):
+    title: str
+    description: str = ""
+    price: float
+    images: list = []
+
+
+@router.post("/departments/{dept_id}/products")
+async def admin_create_product_for_dept(
+    dept_id: str, req: AdminCreateProductRequest, admin: dict = Depends(require_admin)
+):
+    """Admin creates a product for a specific department/store with stock=0 and auto-approved."""
+    from models.bert_service import bert_service
+    from database import store_product_embedding
+
+    sb = get_supabase()
+
+    # Verify department exists
+    dept = sb.table("departments").select("id, manager_id, name").eq("id", dept_id).execute()
+    if not dept.data:
+        raise HTTPException(status_code=404, detail="Department not found")
+
+    # Validate fields
+    if not req.title or not req.title.strip():
+        raise HTTPException(status_code=400, detail="Product title is required")
+    if req.price <= 0:
+        raise HTTPException(status_code=400, detail="Price must be greater than 0")
+    if not req.images or len(req.images) == 0:
+        raise HTTPException(status_code=400, detail="At least one product image is required")
+    if len(req.images) > 5:
+        raise HTTPException(status_code=400, detail="Maximum 5 images allowed")
+
+    # Admin is the seller_id (owner)
+    admin_id = admin["sub"]
+
+    result = sb.table("products").insert({
+        "seller_id": admin_id,
+        "title": req.title.strip(),
+        "description": (req.description or "").strip(),
+        "price": req.price,
+        "stock": 0,
+        "images": req.images,
+        "status": "approved",
+    }).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create product")
+
+    product = result.data[0]
+
+    # Compute BERT embedding
+    try:
+        if bert_service._loaded:
+            embedding = bert_service.compute_embedding(req.title)
+            store_product_embedding(product["id"], embedding)
+    except Exception as e:
+        print(f"[Admin] Warning: Failed to compute embedding: {e}")
+
+    return {
+        "message": f"Product created for {dept.data[0]['name']}",
+        "product": {
+            "id": product["id"],
+            "title": product["title"],
+            "price": float(product["price"]),
+            "stock": 0,
+            "status": "approved",
+        },
+    }
+
+
 # --- Manager Registration ---
 
 class ManagerRegisterRequest(BaseModel):
@@ -1592,3 +1766,454 @@ async def admin_get_restock_requests(
         })
 
     return results
+
+
+# --- Salary Management ---
+
+class SetSalaryRequest(BaseModel):
+    salary: float
+
+
+class PayIndividualRequest(BaseModel):
+    recipient_id: str
+    amount: float
+
+
+class PayGroupRequest(BaseModel):
+    amount_per_person: Optional[float] = None  # If None, uses each person's fixed salary
+
+
+@router.get("/salaries")
+async def admin_get_salaries(admin: dict = Depends(require_admin)):
+    """Get salary overview: all departments with managers, staff, their salaries, and payment history."""
+    sb = get_supabase()
+    admin_id = admin["sub"]
+
+    # Admin balance
+    admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+    admin_balance = float(admin_bal.data[0]["balance"]) if admin_bal.data else 0.0
+
+    # Get all departments
+    depts = sb.table("departments").select("id, name, manager_id").execute()
+    dept_list = depts.data or []
+
+    # Get all managers and staff (sellers)
+    managers = sb.table("users").select("id, full_name, email, role, department_id, salary").eq("role", "manager").execute()
+    staff = sb.table("users").select("id, full_name, email, role, department_id, salary").eq("role", "seller").execute()
+
+    manager_map = {}
+    for m in (managers.data or []):
+        manager_map[m["id"]] = m
+
+    # Build per-department data
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+
+    # Get salary payments for current month
+    payments_this_month = sb.table("salary_payments").select("*").eq("payment_month", current_month).order("created_at", desc=True).execute()
+    payments_data = payments_this_month.data or []
+
+    # Build paid amounts per recipient this month
+    paid_this_month = {}
+    for p in payments_data:
+        rid = p["recipient_id"]
+        paid_this_month[rid] = paid_this_month.get(rid, 0) + float(p["amount"])
+
+    # Build department list
+    departments_result = []
+    total_salaries = 0.0
+
+    for dept in dept_list:
+        dept_managers = []
+        dept_staff = []
+
+        # Find manager for this dept
+        if dept.get("manager_id") and dept["manager_id"] in manager_map:
+            mgr = manager_map[dept["manager_id"]]
+            salary_val = float(mgr.get("salary", 0))
+            paid_val = paid_this_month.get(mgr["id"], 0)
+            dept_managers.append({
+                "id": mgr["id"],
+                "full_name": mgr["full_name"],
+                "email": mgr["email"],
+                "role": "manager",
+                "salary": salary_val,
+                "paid_this_month": paid_val,
+                "remaining": max(salary_val - paid_val, 0),
+            })
+            total_salaries += max(salary_val - paid_val, 0)
+
+        # Find staff for this dept
+        for s in (staff.data or []):
+            if s.get("department_id") == dept["id"]:
+                salary_val = float(s.get("salary", 0))
+                paid_val = paid_this_month.get(s["id"], 0)
+                dept_staff.append({
+                    "id": s["id"],
+                    "full_name": s["full_name"],
+                    "email": s["email"],
+                    "role": "seller",
+                    "salary": salary_val,
+                    "paid_this_month": paid_val,
+                    "remaining": max(salary_val - paid_val, 0),
+                })
+                total_salaries += max(salary_val - paid_val, 0)
+
+        dept_total = sum(m["remaining"] for m in dept_managers) + sum(s["remaining"] for s in dept_staff)
+
+        departments_result.append({
+            "id": dept["id"],
+            "name": dept["name"],
+            "managers": dept_managers,
+            "staff": dept_staff,
+            "total_remaining": dept_total,
+        })
+
+    # Next pay date: 1st of next month
+    if now.month == 12:
+        next_pay = datetime(now.year + 1, 1, 1)
+    else:
+        next_pay = datetime(now.year, now.month + 1, 1)
+
+    # Recent payment history (last 50)
+    recent_payments = sb.table("salary_payments").select("*").order("created_at", desc=True).limit(50).execute()
+    # Get recipient names
+    recipient_ids = set(p["recipient_id"] for p in (recent_payments.data or []))
+    recipient_names = {}
+    if recipient_ids:
+        rn = sb.table("users").select("id, full_name").in_("id", list(recipient_ids)).execute()
+        recipient_names = {u["id"]: u["full_name"] for u in (rn.data or [])}
+
+    payment_history = []
+    for p in (recent_payments.data or []):
+        payment_history.append({
+            "id": p["id"],
+            "recipient_id": p["recipient_id"],
+            "recipient_name": recipient_names.get(p["recipient_id"], "Unknown"),
+            "amount": float(p["amount"]),
+            "payment_month": p["payment_month"],
+            "notes": p.get("notes", ""),
+            "created_at": p["created_at"],
+        })
+
+    return {
+        "admin_balance": admin_balance,
+        "total_salaries_remaining": round(total_salaries, 2),
+        "current_month": current_month,
+        "next_pay_date": next_pay.strftime("%B %d, %Y"),
+        "departments": departments_result,
+        "payment_history": payment_history,
+    }
+
+
+@router.put("/salaries/set/{user_id}")
+async def admin_set_salary(user_id: str, req: SetSalaryRequest, admin: dict = Depends(require_admin)):
+    """Set or update the fixed salary for a staff member or manager."""
+    if req.salary < 0:
+        raise HTTPException(status_code=400, detail="Salary cannot be negative")
+
+    sb = get_supabase()
+
+    # Verify user exists and is staff or manager
+    user = sb.table("users").select("id, role").eq("id", user_id).execute()
+    if not user.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.data[0]["role"] not in ("seller", "manager"):
+        raise HTTPException(status_code=400, detail="Can only set salary for staff or managers")
+
+    sb.table("users").update({"salary": req.salary}).eq("id", user_id).execute()
+
+    return {"message": f"Salary updated to PHP {req.salary:.2f}"}
+
+
+@router.post("/salaries/pay-all")
+async def admin_pay_all_salaries(admin: dict = Depends(require_admin)):
+    """Pay all staff and managers their remaining salary for the current month."""
+    sb = get_supabase()
+    admin_id = admin["sub"]
+
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+
+    # Get admin balance
+    admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+    if not admin_bal.data:
+        raise HTTPException(status_code=400, detail="Admin balance not found")
+    admin_balance = float(admin_bal.data[0]["balance"])
+
+    # Get all managers and staff with salary > 0
+    recipients = sb.table("users").select("id, full_name, role, department_id, salary").in_(
+        "role", ["seller", "manager"]
+    ).execute()
+
+    if not recipients.data:
+        raise HTTPException(status_code=400, detail="No staff or managers found")
+
+    # Get payments already made this month
+    payments = sb.table("salary_payments").select("recipient_id, amount").eq("payment_month", current_month).execute()
+    paid_map = {}
+    for p in (payments.data or []):
+        rid = p["recipient_id"]
+        paid_map[rid] = paid_map.get(rid, 0) + float(p["amount"])
+
+    # Calculate remaining for each
+    to_pay = []
+    total_needed = 0
+    for r in recipients.data:
+        salary = float(r.get("salary", 0))
+        if salary <= 0:
+            continue
+        paid = paid_map.get(r["id"], 0)
+        remaining = max(salary - paid, 0)
+        if remaining > 0:
+            to_pay.append({"user": r, "amount": remaining})
+            total_needed += remaining
+
+    if not to_pay:
+        raise HTTPException(status_code=400, detail="No remaining salaries to pay this month")
+
+    if admin_balance < total_needed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Need PHP {total_needed:.2f}, have PHP {admin_balance:.2f}"
+        )
+
+    # Deduct from admin
+    new_admin_balance = admin_balance - total_needed
+    sb.table("user_balances").update({"balance": new_admin_balance}).eq("user_id", admin_id).execute()
+
+    # Credit each recipient and record payments
+    paid_count = 0
+    for item in to_pay:
+        user = item["user"]
+        amount = item["amount"]
+
+        # Credit recipient balance
+        rec_bal = sb.table("user_balances").select("balance").eq("user_id", user["id"]).execute()
+        if rec_bal.data:
+            new_bal = float(rec_bal.data[0]["balance"]) + amount
+            sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user["id"]).execute()
+        else:
+            sb.table("user_balances").insert({"user_id": user["id"], "balance": amount}).execute()
+
+        # Record salary payment
+        sb.table("salary_payments").insert({
+            "admin_id": admin_id,
+            "recipient_id": user["id"],
+            "department_id": user.get("department_id"),
+            "amount": amount,
+            "payment_month": current_month,
+            "notes": "Bulk pay all",
+        }).execute()
+
+        # Record in SVF history for recipient
+        sb.table("stored_value").insert({
+            "user_id": user["id"],
+            "transaction_type": "deposit",
+            "amount": amount,
+        }).execute()
+
+        paid_count += 1
+
+    # Record admin withdrawal in SVF
+    sb.table("stored_value").insert({
+        "user_id": admin_id,
+        "transaction_type": "withdrawal",
+        "amount": total_needed,
+    }).execute()
+
+    return {
+        "message": f"Successfully paid {paid_count} people a total of PHP {total_needed:.2f}",
+        "total_paid": total_needed,
+        "recipients_count": paid_count,
+        "new_admin_balance": new_admin_balance,
+    }
+
+
+@router.post("/salaries/pay-store/{department_id}")
+async def admin_pay_store_salaries(department_id: str, admin: dict = Depends(require_admin)):
+    """Pay all remaining salaries for a specific store/department."""
+    sb = get_supabase()
+    admin_id = admin["sub"]
+
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+
+    # Verify department exists
+    dept = sb.table("departments").select("id, name, manager_id").eq("id", department_id).execute()
+    if not dept.data:
+        raise HTTPException(status_code=404, detail="Department not found")
+
+    # Get admin balance
+    admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+    if not admin_bal.data:
+        raise HTTPException(status_code=400, detail="Admin balance not found")
+    admin_balance = float(admin_bal.data[0]["balance"])
+
+    # Get staff in this department
+    staff = sb.table("users").select("id, full_name, role, department_id, salary").eq(
+        "department_id", department_id
+    ).in_("role", ["seller", "manager"]).execute()
+
+    # Also include manager via departments.manager_id
+    manager_id = dept.data[0].get("manager_id")
+    all_recipients = list(staff.data or [])
+    if manager_id:
+        mgr = sb.table("users").select("id, full_name, role, department_id, salary").eq("id", manager_id).execute()
+        if mgr.data:
+            existing_ids = {r["id"] for r in all_recipients}
+            if mgr.data[0]["id"] not in existing_ids:
+                all_recipients.append(mgr.data[0])
+
+    if not all_recipients:
+        raise HTTPException(status_code=400, detail="No staff or managers in this department")
+
+    # Get existing payments this month
+    recipient_ids = [r["id"] for r in all_recipients]
+    payments = sb.table("salary_payments").select("recipient_id, amount").eq(
+        "payment_month", current_month
+    ).in_("recipient_id", recipient_ids).execute()
+
+    paid_map = {}
+    for p in (payments.data or []):
+        rid = p["recipient_id"]
+        paid_map[rid] = paid_map.get(rid, 0) + float(p["amount"])
+
+    to_pay = []
+    total_needed = 0
+    for r in all_recipients:
+        salary = float(r.get("salary", 0))
+        if salary <= 0:
+            continue
+        paid = paid_map.get(r["id"], 0)
+        remaining = max(salary - paid, 0)
+        if remaining > 0:
+            to_pay.append({"user": r, "amount": remaining})
+            total_needed += remaining
+
+    if not to_pay:
+        raise HTTPException(status_code=400, detail="No remaining salaries to pay in this department")
+
+    if admin_balance < total_needed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Need PHP {total_needed:.2f}, have PHP {admin_balance:.2f}"
+        )
+
+    # Deduct from admin
+    new_admin_balance = admin_balance - total_needed
+    sb.table("user_balances").update({"balance": new_admin_balance}).eq("user_id", admin_id).execute()
+
+    paid_count = 0
+    for item in to_pay:
+        user = item["user"]
+        amount = item["amount"]
+
+        rec_bal = sb.table("user_balances").select("balance").eq("user_id", user["id"]).execute()
+        if rec_bal.data:
+            new_bal = float(rec_bal.data[0]["balance"]) + amount
+            sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user["id"]).execute()
+        else:
+            sb.table("user_balances").insert({"user_id": user["id"], "balance": amount}).execute()
+
+        sb.table("salary_payments").insert({
+            "admin_id": admin_id,
+            "recipient_id": user["id"],
+            "department_id": department_id,
+            "amount": amount,
+            "payment_month": current_month,
+            "notes": f"Store pay: {dept.data[0]['name']}",
+        }).execute()
+
+        sb.table("stored_value").insert({
+            "user_id": user["id"],
+            "transaction_type": "deposit",
+            "amount": amount,
+        }).execute()
+
+        paid_count += 1
+
+    sb.table("stored_value").insert({
+        "user_id": admin_id,
+        "transaction_type": "withdrawal",
+        "amount": total_needed,
+    }).execute()
+
+    return {
+        "message": f"Paid {paid_count} people in {dept.data[0]['name']} — PHP {total_needed:.2f}",
+        "total_paid": total_needed,
+        "recipients_count": paid_count,
+        "new_admin_balance": new_admin_balance,
+    }
+
+
+@router.post("/salaries/pay-individual")
+async def admin_pay_individual(req: PayIndividualRequest, admin: dict = Depends(require_admin)):
+    """Pay a specific amount to a specific staff member or manager."""
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+    sb = get_supabase()
+    admin_id = admin["sub"]
+
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+
+    # Verify recipient
+    recipient = sb.table("users").select("id, full_name, role, department_id, salary").eq("id", req.recipient_id).execute()
+    if not recipient.data:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    if recipient.data[0]["role"] not in ("seller", "manager"):
+        raise HTTPException(status_code=400, detail="Can only pay staff or managers")
+
+    # Get admin balance
+    admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+    if not admin_bal.data:
+        raise HTTPException(status_code=400, detail="Admin balance not found")
+    admin_balance = float(admin_bal.data[0]["balance"])
+
+    if admin_balance < req.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient balance. Need PHP {req.amount:.2f}, have PHP {admin_balance:.2f}"
+        )
+
+    # Deduct from admin
+    new_admin_balance = admin_balance - req.amount
+    sb.table("user_balances").update({"balance": new_admin_balance}).eq("user_id", admin_id).execute()
+
+    # Credit recipient
+    rec_bal = sb.table("user_balances").select("balance").eq("user_id", req.recipient_id).execute()
+    if rec_bal.data:
+        new_bal = float(rec_bal.data[0]["balance"]) + req.amount
+        sb.table("user_balances").update({"balance": new_bal}).eq("user_id", req.recipient_id).execute()
+    else:
+        sb.table("user_balances").insert({"user_id": req.recipient_id, "balance": req.amount}).execute()
+
+    # Record payment
+    sb.table("salary_payments").insert({
+        "admin_id": admin_id,
+        "recipient_id": req.recipient_id,
+        "department_id": recipient.data[0].get("department_id"),
+        "amount": req.amount,
+        "payment_month": current_month,
+        "notes": f"Individual payment to {recipient.data[0]['full_name']}",
+    }).execute()
+
+    # SVF records
+    sb.table("stored_value").insert({
+        "user_id": req.recipient_id,
+        "transaction_type": "deposit",
+        "amount": req.amount,
+    }).execute()
+
+    sb.table("stored_value").insert({
+        "user_id": admin_id,
+        "transaction_type": "withdrawal",
+        "amount": req.amount,
+    }).execute()
+
+    return {
+        "message": f"Paid PHP {req.amount:.2f} to {recipient.data[0]['full_name']}",
+        "new_admin_balance": new_admin_balance,
+    }

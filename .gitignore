@@ -16,7 +16,7 @@ build/
 venv/
 .venv/
 env/
-
+supabase/
 # ========================
 # Models & Checkpoints (large binary files)
 # ========================
@@ -37,6 +37,7 @@ implementation plan/
 *.parquet
 *.npy
 *.xlsx
+
 
 # ========================
 # Prompt files

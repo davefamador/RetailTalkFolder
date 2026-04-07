@@ -11,10 +11,11 @@ import {
     getManagerDeliveryOrders, managerUpdateDeliveryOrderStatus,
     getManagerWalkinOrders, managerUpdateWalkinOrderStatus,
     managerRequestProductRemoval, getSellerWishlistReport,
+    managerReassignOrder, getSalaryHistory, getBalance, withdraw,
 } from '../../../lib/api';
 import {
     LayoutDashboard, Users, Package, ShoppingCart, Truck, Tag,
-    CreditCard, TrendingUp, LogOut, Trash2, Heart,
+    CreditCard, TrendingUp, LogOut, Trash2, Heart, DollarSign,
 } from 'lucide-react';
 import ReportsContent from '../../components/ReportsContent';
 
@@ -96,6 +97,105 @@ function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height 
             ctx.restore();
         });
     }, [data, labelKey, valueKey, color, height]);
+
+    return (
+        <div>
+            <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>{title}</h4>
+            {(!data || data.length === 0) ? (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No data yet</p>
+            ) : (
+                <canvas ref={canvasRef} style={{ width: '100%', height }} />
+            )}
+        </div>
+    );
+}
+
+// ── Dual Line Chart Component ────────────────────────────
+function DualLineChart({ data, labelKey, valueKey1, valueKey2, color1 = '#10b981', color2 = '#3b82f6', label1 = 'Line 1', label2 = 'Line 2', title, height = 220 }) {
+    const canvasRef = useRef(null);
+
+    useEffect(() => {
+        if (!canvasRef.current || !data || data.length === 0) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = canvas.parentElement.clientWidth;
+        const h = canvas.height = height;
+        ctx.clearRect(0, 0, w, h);
+
+        const padding = { top: 24, right: 20, bottom: 50, left: 50 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+        const maxVal = Math.max(
+            ...data.map(d => d[valueKey1] || 0),
+            ...data.map(d => d[valueKey2] || 0),
+            1
+        );
+
+        // Grid lines
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartH * i / 4);
+            ctx.strokeStyle = 'rgba(136,136,160,0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+            ctx.fillStyle = 'rgba(136,136,160,0.5)';
+            ctx.font = '11px Inter, system-ui';
+            ctx.textAlign = 'right';
+            ctx.fillText((maxVal * (4 - i) / 4).toFixed(0), padding.left - 8, y + 4);
+        }
+
+        const stepX = data.length > 1 ? chartW / (data.length - 1) : chartW;
+
+        // Draw line helper
+        const drawLine = (key, color) => {
+            const points = data.map((d, i) => ({
+                x: padding.left + i * stepX,
+                y: padding.top + chartH - ((d[key] || 0) / maxVal) * chartH,
+            }));
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+            // Dots
+            points.forEach(p => {
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
+            });
+        };
+
+        drawLine(valueKey1, color1);
+        drawLine(valueKey2, color2);
+
+        // X labels
+        ctx.fillStyle = 'rgba(136,136,160,0.6)';
+        ctx.font = '10px Inter, system-ui';
+        ctx.textAlign = 'center';
+        data.forEach((d, i) => {
+            const x = padding.left + i * stepX;
+            const label = d[labelKey].length > 8 ? d[labelKey].slice(-5) : d[labelKey];
+            ctx.save();
+            ctx.translate(x, h - 5);
+            ctx.rotate(-0.4);
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+        });
+
+        // Legend
+        const legendY = 8;
+        const legendX = w - padding.right - 160;
+        [{ color: color1, label: label1 }, { color: color2, label: label2 }].forEach((item, i) => {
+            const x = legendX + i * 80;
+            ctx.fillStyle = item.color;
+            ctx.beginPath(); ctx.arc(x, legendY, 4, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(136,136,160,0.7)';
+            ctx.font = '10px Inter, system-ui';
+            ctx.textAlign = 'left';
+            ctx.fillText(item.label, x + 8, legendY + 3);
+        });
+    }, [data, labelKey, valueKey1, valueKey2, color1, color2, label1, label2, height]);
 
     return (
         <div>
@@ -220,12 +320,24 @@ export default function ManagerDashboard() {
     const [wishlistReport, setWishlistReport] = useState(null);
     const [wishlistLoading, setWishlistLoading] = useState(false);
 
+    // Reassign order
+    const [reassignOrderId, setReassignOrderId] = useState(null);
+    const [reassignLoading, setReassignLoading] = useState(false);
+
     // Restock approve/reject inline forms
     const [approveId, setApproveId] = useState(null);
     const [approveData, setApproveData] = useState({ approved_quantity: '', manager_notes: '' });
     const [rejectId, setRejectId] = useState(null);
     const [rejectNotes, setRejectNotes] = useState('');
     const [restockActionLoading, setRestockActionLoading] = useState(false);
+
+    // Salary state
+    const [salaryInfo, setSalaryInfo] = useState(null);
+    const [salaryLoading, setSalaryLoading] = useState(false);
+    const [mgrBalance, setMgrBalance] = useState(0);
+    const [withdrawAmt, setWithdrawAmt] = useState('');
+    const [withdrawing, setWithdrawing] = useState(false);
+    const [salaryMsg, setSalaryMsg] = useState({ type: '', text: '' });
 
     useEffect(() => {
         const stored = getStoredUser();
@@ -244,7 +356,7 @@ export default function ManagerDashboard() {
         finally { setDashLoading(false); }
     };
     const loadStaff = async (search = '') => {
-        try { setStaff(await managerGetStaff(search)); } catch (e) { console.error(e); }
+        try { setStaff(await managerGetStaff(search)); } catch (e) { console.error(e); setMessage({ type: 'error', text: 'Failed to load staff: ' + e.message }); }
     };
     const loadRestockRequests = async (status = 'pending_manager') => {
         try { setRestockRequests(await managerGetRestockRequests(status)); } catch (e) { console.error(e); }
@@ -276,6 +388,28 @@ export default function ManagerDashboard() {
         try { setWishlistReport(await getSellerWishlistReport()); } catch (e) { console.error(e); }
         finally { setWishlistLoading(false); }
     };
+    const loadSalaryInfo = async () => {
+        setSalaryLoading(true);
+        try {
+            const [sal, bal] = await Promise.all([getSalaryHistory(), getBalance()]);
+            setSalaryInfo(sal);
+            setMgrBalance(parseFloat(bal.balance) || 0);
+        } catch (e) { console.error(e); }
+        finally { setSalaryLoading(false); }
+    };
+    const handleSalaryWithdraw = async () => {
+        const amt = parseFloat(withdrawAmt);
+        if (!amt || amt <= 0) { setSalaryMsg({ type: 'error', text: 'Enter a valid amount' }); return; }
+        setWithdrawing(true);
+        try {
+            const res = await withdraw(amt);
+            setMgrBalance(res.balance || 0);
+            setWithdrawAmt('');
+            setSalaryMsg({ type: 'success', text: `Successfully withdrew PHP ${amt.toFixed(2)}` });
+            loadSalaryInfo();
+        } catch (e) { setSalaryMsg({ type: 'error', text: e.message }); }
+        finally { setWithdrawing(false); }
+    };
     const handleMgrWalkinStatusUpdate = async (txnId, status) => {
         setWalkinOrderLoading(true);
         try {
@@ -285,6 +419,18 @@ export default function ManagerDashboard() {
             if (status === 'completed') loadDashboard();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
         finally { setWalkinOrderLoading(false); }
+    };
+
+    const handleReassignOrder = async (orderId, staffId, isWalkin) => {
+        setReassignLoading(true);
+        try {
+            await managerReassignOrder(orderId, staffId);
+            setMessage({ type: 'success', text: 'Order reassigned successfully' });
+            setReassignOrderId(null);
+            if (isWalkin) loadMgrWalkinOrders();
+            else loadMgrDeliveryOrders();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setReassignLoading(false); }
     };
 
     const handleRequestRemoval = async (productId) => {
@@ -310,6 +456,7 @@ export default function ManagerDashboard() {
         if (activeTab === 'delivery_orders') loadMgrDeliveryOrders();
         if (activeTab === 'walkin_orders') loadMgrWalkinOrders();
         if (activeTab === 'wishlist') loadWishlistReport();
+        if (activeTab === 'salary') loadSalaryInfo();
     }, [activeTab, authChecked]);
 
     useEffect(() => {
@@ -348,11 +495,11 @@ export default function ManagerDashboard() {
     };
 
     const handleRemoveStaff = async (userId, staffName) => {
-        if (!window.confirm(`Are you sure you want to remove "${staffName}" from your department? They will be unassigned but their account will not be deleted.`)) return;
+        if (!window.confirm(`Permanently delete "${staffName}"? This cannot be undone.`)) return;
         setRemoveStaffLoading(true);
         try {
             await managerRemoveStaff(userId);
-            setMessage({ type: 'success', text: `Staff member "${staffName}" has been removed from the department.` });
+            setMessage({ type: 'success', text: `Staff member "${staffName}" has been permanently deleted.` });
             closeStaffPanel();
             loadStaff(staffSearch);
             loadDashboard();
@@ -455,6 +602,7 @@ export default function ManagerDashboard() {
         { id: 'products', icon: Tag, label: 'Products' },
         { id: 'transactions', icon: CreditCard, label: 'Transactions' },
         { id: 'wishlist', icon: Heart, label: 'Wishlist' },
+        { id: 'salary', icon: DollarSign, label: 'Salary' },
         { id: 'divider' },
         { id: 'reports', icon: TrendingUp, label: 'Reports' },
     ];
@@ -534,6 +682,102 @@ export default function ManagerDashboard() {
 
                 {/* ===== REPORTS TAB (embedded) ===== */}
                 {activeTab === 'reports' && <ReportsContent />}
+
+                {/* ===== SALARY TAB ===== */}
+                {activeTab === 'salary' && (
+                    <div style={{ padding: '32px 24px', maxWidth: 800 }}>
+                        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: 24 }}>My Salary</h2>
+                        {salaryLoading ? (
+                            <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ width: 32, height: 32, margin: '0 auto' }}></div></div>
+                        ) : salaryInfo ? (
+                            <>
+                                {salaryMsg.text && (
+                                    <div className={`alert alert-${salaryMsg.type}`} style={{ marginBottom: 16 }}>{salaryMsg.text}</div>
+                                )}
+                                {/* Summary Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
+                                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Fixed Salary</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#6366f1' }}>PHP {salaryInfo.fixed_salary.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Paid This Month</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>PHP {salaryInfo.paid_this_month.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Remaining</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: salaryInfo.remaining_this_month > 0 ? '#ef4444' : '#10b981' }}>PHP {salaryInfo.remaining_this_month.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Your Balance</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>PHP {mgrBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                </div>
+                                {/* Withdraw Section */}
+                                <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20, marginBottom: 28 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <DollarSign size={18} /> Withdraw Salary
+                                    </h3>
+                                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                        <input type="number" min="0" placeholder="Amount to withdraw"
+                                            value={withdrawAmt} onChange={e => setWithdrawAmt(e.target.value)}
+                                            style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.9rem', fontFamily: 'Inter, sans-serif' }}
+                                        />
+                                        <button onClick={handleSalaryWithdraw} disabled={withdrawing || !withdrawAmt}
+                                            className="btn btn-primary" style={{ padding: '10px 24px', borderRadius: 10, fontSize: '0.88rem' }}>
+                                            {withdrawing ? 'Processing...' : 'Withdraw'}
+                                        </button>
+                                    </div>
+                                </div>
+                                {/* Transaction History */}
+                                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>Transaction History</h3>
+                                {salaryInfo.history.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No transactions yet</div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {salaryInfo.history.map(p => {
+                                            const isDeposit = p.type === 'salary_deposit';
+                                            return (
+                                                <div key={p.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 14, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <div style={{
+                                                            width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            background: isDeposit ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
+                                                        }}>
+                                                            <span style={{ fontSize: '1rem' }}>{isDeposit ? '↓' : '↑'}</span>
+                                                        </div>
+                                                        <div>
+                                                            <p style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 2, color: isDeposit ? '#10b981' : '#ef4444' }}>
+                                                                {isDeposit ? '+' : '-'}PHP {p.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                                            </p>
+                                                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{p.notes || (isDeposit ? 'Salary deposit' : 'Withdrawal')}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right' }}>
+                                                        <span style={{
+                                                            display: 'inline-block', padding: '2px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, marginBottom: 4,
+                                                            background: isDeposit ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
+                                                            color: isDeposit ? '#10b981' : '#ef4444',
+                                                        }}>
+                                                            {isDeposit ? 'Salary' : 'Withdrawal'}
+                                                        </span>
+                                                        {p.payment_month && <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{p.payment_month}</p>}
+                                                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{new Date(p.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                <div style={{ marginTop: 20, padding: 14, borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.15)', textAlign: 'center' }}>
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Total Salary Received (All Time): <strong style={{ color: '#6366f1' }}>PHP {salaryInfo.total_all_time.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p>
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Failed to load salary data</div>
+                        )}
+                    </div>
+                )}
 
                 {/* ===== DASHBOARD TAB ===== */}
                 {activeTab === 'dashboard' && dashLoading && (
@@ -661,7 +905,7 @@ export default function ManagerDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th style={{ width: 100, textAlign: 'center' }}>Action</th>
+                                        <th>Name</th><th>Email</th><th>Status</th><th style={{ textAlign: 'center' }}>Tasks Today</th><th style={{ textAlign: 'center' }}>Items (W/D)</th><th style={{ textAlign: 'center' }}>Total Completed</th><th style={{ width: 100, textAlign: 'center' }}>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -684,8 +928,16 @@ export default function ManagerDashboard() {
                                                     {s.is_banned ? 'Banned' : 'Active'}
                                                 </span>
                                             </td>
-                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                {new Date(s.created_at).toLocaleDateString()}
+                                            <td style={{ textAlign: 'center', fontWeight: 600, fontSize: '0.85rem' }}>
+                                                {s.tasks_completed_today || 0}
+                                            </td>
+                                            <td style={{ textAlign: 'center', fontSize: '0.8rem' }}>
+                                                <span style={{ color: '#10b981', fontWeight: 600 }}>{s.walkin_items_today || 0}</span>
+                                                <span style={{ color: 'var(--text-muted)', margin: '0 2px' }}>/</span>
+                                                <span style={{ color: '#3b82f6', fontWeight: 600 }}>{s.delivery_items_today || 0}</span>
+                                            </td>
+                                            <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', color: 'var(--accent-primary)' }}>
+                                                {s.total_completed_tasks || 0}
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <button
@@ -881,22 +1133,68 @@ export default function ManagerDashboard() {
                                                     <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                                                         Buyer: {order.buyer_name} | Staff: {order.seller_name} | Qty: {order.quantity} | PHP {order.amount.toFixed(2)}
                                                     </p>
+                                                    {order.assigned_staff_name ? (
+                                                        <span style={{
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4,
+                                                            padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                            background: 'rgba(99,102,241,0.1)', color: '#6366f1',
+                                                        }}>Assigned to: {order.assigned_staff_name}</span>
+                                                    ) : (
+                                                        <span style={{
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4,
+                                                            padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                            background: 'rgba(148,163,184,0.1)', color: '#94a3b8',
+                                                        }}>Unassigned</span>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                                                     {new Date(order.created_at).toLocaleString()}
                                                 </span>
-                                                {nextStatus[order.status] && (
-                                                    <button
-                                                        className="btn btn-primary btn-sm"
-                                                        disabled={walkinOrderLoading}
-                                                        onClick={() => handleMgrWalkinStatusUpdate(order.id, nextStatus[order.status])}
-                                                        style={{ fontWeight: 600 }}
-                                                    >
-                                                        {nextLabel[order.status]}
-                                                    </button>
-                                                )}
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                    {manager && manager.role === 'manager' && (
+                                                        reassignOrderId === order.id ? (
+                                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                                                <select
+                                                                    onChange={e => { if (e.target.value) handleReassignOrder(order.id, e.target.value, true); }}
+                                                                    disabled={reassignLoading}
+                                                                    style={{
+                                                                        padding: '4px 8px', borderRadius: 6, fontSize: '0.75rem',
+                                                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                                                        color: 'var(--text-primary)',
+                                                                    }}
+                                                                >
+                                                                    <option value="">Select staff...</option>
+                                                                    {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                                                                </select>
+                                                                <button onClick={() => setReassignOrderId(null)} style={{
+                                                                    padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)',
+                                                                    background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem',
+                                                                }}>Cancel</button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => { setReassignOrderId(order.id); if (staff.length === 0) loadStaff(); }}
+                                                                style={{
+                                                                    padding: '4px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 600,
+                                                                    border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.08)',
+                                                                    color: '#8b5cf6', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                                }}
+                                                            >Reassign</button>
+                                                        )
+                                                    )}
+                                                    {nextStatus[order.status] && (
+                                                        <button
+                                                            className="btn btn-primary btn-sm"
+                                                            disabled={walkinOrderLoading}
+                                                            onClick={() => handleMgrWalkinStatusUpdate(order.id, nextStatus[order.status])}
+                                                            style={{ fontWeight: 600 }}
+                                                        >
+                                                            {nextLabel[order.status]}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -999,22 +1297,68 @@ export default function ManagerDashboard() {
                                                             📍 {order.delivery_address}
                                                         </p>
                                                     )}
+                                                    {order.assigned_staff_name ? (
+                                                        <span style={{
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4,
+                                                            padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                            background: 'rgba(99,102,241,0.1)', color: '#6366f1',
+                                                        }}>Assigned to: {order.assigned_staff_name}</span>
+                                                    ) : (
+                                                        <span style={{
+                                                            display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 4,
+                                                            padding: '2px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                            background: 'rgba(148,163,184,0.1)', color: '#94a3b8',
+                                                        }}>Unassigned</span>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                                                     {new Date(order.created_at).toLocaleString()}
                                                 </span>
-                                                {order.status === 'pending' && (
-                                                    <button
-                                                        className="btn btn-primary btn-sm"
-                                                        disabled={deliveryOrderLoading}
-                                                        onClick={() => handleMgrDeliveryStatusUpdate(order.id)}
-                                                        style={{ fontWeight: 600 }}
-                                                    >
-                                                        Mark Ready
-                                                    </button>
-                                                )}
+                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                    {manager && manager.role === 'manager' && (
+                                                        reassignOrderId === order.id ? (
+                                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                                                <select
+                                                                    onChange={e => { if (e.target.value) handleReassignOrder(order.id, e.target.value, false); }}
+                                                                    disabled={reassignLoading}
+                                                                    style={{
+                                                                        padding: '4px 8px', borderRadius: 6, fontSize: '0.75rem',
+                                                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                                                        color: 'var(--text-primary)',
+                                                                    }}
+                                                                >
+                                                                    <option value="">Select staff...</option>
+                                                                    {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                                                                </select>
+                                                                <button onClick={() => setReassignOrderId(null)} style={{
+                                                                    padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)',
+                                                                    background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.7rem',
+                                                                }}>Cancel</button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => { setReassignOrderId(order.id); if (staff.length === 0) loadStaff(); }}
+                                                                style={{
+                                                                    padding: '4px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 600,
+                                                                    border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.08)',
+                                                                    color: '#8b5cf6', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                                }}
+                                                            >Reassign</button>
+                                                        )
+                                                    )}
+                                                    {order.status === 'pending' && (
+                                                        <button
+                                                            className="btn btn-primary btn-sm"
+                                                            disabled={deliveryOrderLoading}
+                                                            onClick={() => handleMgrDeliveryStatusUpdate(order.id)}
+                                                            style={{ fontWeight: 600 }}
+                                                        >
+                                                            Mark Ready
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -1718,64 +2062,45 @@ export default function ManagerDashboard() {
                                     </div>
                                 </div>
 
-                                {/* Report Graphs */}
+                                {/* Report Stats */}
                                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>📊 Reports</h3>
-                                <div style={{ marginBottom: 24 }}>
-                                    {/* Daily Bar Chart */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
                                     <div style={{
                                         padding: 16, borderRadius: 12, background: 'var(--bg-secondary)',
-                                        border: '1px solid var(--border-color)', marginBottom: 12,
+                                        border: '1px solid var(--border-color)', textAlign: 'center',
                                     }}>
-                                        <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 10 }}>Daily Activity (Last 14 Days)</h4>
-                                        {!staffDetail.report?.daily || staffDetail.report.daily.length === 0 ? (
-                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No data yet</p>
-                                        ) : (
-                                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100 }}>
-                                                {[...staffDetail.report.daily].reverse().slice(0, 14).map((d, i) => {
-                                                    const max = Math.max(...staffDetail.report.daily.map(x => x.amount), 1);
-                                                    const h = Math.max((d.amount / max) * 100, 4);
-                                                    return (
-                                                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                                            <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)' }}>₱{d.amount}</span>
-                                                            <div style={{
-                                                                width: '100%', height: `${h}%`, borderRadius: 3, minHeight: 3,
-                                                                background: 'linear-gradient(to top, #6366f1, rgba(99,102,241,0.4))',
-                                                            }} />
-                                                            <span style={{ fontSize: '0.5rem', color: 'var(--text-muted)' }}>{d.date.slice(-5)}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
+                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 6 }}>Total Tasks Completed</p>
+                                        <p style={{ fontSize: '1.4rem', fontWeight: 800, color: '#10b981' }}>{staffDetail.report?.total_completed_tasks || 0}</p>
                                     </div>
+                                    <div style={{
+                                        padding: 16, borderRadius: 12, background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-color)', textAlign: 'center',
+                                    }}>
+                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 6 }}>Total Items Processed</p>
+                                        <p style={{ fontSize: '1.4rem', fontWeight: 800, color: '#6366f1' }}>{staffDetail.report?.total_items_processed || 0}</p>
+                                    </div>
+                                    <div style={{
+                                        padding: 16, borderRadius: 12, background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-color)', textAlign: 'center',
+                                    }}>
+                                        <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 6 }}>Total Transactions</p>
+                                        <p style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f59e0b' }}>{staffDetail.report?.total_transactions || 0}</p>
+                                    </div>
+                                </div>
 
-                                    {/* Monthly Bar Chart */}
-                                    <div style={{
-                                        padding: 16, borderRadius: 12, background: 'var(--bg-secondary)',
-                                        border: '1px solid var(--border-color)',
-                                    }}>
-                                        <h4 style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 10 }}>Monthly Activity</h4>
-                                        {!staffDetail.report?.monthly || staffDetail.report.monthly.length === 0 ? (
-                                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No data yet</p>
-                                        ) : (
-                                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 100 }}>
-                                                {[...staffDetail.report.monthly].reverse().slice(0, 6).map((d, i) => {
-                                                    const max = Math.max(...staffDetail.report.monthly.map(x => x.amount), 1);
-                                                    const h = Math.max((d.amount / max) * 100, 4);
-                                                    return (
-                                                        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                                                            <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>₱{d.amount}</span>
-                                                            <div style={{
-                                                                width: '100%', height: `${h}%`, borderRadius: 4, minHeight: 4,
-                                                                background: 'linear-gradient(to top, #f59e0b, rgba(245,158,11,0.4))',
-                                                            }} />
-                                                            <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>{d.date}</span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
+                                {/* Walk-in vs Delivery Line Chart */}
+                                <div style={{
+                                    padding: 16, borderRadius: 12, background: 'var(--bg-secondary)',
+                                    border: '1px solid var(--border-color)', marginBottom: 24,
+                                }}>
+                                    <DualLineChart
+                                        data={[...(staffDetail.report?.daily || [])].reverse().slice(0, 14)}
+                                        labelKey="date"
+                                        valueKey1="walkin_items" color1="#10b981" label1="Walk-in"
+                                        valueKey2="delivery_items" color2="#3b82f6" label2="Delivery"
+                                        title="Items Processed (Walk-in vs Delivery)"
+                                        height={200}
+                                    />
                                 </div>
 
                                 {/* Staff Products */}
@@ -1824,55 +2149,53 @@ export default function ManagerDashboard() {
                                     </>
                                 )}
 
-                                {/* Transaction History */}
-                                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>🧾 Recent Transactions</h3>
-                                {!staffDetail.transactions || staffDetail.transactions.length === 0 ? (
-                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>No transactions yet</p>
+                                {/* Recent Products Handled */}
+                                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>🛒 Recent Products Handled</h3>
+                                {!staffDetail.recent_products_handled || staffDetail.recent_products_handled.length === 0 ? (
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>No products handled yet</p>
                                 ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                        {staffDetail.transactions.slice(0, 20).map(t => {
-                                            const statusClr = {
-                                                pending: '#fbbf24', approved: '#6366f1', ondeliver: '#3b82f6',
-                                                delivered: '#10b981', undelivered: '#ef4444', disapproved: '#ef4444',
-                                                completed: '#10b981', cancelled: '#ef4444',
-                                            };
-                                            return (
-                                                <div key={t.id} style={{
-                                                    padding: 12, borderRadius: 10,
-                                                    background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
-                                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                        {staffDetail.recent_products_handled.map(p => (
+                                            <div key={p.product_id} style={{
+                                                padding: 10, borderRadius: 10,
+                                                background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                                display: 'flex', gap: 10, alignItems: 'center',
+                                            }}>
+                                                <div style={{
+                                                    width: 48, height: 48, borderRadius: 8, overflow: 'hidden',
+                                                    background: 'rgba(0,0,0,0.2)', flexShrink: 0,
                                                 }}>
-                                                    <div>
-                                                        <p style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 4 }}>{t.product_title || 'Transaction'}</p>
-                                                        <div style={{ display: 'flex', gap: 8, fontSize: '0.7rem' }}>
-                                                            <span style={{
-                                                                padding: '2px 8px', borderRadius: 10,
-                                                                background: `${statusClr[t.status] || '#94a3b8'}15`,
-                                                                color: statusClr[t.status] || '#94a3b8',
-                                                                fontWeight: 600,
-                                                            }}>{t.status}</span>
-                                                            {t.purchase_type && (
-                                                                <span style={{
-                                                                    padding: '2px 8px', borderRadius: 10,
-                                                                    background: 'rgba(148,163,184,0.1)',
-                                                                    color: '#94a3b8', fontWeight: 600,
-                                                                    textTransform: 'capitalize',
-                                                                }}>{t.purchase_type}</span>
-                                                            )}
-                                                            {t.quantity && (
-                                                                <span style={{ color: 'var(--text-muted)' }}>x{t.quantity}</span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <div style={{ textAlign: 'right' }}>
-                                                        <p style={{ fontWeight: 700, fontSize: '0.9rem' }}>₱{(t.amount || 0).toFixed(2)}</p>
-                                                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                                            {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
-                                                        </p>
-                                                    </div>
+                                                    {p.product_image ? (
+                                                        <img src={p.product_image} alt={p.product_title}
+                                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                            onError={e => e.target.style.display = 'none'} />
+                                                    ) : (
+                                                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.6rem' }}>N/A</div>
+                                                    )}
                                                 </div>
-                                            );
-                                        })}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <p style={{
+                                                        fontWeight: 600, fontSize: '0.78rem', marginBottom: 3,
+                                                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                                    }}>{p.product_title}</p>
+                                                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                        <span style={{
+                                                            fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4,
+                                                            background: 'rgba(99,102,241,0.1)', color: '#6366f1', fontWeight: 600,
+                                                        }}>{p.quantity_processed} processed</span>
+                                                        <span style={{
+                                                            fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4,
+                                                            background: p.purchase_type === 'walkin' ? 'rgba(16,185,129,0.1)' : 'rgba(59,130,246,0.1)',
+                                                            color: p.purchase_type === 'walkin' ? '#10b981' : '#3b82f6', fontWeight: 600,
+                                                            textTransform: 'capitalize',
+                                                        }}>{p.purchase_type}</span>
+                                                    </div>
+                                                    <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                                                        Last: {new Date(p.last_handled).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </>

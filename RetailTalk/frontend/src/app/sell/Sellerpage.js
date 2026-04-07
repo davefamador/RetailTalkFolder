@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, getSellerWishlistReport } from '../../lib/api';
+import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
 import SearchContent from '../components/SearchContent';
 import {
     LayoutDashboard, Tag, ShoppingCart, Truck, Package,
-    Search, ClipboardList, Heart, LogOut, TrendingUp,
+    Search, ClipboardList, Heart, LogOut, TrendingUp, DollarSign,
 } from 'lucide-react';
 
 // ── Sidebar Item ─────────────────────────────────────────
@@ -80,6 +80,12 @@ export default function SellPage() {
     // Wishlist analytics
     const [wishlistReport, setWishlistReport] = useState(null);
     const [wishlistLoading, setWishlistLoading] = useState(false);
+    // Salary state
+    const [salaryInfo, setSalaryInfo] = useState(null);
+    const [salaryLoading, setSalaryLoading] = useState(false);
+    const [withdrawAmt, setWithdrawAmt] = useState('');
+    const [withdrawing, setWithdrawing] = useState(false);
+    const [salaryMsg, setSalaryMsg] = useState({ type: '', text: '' });
 
     useEffect(() => {
         const stored = getStoredUser();
@@ -112,6 +118,24 @@ export default function SellPage() {
             setWishlistReport(data);
         } catch (e) { console.error(e); }
         finally { setWishlistLoading(false); }
+    };
+    const loadSalaryInfo = async () => {
+        setSalaryLoading(true);
+        try { setSalaryInfo(await getSalaryHistory()); } catch (e) { console.error(e); }
+        finally { setSalaryLoading(false); }
+    };
+    const handleSalaryWithdraw = async () => {
+        const amt = parseFloat(withdrawAmt);
+        if (!amt || amt <= 0) { setSalaryMsg({ type: 'error', text: 'Enter a valid amount' }); return; }
+        setWithdrawing(true);
+        try {
+            const res = await withdraw(amt);
+            setSellerBalance(res.balance || 0);
+            setWithdrawAmt('');
+            setSalaryMsg({ type: 'success', text: `Successfully withdrew PHP ${amt.toFixed(2)}` });
+            loadSalaryInfo();
+        } catch (e) { setSalaryMsg({ type: 'error', text: e.message }); }
+        finally { setWithdrawing(false); }
     };
 
     const loadDashboardData = async () => {
@@ -364,6 +388,7 @@ export default function SellPage() {
                     <SidebarItem icon={Search} label="Search" active={activeSection === 'search'} onClick={() => setActiveSection('search')} />
                     <SidebarItem icon={ClipboardList} label="Order History" active={activeSection === 'orderhistory'} onClick={() => setActiveSection('orderhistory')} />
                     <SidebarItem icon={Heart} label="Wishlist Analytics" active={activeSection === 'wishlist'} onClick={() => { setActiveSection('wishlist'); loadWishlistReport(); }} />
+                    <SidebarItem icon={DollarSign} label="Salary" active={activeSection === 'salary'} onClick={() => { setActiveSection('salary'); loadSalaryInfo(); loadDashboardData(); }} />
                 </nav>
 
                 <div style={{
@@ -1249,6 +1274,101 @@ export default function SellPage() {
                     </div>
                 )}
 
+                {/* ===== SALARY TAB ===== */}
+                {activeSection === 'salary' && (
+                    <div style={{ padding: '32px 24px', maxWidth: 800 }}>
+                        <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: 24 }}>My Salary</h2>
+                        {salaryLoading ? (
+                            <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ width: 32, height: 32, margin: '0 auto' }}></div></div>
+                        ) : salaryInfo ? (
+                            <>
+                                {salaryMsg.text && (
+                                    <div className={`alert alert-${salaryMsg.type}`} style={{ marginBottom: 16 }}>{salaryMsg.text}</div>
+                                )}
+                                {/* Summary Cards */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
+                                    <div className="card" style={{ padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Fixed Salary</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--accent-primary)' }}>PHP {salaryInfo.fixed_salary.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div className="card" style={{ padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Paid This Month</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>PHP {salaryInfo.paid_this_month.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div className="card" style={{ padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Remaining</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800, color: salaryInfo.remaining_this_month > 0 ? '#ef4444' : '#10b981' }}>PHP {salaryInfo.remaining_this_month.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                    <div className="card" style={{ padding: 20 }}>
+                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Your Balance</p>
+                                        <p style={{ fontSize: '1.5rem', fontWeight: 800 }}>PHP {sellerBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+                                    </div>
+                                </div>
+                                {/* Withdraw Section */}
+                                <div className="card" style={{ padding: 20, marginBottom: 28 }}>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <DollarSign size={18} /> Withdraw Salary
+                                    </h3>
+                                    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                        <input type="number" min="0" placeholder="Amount to withdraw"
+                                            value={withdrawAmt} onChange={e => setWithdrawAmt(e.target.value)}
+                                            style={{ flex: 1, padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '0.9rem', fontFamily: 'Inter, sans-serif' }}
+                                        />
+                                        <button onClick={handleSalaryWithdraw} disabled={withdrawing || !withdrawAmt}
+                                            className="btn btn-primary" style={{ padding: '10px 24px', borderRadius: 10, fontSize: '0.88rem' }}>
+                                            {withdrawing ? 'Processing...' : 'Withdraw'}
+                                        </button>
+                                    </div>
+                                </div>
+                                {/* Transaction History */}
+                                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 16 }}>Transaction History</h3>
+                                {salaryInfo.history.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No transactions yet</div>
+                                ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {salaryInfo.history.map(p => {
+                                            const isDeposit = p.type === 'salary_deposit';
+                                            return (
+                                                <div key={p.id} className="card" style={{ padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        <div style={{
+                                                            width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                            background: isDeposit ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
+                                                        }}>
+                                                            <span style={{ fontSize: '1rem' }}>{isDeposit ? '↓' : '↑'}</span>
+                                                        </div>
+                                                        <div>
+                                                            <p style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 2, color: isDeposit ? '#10b981' : '#ef4444' }}>
+                                                                {isDeposit ? '+' : '-'}PHP {p.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                                            </p>
+                                                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{p.notes || (isDeposit ? 'Salary deposit' : 'Withdrawal')}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right' }}>
+                                                        <span style={{
+                                                            display: 'inline-block', padding: '2px 10px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 700, marginBottom: 4,
+                                                            background: isDeposit ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
+                                                            color: isDeposit ? '#10b981' : '#ef4444',
+                                                        }}>
+                                                            {isDeposit ? 'Salary' : 'Withdrawal'}
+                                                        </span>
+                                                        {p.payment_month && <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{p.payment_month}</p>}
+                                                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{new Date(p.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                <div style={{ marginTop: 20, padding: 14, borderRadius: 10, background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.15)', textAlign: 'center' }}>
+                                    <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Total Salary Received (All Time): <strong style={{ color: 'var(--accent-primary)' }}>PHP {salaryInfo.total_all_time.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></p>
+                                </div>
+                            </>
+                        ) : (
+                            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>Failed to load salary data</div>
+                        )}
+                    </div>
+                )}
                 {/* Restock Request Modal */}
                 {showRestockModal && (
                     <div style={{

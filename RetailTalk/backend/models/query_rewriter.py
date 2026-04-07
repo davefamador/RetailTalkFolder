@@ -12,6 +12,13 @@ from typing import Optional
 
 
 @dataclass
+class SearchGroup:
+    """A single search sub-query with its own text and filters."""
+    search_text: str
+    filters: dict = field(default_factory=dict)
+
+
+@dataclass
 class RewrittenQuery:
     """Output of the query rewriter."""
     search_text: str           # Cleaned query for BERT embedding + keyword matching
@@ -20,6 +27,7 @@ class RewrittenQuery:
     intents: list = field(default_factory=list)   # Detected intents
     slots: dict = field(default_factory=dict)     # All extracted slots
     is_rewritten: bool = False  # Whether any rewriting was applied
+    search_groups: list = field(default_factory=list)  # List[SearchGroup] for compound queries
 
 
 # Slot types that represent product names (included in search text)
@@ -44,20 +52,64 @@ MODIFIER_WORDS = {
 }
 
 
+# Conjunction patterns for compound query splitting
+COMPOUND_CONJUNCTIONS = [
+    r'\s+and\s+',
+    r'\s+at\s+saka\s+',
+    r'\s+tapos\s+',
+    r'\s+tsaka\s+',
+    r'\s+pati\s+(na\s+)?',
+]
+
+
+def split_compound_query(query: str) -> list[str]:
+    """
+    Split a compound query on conjunctions ('and', 'at saka', etc.)
+    into separate product searches.
+
+    "party items less than 300 and shoes for kids less 200"
+    -> ["party items less than 300", "shoes for kids less 200"]
+
+    "peanut butter and jelly under 200"
+    -> ["peanut butter", "jelly under 200"]
+    """
+    for conj in COMPOUND_CONJUNCTIONS:
+        parts = re.split(conj, query, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            cleaned = [p.strip() for p in parts if p and p.strip()]
+            if len(cleaned) >= 2:
+                return cleaned
+    return [query]
+
+
 def split_sentences(query: str) -> list[str]:
     """
-    Split a multi-sentence query into individual sentences.
-
-    Splits on . ? ! followed by whitespace (or end of string).
-    Does NOT split on decimal numbers (e.g., 3.5) or trailing punctuation.
+    Split a multi-sentence or compound query into individual sub-queries.
+    1. Splits on . ? ! followed by whitespace (standard sentence splitting).
+    2. Splits on commas that act as product separators.
+    3. Then splits each sentence on conjunctions ('and', 'at saka').
     """
-    # Split on sentence-ending punctuation followed by whitespace
-    # (?<!\d)\. prevents splitting on decimals like "3.5"
-    # [?!] always splits
-    parts = re.split(r'(?<!\d)\.(?=\s+[A-Za-z])|[?!](?:\s+|$)', query)
+    # Split on sentence-ending punctuation: . followed by space+letter (avoids
+    # decimals like "3.5"), or ? / ! at end/followed by whitespace.
+    parts = re.split(r'\.(?=\s+[A-Za-z])|[?!](?:\s+|$)', query)
     sentences = [s.strip().rstrip('.!?') for s in parts if s and s.strip()]
     sentences = [s for s in sentences if s]
-    return sentences if sentences else [query.strip()]
+    if not sentences:
+        sentences = [query.strip()]
+
+    # Split on commas — treat commas as product separators
+    comma_parts = []
+    for sent in sentences:
+        csv = [p.strip() for p in sent.split(',') if p and p.strip()]
+        comma_parts.extend(csv if len(csv) >= 2 else [sent])
+
+    # Compound query splitting on each part (handles 'and')
+    all_parts = []
+    for part in comma_parts:
+        compound_parts = split_compound_query(part)
+        all_parts.extend(compound_parts)
+
+    return all_parts if all_parts else [query.strip()]
 
 
 def _merge_rewritten_queries(
@@ -66,14 +118,51 @@ def _merge_rewritten_queries(
 ) -> RewrittenQuery:
     """Merge multiple per-sentence RewrittenQuery results into one."""
     if len(sub_queries) == 1:
-        return sub_queries[0]
+        rq = sub_queries[0]
+        rq.search_groups = [SearchGroup(search_text=rq.search_text, filters=rq.filters)]
+        return rq
 
     # Union of all intents (deduplicated, preserving order)
     merged_intents = list(dict.fromkeys(
         intent for rq in sub_queries for intent in rq.intents
     ))
 
-    # Merge slots: first-wins, but PRODUCT slots fill PRODUCT1 then PRODUCT2
+    # Each sub-query that originated from a separator (dot, comma, 'and') represents
+    # a distinct product search — always keep them as independent search groups.
+    # We only collapse to a single group when all sub-queries share the same search
+    # text (i.e., splitting produced no meaningful separation).
+    distinct_texts = len({rq.search_text for rq in sub_queries}) > 1
+
+    if distinct_texts:
+        # ── COMPOUND QUERY ──
+        # Each sub-query becomes its own SearchGroup with independent filters.
+        search_groups = [
+            SearchGroup(search_text=rq.search_text, filters=rq.filters)
+            for rq in sub_queries
+        ]
+        merged_slots = {}
+        product_idx = 1
+        for rq in sub_queries:
+            for key, value in rq.slots.items():
+                if key in ("PRODUCT1", "PRODUCT2"):
+                    slot_key = f"PRODUCT{product_idx}"
+                    if slot_key not in merged_slots:
+                        merged_slots[slot_key] = value
+                        product_idx += 1
+                elif key not in merged_slots:
+                    merged_slots[key] = value
+        search_text = " | ".join(g.search_text for g in search_groups)
+        return RewrittenQuery(
+            search_text=search_text,
+            filters={},
+            original_query=original_query,
+            intents=merged_intents,
+            slots=merged_slots,
+            is_rewritten=True,
+            search_groups=search_groups,
+        )
+
+    # ── SINGLE GROUP (original merge behavior) ──
     merged_slots = {}
     for rq in sub_queries:
         for key, value in rq.slots.items():
@@ -85,7 +174,6 @@ def _merge_rewritten_queries(
             elif key not in merged_slots:
                 merged_slots[key] = value
 
-    # Merge filters: most restrictive for prices/rating, first-wins for others
     merged_filters = {}
     for rq in sub_queries:
         for key, value in rq.filters.items():
@@ -98,7 +186,6 @@ def _merge_rewritten_queries(
             elif key == "rating_min":
                 merged_filters[key] = max(merged_filters[key], value)
 
-    # Deduplicated search text (preserving order)
     seen = set()
     search_parts = []
     for rq in sub_queries:
@@ -116,6 +203,7 @@ def _merge_rewritten_queries(
         intents=merged_intents,
         slots=merged_slots,
         is_rewritten=any(rq.is_rewritten for rq in sub_queries),
+        search_groups=[SearchGroup(search_text=search_text, filters=merged_filters)],
     )
 
 
@@ -306,6 +394,7 @@ class QueryRewriterService:
             # Single sentence: no splitting overhead
             result = self._process_single(sentences[0])
             result.original_query = query.strip()
+            result.search_groups = [SearchGroup(search_text=result.search_text, filters=result.filters)]
             self._log(query, result)
             return result
 

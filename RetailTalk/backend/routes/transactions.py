@@ -431,10 +431,12 @@ async def get_staff_walkin_orders(current_user: dict = Depends(get_current_user)
     if not txns.data:
         return []
 
-    # Get buyer names
+    # Get buyer + assigned staff names
     buyer_ids = set(t["buyer_id"] for t in txns.data)
-    buyers = sb.table("users").select("id, full_name").in_("id", list(buyer_ids)).execute()
-    buyer_names = {u["id"]: u["full_name"] for u in (buyers.data or [])}
+    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
+    all_user_ids = buyer_ids | assigned_ids
+    users_lookup = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
+    user_names = {u["id"]: u["full_name"] for u in (users_lookup.data or [])}
 
     results = []
     for t in txns.data:
@@ -442,7 +444,7 @@ async def get_staff_walkin_orders(current_user: dict = Depends(get_current_user)
         results.append({
             "id": t["id"],
             "buyer_id": t["buyer_id"],
-            "buyer_name": buyer_names.get(t["buyer_id"], "Unknown"),
+            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
             "product_id": t["product_id"],
             "product_title": prod.get("title", ""),
             "product_price": float(prod.get("price", 0)),
@@ -451,6 +453,8 @@ async def get_staff_walkin_orders(current_user: dict = Depends(get_current_user)
             "amount": float(t["amount"]),
             "status": t["status"],
             "purchase_type": t.get("purchase_type", "walkin"),
+            "assigned_staff_id": t.get("assigned_staff_id"),
+            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
             "created_at": t["created_at"],
         })
 
@@ -501,6 +505,12 @@ async def update_walkin_order_status(
         if seller_id != user_id:
             raise HTTPException(status_code=403, detail="Order does not belong to you")
 
+    # Staff assignment check: if assigned to another staff, only managers can override
+    assigned_staff = txn.data[0].get("assigned_staff_id")
+    user_role = user.data[0]["role"]
+    if assigned_staff and assigned_staff != user_id and user_role == "seller":
+        raise HTTPException(status_code=403, detail="This order is assigned to another staff member")
+
     current_status = txn.data[0]["status"]
     expected_next = valid_transitions.get(current_status)
 
@@ -510,7 +520,11 @@ async def update_walkin_order_status(
             detail=f"Cannot transition from '{current_status}' to '{req.status}'. Expected: '{expected_next}'"
         )
 
-    sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
+    # Auto-assign staff on first action
+    update_data = {"status": req.status}
+    if not assigned_staff:
+        update_data["assigned_staff_id"] = user_id
+    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
 
     # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
     if req.status == "completed":
@@ -596,7 +610,8 @@ async def get_manager_walkin_orders(current_user: dict = Depends(get_current_use
         return []
 
     buyer_ids = set(t["buyer_id"] for t in txns.data)
-    all_user_ids = buyer_ids | set(t["seller_id"] for t in txns.data)
+    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
+    all_user_ids = buyer_ids | set(t["seller_id"] for t in txns.data) | assigned_ids
     users_result = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
 
@@ -616,6 +631,8 @@ async def get_manager_walkin_orders(current_user: dict = Depends(get_current_use
             "amount": float(t["amount"]),
             "status": t["status"],
             "purchase_type": t.get("purchase_type", "walkin"),
+            "assigned_staff_id": t.get("assigned_staff_id"),
+            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
             "created_at": t["created_at"],
         })
 
@@ -677,7 +694,11 @@ async def manager_update_walkin_order_status(
             detail=f"Cannot transition from '{current_status}' to '{req.status}'. Expected: '{expected_next}'"
         )
 
-    sb.table("product_transactions").update({"status": req.status}).eq("id", transaction_id).execute()
+    # Manager can always update; auto-assign if not yet assigned
+    update_data = {"status": req.status}
+    if not txn.data[0].get("assigned_staff_id"):
+        update_data["assigned_staff_id"] = user_id
+    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
 
     # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
     if req.status == "completed":
@@ -737,8 +758,10 @@ async def get_staff_delivery_orders(current_user: dict = Depends(get_current_use
         return []
 
     buyer_ids = set(t["buyer_id"] for t in txns.data)
-    buyers = sb.table("users").select("id, full_name").in_("id", list(buyer_ids)).execute()
-    buyer_names = {u["id"]: u["full_name"] for u in (buyers.data or [])}
+    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
+    all_user_ids = buyer_ids | assigned_ids
+    users_lookup = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
+    user_names = {u["id"]: u["full_name"] for u in (users_lookup.data or [])}
 
     results = []
     for t in txns.data:
@@ -746,7 +769,7 @@ async def get_staff_delivery_orders(current_user: dict = Depends(get_current_use
         results.append({
             "id": t["id"],
             "buyer_id": t["buyer_id"],
-            "buyer_name": buyer_names.get(t["buyer_id"], "Unknown"),
+            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
             "product_id": t["product_id"],
             "product_title": prod.get("title", ""),
             "product_price": float(prod.get("price", 0)),
@@ -757,6 +780,8 @@ async def get_staff_delivery_orders(current_user: dict = Depends(get_current_use
             "delivery_address": t.get("delivery_address", ""),
             "status": t["status"],
             "purchase_type": t.get("purchase_type", "delivery"),
+            "assigned_staff_id": t.get("assigned_staff_id"),
+            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
             "created_at": t["created_at"],
         })
 
@@ -801,6 +826,12 @@ async def update_delivery_order_status(
         if seller_id != user_id:
             raise HTTPException(status_code=403, detail="Order does not belong to you")
 
+    # Staff assignment check: if assigned to another staff, only managers can override
+    assigned_staff = txn.data[0].get("assigned_staff_id")
+    user_role = user.data[0]["role"]
+    if assigned_staff and assigned_staff != user_id and user_role == "seller":
+        raise HTTPException(status_code=403, detail="This order is assigned to another staff member")
+
     current_status = txn.data[0]["status"]
     if current_status != "pending":
         raise HTTPException(
@@ -808,7 +839,11 @@ async def update_delivery_order_status(
             detail=f"Can only approve orders with 'pending' status. Current: '{current_status}'"
         )
 
-    sb.table("product_transactions").update({"status": "approved"}).eq("id", transaction_id).execute()
+    # Auto-assign staff on first action
+    update_data = {"status": "approved"}
+    if not assigned_staff:
+        update_data["assigned_staff_id"] = user_id
+    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
 
     return {"message": "Order marked as ready for delivery pickup"}
 
@@ -859,7 +894,8 @@ async def get_manager_delivery_orders(current_user: dict = Depends(get_current_u
         return []
 
     buyer_ids = set(t["buyer_id"] for t in txns.data)
-    all_user_ids = buyer_ids | set(t["seller_id"] for t in txns.data)
+    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
+    all_user_ids = buyer_ids | set(t["seller_id"] for t in txns.data) | assigned_ids
     users_result = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
 
@@ -881,6 +917,8 @@ async def get_manager_delivery_orders(current_user: dict = Depends(get_current_u
             "delivery_address": t.get("delivery_address", ""),
             "status": t["status"],
             "purchase_type": t.get("purchase_type", "delivery"),
+            "assigned_staff_id": t.get("assigned_staff_id"),
+            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
             "created_at": t["created_at"],
         })
 
@@ -937,9 +975,68 @@ async def manager_update_delivery_order_status(
             detail=f"Can only approve orders with 'pending' status. Current: '{current_status}'"
         )
 
-    sb.table("product_transactions").update({"status": "approved"}).eq("id", transaction_id).execute()
+    # Manager can always update; auto-assign if not yet assigned
+    update_data = {"status": "approved"}
+    if not txn.data[0].get("assigned_staff_id"):
+        update_data["assigned_staff_id"] = user_id
+    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
 
     return {"message": "Order approved for delivery pickup"}
+
+
+# --- Manager Reassign Order ---
+
+class ReassignOrderRequest(BaseModel):
+    staff_id: str
+
+
+@router.put("/manager/reassign/{transaction_id}")
+async def manager_reassign_order(
+    transaction_id: str,
+    req: ReassignOrderRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Manager reassigns an order to a specific staff member."""
+    sb = get_supabase()
+    user_id = current_user["sub"]
+
+    # Verify manager role
+    user = sb.table("users").select("role, department_id").eq("id", user_id).execute()
+    if not user.data or user.data[0]["role"] != "manager":
+        raise HTTPException(status_code=403, detail="Only managers can reassign orders")
+
+    dept_id = user.data[0].get("department_id")
+    if not dept_id:
+        dept_lookup = sb.table("departments").select("id").eq("manager_id", user_id).limit(1).execute()
+        if dept_lookup.data:
+            dept_id = dept_lookup.data[0]["id"]
+
+    if not dept_id:
+        raise HTTPException(status_code=400, detail="Manager is not assigned to a department")
+
+    # Verify target staff belongs to same department
+    target_staff = sb.table("users").select("id, department_id, full_name").eq("id", req.staff_id).execute()
+    if not target_staff.data:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+    if target_staff.data[0].get("department_id") != dept_id:
+        raise HTTPException(status_code=403, detail="Staff member is not in your department")
+
+    # Verify transaction exists and belongs to department
+    txn = sb.table("product_transactions").select("*").eq("id", transaction_id).execute()
+    if not txn.data:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    seller_id = txn.data[0]["seller_id"]
+    seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
+    if not seller_info.data or seller_info.data[0].get("department_id") != dept_id:
+        raise HTTPException(status_code=403, detail="Order does not belong to your department")
+
+    sb.table("product_transactions").update({
+        "assigned_staff_id": req.staff_id,
+    }).eq("id", transaction_id).execute()
+
+    staff_name = target_staff.data[0]["full_name"]
+    return {"message": f"Order reassigned to {staff_name}"}
 
 
 # --- Buyer Order Cancellation ---
@@ -1027,4 +1124,78 @@ async def buyer_cancel_order(
         "message": f"Order cancelled successfully. PHP {refund_amount:.2f} refunded to your wallet.{fee_msg}",
         "refund_amount": refund_amount,
         "cancellation_fee": fee_to_delivery,
+    }
+
+
+# --- Salary History (for staff/managers) ---
+
+@router.get("/salary-history")
+async def get_salary_history(current_user: dict = Depends(get_current_user)):
+    """Get salary payment history for the current user (staff or manager)."""
+    sb = get_supabase()
+    user_id = current_user["sub"]
+
+    # Verify role
+    user = sb.table("users").select("role, salary").eq("id", user_id).execute()
+    if not user.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.data[0]["role"] not in ("seller", "manager"):
+        raise HTTPException(status_code=403, detail="Only staff and managers can view salary history")
+
+    fixed_salary = float(user.data[0].get("salary", 0))
+
+    # Get all salary payments for this user
+    payments = sb.table("salary_payments").select("*").eq(
+        "recipient_id", user_id
+    ).order("created_at", desc=True).limit(100).execute()
+
+    # Current month paid
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+    paid_this_month = sum(
+        float(p["amount"]) for p in (payments.data or []) if p["payment_month"] == current_month
+    )
+
+    total_all_time = sum(float(p["amount"]) for p in (payments.data or []))
+
+    # Build salary deposit entries
+    salary_entries = []
+    for p in (payments.data or []):
+        salary_entries.append({
+            "id": p["id"],
+            "type": "salary_deposit",
+            "amount": float(p["amount"]),
+            "payment_month": p.get("payment_month", ""),
+            "notes": p.get("notes", "Salary payment"),
+            "created_at": p["created_at"],
+        })
+
+    # Get SVF withdrawal history for this user
+    svf = sb.table("stored_value").select("*").eq("user_id", user_id).eq(
+        "transaction_type", "withdrawal"
+    ).order("created_at", desc=True).limit(100).execute()
+
+    withdrawal_entries = []
+    for w in (svf.data or []):
+        withdrawal_entries.append({
+            "id": w["id"],
+            "type": "withdrawal",
+            "amount": float(w["amount"]),
+            "payment_month": "",
+            "notes": "Salary withdrawal",
+            "created_at": w["created_at"],
+        })
+
+    # Merge and sort by date descending
+    all_transactions = salary_entries + withdrawal_entries
+    all_transactions.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return {
+        "fixed_salary": fixed_salary,
+        "paid_this_month": round(paid_this_month, 2),
+        "remaining_this_month": round(max(fixed_salary - paid_this_month, 0), 2),
+        "total_all_time": round(total_all_time, 2),
+        "current_month": current_month,
+        "history": all_transactions,
     }
