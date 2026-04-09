@@ -86,6 +86,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
         try {
             await buyProduct(product.id, quantity, purchaseType);
             setPurchased(true);
+            window.dispatchEvent(new Event('balance-updated'));
             if (onPurchased) onPurchased(product, quantity);
         } catch (err) {
             const msg = err.message || '';
@@ -113,6 +114,7 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
             setAddressModal(false);
             await buyProduct(product.id, quantity, purchaseType);
             setPurchased(true);
+            window.dispatchEvent(new Event('balance-updated'));
             if (onPurchased) onPurchased(product, quantity);
         } catch (err) {
             setPurchaseError(err.message || 'Failed to complete purchase.');
@@ -392,40 +394,10 @@ export default function ProductDetailModal({ product, user, onClose, onPurchased
 
                                         {user && user.role === 'buyer' && (
                                             <>
-                                                {/* Walk-in / Delivery selector */}
-                                                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPurchaseType('delivery')}
-                                                        style={{
-                                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                            borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
-                                                            background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                                            color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                        }}
-                                                    >
-                                                        Delivery
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setPurchaseType('walkin')}
-                                                        style={{
-                                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                            borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
-                                                            background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
-                                                            color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
-                                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                        }}
-                                                    >
-                                                        Walk-in
-                                                    </button>
-                                                </div>
-                                                {purchaseType === 'delivery' && (
-                                                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 10 }}>
-                                                        + PHP 90.00 delivery fee per department store
-                                                    </p>
-                                                )}
+                                                {/* Delivery info */}
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+                                                    + PHP 90.00 delivery fee per department store
+                                                </p>
                                                 <div style={{ display: 'flex', gap: 8 }}>
                                                     <button
                                                         className="btn"

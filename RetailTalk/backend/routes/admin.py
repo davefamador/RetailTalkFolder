@@ -519,13 +519,13 @@ async def list_admin_products(
     sb = get_supabase()
 
     if search:
-        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").ilike(
-            "title", f"%{search}%"
-        ).order("created_at", desc=True).limit(200).execute()
+        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").eq(
+            "is_active", True
+        ).ilike("title", f"%{search}%").order("created_at", desc=True).limit(200).execute()
     else:
-        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").order(
-            "created_at", desc=True
-        ).limit(200).execute()
+        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").eq(
+            "is_active", True
+        ).order("created_at", desc=True).limit(200).execute()
 
     # Batch-lookup department names
     dept_ids = set()
@@ -689,7 +689,6 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
     completed_count = 0
     total_items = 0
     today_tasks = 0
-    walkin_items_today = 0
     delivery_items_today = 0
     products_handled = {}
 
@@ -709,14 +708,11 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
             month_key = t["created_at"][:7]
 
         if day_key not in daily_data:
-            daily_data[day_key] = {"amount": 0, "count": 0, "walkin_items": 0, "delivery_items": 0}
+            daily_data[day_key] = {"amount": 0, "count": 0, "delivery_items": 0}
         daily_data[day_key]["amount"] += amt
         daily_data[day_key]["count"] += 1
         if is_completed:
-            if purchase_type == "walkin":
-                daily_data[day_key]["walkin_items"] += qty
-            else:
-                daily_data[day_key]["delivery_items"] += qty
+            daily_data[day_key]["delivery_items"] += qty
 
         if month_key not in monthly_data:
             monthly_data[month_key] = {"amount": 0, "count": 0}
@@ -729,10 +725,7 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
             total_items += qty
             if day_key == today_str:
                 today_tasks += 1
-                if purchase_type == "walkin":
-                    walkin_items_today += qty
-                else:
-                    delivery_items_today += qty
+                delivery_items_today += qty
 
             # Track recent products handled
             pid = t["product_id"]
@@ -750,7 +743,7 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
 
     daily = sorted(
         [{"date": k, "amount": round(v["amount"], 2), "count": v["count"],
-          "walkin_items": v["walkin_items"], "delivery_items": v["delivery_items"]}
+          "delivery_items": v["delivery_items"]}
          for k, v in daily_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:30]
@@ -801,7 +794,6 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
             "total_completed_tasks": completed_count,
             "total_items_processed": total_items,
             "tasks_completed_today": today_tasks,
-            "walkin_items_today": walkin_items_today,
             "delivery_items_today": delivery_items_today,
             "daily": daily,
             "monthly": monthly,
@@ -1043,18 +1035,14 @@ async def list_departments(admin: dict = Depends(require_admin)):
         total_revenue = 0
         total_orders = 0
         delivery_orders = 0
-        walkin_orders = 0
         if staff_ids:
             txns = sb.table("product_transactions").select(
-                "seller_amount, purchase_type"
+                "seller_amount"
             ).in_("seller_id", staff_ids).in_("status", ["delivered", "completed"]).execute()
             for t in (txns.data or []):
                 total_revenue += float(t.get("seller_amount", 0))
                 total_orders += 1
-                if t.get("purchase_type") == "delivery":
-                    delivery_orders += 1
-                else:
-                    walkin_orders += 1
+                delivery_orders += 1
 
         results.append({
             "id": d["id"],
@@ -1068,7 +1056,6 @@ async def list_departments(admin: dict = Depends(require_admin)):
             "total_revenue": round(total_revenue, 2),
             "total_orders": total_orders,
             "delivery_orders": delivery_orders,
-            "walkin_orders": walkin_orders,
             "created_at": d["created_at"],
         })
 
@@ -1169,26 +1156,20 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
     weekly_sales = {}
     monthly_sales = {}
     delivery_earnings = {}
-    walkin_earnings = {}
     total_revenue = 0
     total_orders = 0
     delivery_order_count = 0
-    walkin_order_count = 0
 
     if staff_ids:
         txns = sb.table("product_transactions").select(
-            "amount, seller_amount, created_at, purchase_type"
+            "amount, seller_amount, created_at"
         ).in_("seller_id", staff_ids).in_("status", ["delivered", "completed"]).execute()
 
         for t in (txns.data or []):
             amt = float(t.get("seller_amount", 0))
             total_revenue += amt
             total_orders += 1
-            purchase_type = t.get("purchase_type", "delivery")
-            if purchase_type == "delivery":
-                delivery_order_count += 1
-            else:
-                walkin_order_count += 1
+            delivery_order_count += 1
 
             try:
                 dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
@@ -1207,12 +1188,11 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
                 data[key]["amount"] += amt
                 data[key]["count"] += 1
 
-            # Delivery vs walk-in breakdown by month
-            target = delivery_earnings if purchase_type == "delivery" else walkin_earnings
-            if month_key not in target:
-                target[month_key] = {"amount": 0, "count": 0}
-            target[month_key]["amount"] += amt
-            target[month_key]["count"] += 1
+            # Delivery earnings breakdown by month
+            if month_key not in delivery_earnings:
+                delivery_earnings[month_key] = {"amount": 0, "count": 0}
+            delivery_earnings[month_key]["amount"] += amt
+            delivery_earnings[month_key]["count"] += 1
 
     def to_list(data):
         return sorted(
@@ -1238,12 +1218,10 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
         "total_revenue": round(total_revenue, 2),
         "total_orders": total_orders,
         "delivery_orders": delivery_order_count,
-        "walkin_orders": walkin_order_count,
         "daily_sales": to_list(daily_sales),
         "weekly_sales": to_list(weekly_sales),
         "monthly_sales": to_list(monthly_sales),
         "delivery_earnings": to_list(delivery_earnings),
-        "walkin_earnings": to_list(walkin_earnings),
     }
 
 
@@ -1262,6 +1240,32 @@ async def update_department(dept_id: str, req: DepartmentUpdateRequest, admin: d
 
     sb.table("departments").update(update_data).eq("id", dept_id).execute()
     return {"message": "Department updated"}
+
+
+@router.delete("/departments/{dept_id}")
+async def delete_department(dept_id: str, admin: dict = Depends(require_admin)):
+    """Delete a department and disassociate its staff (sets their department_id to NULL)."""
+    sb = get_supabase()
+    dept = sb.table("departments").select("id, name").eq("id", dept_id).execute()
+    if not dept.data:
+        raise HTTPException(status_code=404, detail="Department not found")
+    # Disassociate staff so they are not orphaned
+    sb.table("users").update({"department_id": None}).eq("department_id", dept_id).execute()
+    sb.table("departments").delete().eq("id", dept_id).execute()
+    return {"message": f"Department '{dept.data[0]['name']}' deleted"}
+
+
+# --- Admin Delete Product ---
+
+@router.delete("/products/{product_id}")
+async def admin_delete_product(product_id: str, admin: dict = Depends(require_admin)):
+    """Soft-delete a product (set is_active=False). Admin can delete any product regardless of ownership."""
+    sb = get_supabase()
+    existing = sb.table("products").select("id, title").eq("id", product_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    sb.table("products").update({"is_active": False}).eq("id", product_id).execute()
+    return {"message": "Product deleted successfully"}
 
 
 # --- Admin Create Product for Department ---
@@ -1298,11 +1302,13 @@ async def admin_create_product_for_dept(
     if len(req.images) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 images allowed")
 
-    # Admin is the seller_id (owner)
-    admin_id = admin["sub"]
+    # Use the department's manager as the seller_id so the product belongs to the store.
+    # Fall back to admin if the department has no manager assigned yet.
+    manager_id = dept.data[0].get("manager_id")
+    seller_id = manager_id if manager_id else admin["sub"]
 
     result = sb.table("products").insert({
-        "seller_id": admin_id,
+        "seller_id": seller_id,
         "title": req.title.strip(),
         "description": (req.description or "").strip(),
         "price": req.price,

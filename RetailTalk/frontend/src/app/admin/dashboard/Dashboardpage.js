@@ -9,9 +9,9 @@ import {
 import {
     getStoredAdmin, adminLogout, adminGetDashboard, adminGetUsers,
     adminBanUser, adminDeleteUser, adminGetTransactions, adminGetReports,
-    adminGetProducts, adminUpdateProduct, adminGetUserDetail,
+    adminGetProducts, adminUpdateProduct, adminDeleteProduct, adminGetUserDetail,
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
-    adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminRegisterManager,
+    adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminUpdateDepartment, adminDeleteDepartment, adminRegisterManager,
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
     adminGetDeliveriesStats,
     getBalance, withdraw, getSVFHistory, searchProducts,
@@ -19,7 +19,7 @@ import {
     adminCreateProductForDept, uploadProductImage,
     adminGetSalaries, adminSetSalary, adminPayAll, adminPayStore, adminPayIndividual,
 } from '../../../lib/api';
-// â”€â”€ Line Chart Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Line Chart Component ---------------------------------
 function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220, prefix = 'PHP ' }) {
     const canvasRef = useRef(null);
     useEffect(() => {
@@ -184,7 +184,7 @@ function DualLineChart({ data, labelKey, valueKey1, valueKey2, color1 = '#10b981
         </div>
     );
 }
-// â”€â”€ Sidebar Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Sidebar Item -----------------------------------------
 function SidebarItem({ icon: Icon, label, active, onClick, collapsed }) {
     return (
         <button onClick={onClick} title={collapsed ? label : undefined} style={{
@@ -208,7 +208,7 @@ function SidebarItem({ icon: Icon, label, active, onClick, collapsed }) {
         </button>
     );
 }
-// â”€â”€ Sidebar Section Label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Sidebar Section Label --------------------------------
 function SidebarSection({ label, collapsed }) {
     if (collapsed) return <div style={{ height: 16 }} />;
     return (
@@ -222,7 +222,7 @@ function SidebarSection({ label, collapsed }) {
         }}>{label}</div>
     );
 }
-// â”€â”€ Stat Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Stat Card --------------------------------------------
 function StatCard({ icon: Icon, label, value, color }) {
     return (
         <div style={{
@@ -250,7 +250,7 @@ function StatCard({ icon: Icon, label, value, color }) {
         </div>
     );
 }
-// â”€â”€ Horizontal Bar Chart (for store comparisons) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Horizontal Bar Chart (for store comparisons) ---------
 function HorizontalBarChart({ data, labelKey, valueKey, title, color = '#8b5cf6', prefix = '', height = 'auto' }) {
     if (!data || data.length === 0) {
         return (
@@ -376,7 +376,7 @@ function VerticalBarChart({ data, labelKey, valueKey, title, color = '#6366f1', 
         </div>
     );
 }
-// â”€â”€ Donut/Ring Chart (for order type breakdown) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Donut/Ring Chart (for order type breakdown) ----------
 function DonutChart({ data, title, size = 140 }) {
     const canvasRef = useRef(null);
     useEffect(() => {
@@ -458,6 +458,8 @@ export default function AdminDashboard() {
     const [productSearch, setProductSearch] = useState('');
     const [editProductId, setEditProductId] = useState(null);
     const [editProductData, setEditProductData] = useState({});
+    // Shared confirm dialog
+    const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
     // Inventory tab state
     const [inventorySearch, setInventorySearch] = useState('');
     const [lowStockStoreModal, setLowStockStoreModal] = useState(null);
@@ -717,9 +719,10 @@ export default function AdminDashboard() {
         if (!deptProductForm.title.trim()) { setMessage({ type: 'error', text: 'Product title is required' }); return; }
         if (!deptProductForm.price || parseFloat(deptProductForm.price) <= 0) { setMessage({ type: 'error', text: 'Price must be greater than 0' }); return; }
         if (deptProductImages.length === 0) { setMessage({ type: 'error', text: 'At least one image is required' }); return; }
+        const deptId = selectedDeptDetail.department.id;
         setDeptProductCreating(true);
         try {
-            await adminCreateProductForDept(selectedDeptDetail.department.id, {
+            await adminCreateProductForDept(deptId, {
                 title: deptProductForm.title.trim(),
                 description: deptProductForm.description.trim(),
                 price: parseFloat(deptProductForm.price),
@@ -729,8 +732,11 @@ export default function AdminDashboard() {
             setShowDeptCreateProduct(false);
             setDeptProductForm({ title: '', description: '', price: '' });
             setDeptProductImages([]);
-            // Reload department detail
-            handleDeptClick(selectedDeptDetail.department.id);
+            // Reload department detail without closing the modal
+            try {
+                const detail = await adminGetDepartmentDetail(deptId);
+                setSelectedDeptDetail(detail);
+            } catch (e) { console.error(e); }
         } catch (err) {
             setMessage({ type: 'error', text: 'Failed to create product: ' + err.message });
         } finally {
@@ -785,15 +791,20 @@ export default function AdminDashboard() {
             loadUsers(userSearch, userRoleFilter);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
-    const handleDeleteUser = async (userId, userName) => {
-        if (!window.confirm(`Permanently delete "${userName}"? This cannot be undone.`)) return;
-        try {
-            await adminDeleteUser(userId);
-            setMessage({ type: 'success', text: `User "${userName}" permanently deleted` });
-            setSelectedUserId(null);
-            setUserDetail(null);
-            loadUsers(userSearch, userRoleFilter);
-        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    const handleDeleteUser = (userId, userName) => {
+        setConfirmDialog({
+            title: 'Delete User',
+            message: `Permanently delete "${userName}"? This cannot be undone.`,
+            onConfirm: async () => {
+                try {
+                    await adminDeleteUser(userId);
+                    setMessage({ type: 'success', text: `User "${userName}" permanently deleted` });
+                    setSelectedUserId(null);
+                    setUserDetail(null);
+                    loadUsers(userSearch, userRoleFilter);
+                } catch (e) { setMessage({ type: 'error', text: e.message }); }
+            },
+        });
     };
     const handleApproveRemoval = async (productId) => {
         setRemovalLoading(true);
@@ -833,9 +844,17 @@ export default function AdminDashboard() {
                 notes: restockMessage || '',
             });
             setMessage({ type: 'success', text: `Restock request submitted for ${restockModal.title} (Qty: ${restockQty}) — To Be Delivered` });
+            const deptId = restockModal._dept_id;
             setRestockModal(null);
             setRestockQty('');
             setRestockMessage('');
+            // Refresh the store detail box if the restock came from it
+            if (deptId) {
+                try {
+                    const detail = await adminGetDepartmentDetail(deptId);
+                    setSelectedDeptDetail(detail);
+                } catch (e) { console.error(e); }
+            }
             // Refresh products if on inventory tab
             if (activeTab === 'inventory') loadProducts();
         } catch (e) {
@@ -850,6 +869,33 @@ export default function AdminDashboard() {
             setEditProductData({});
             loadProducts(productSearch);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    };
+    const handleDeleteProduct = (productId, productTitle) => {
+        setConfirmDialog({
+            title: 'Delete Product',
+            message: `Delete "${productTitle}"? This cannot be undone.`,
+            onConfirm: async () => {
+                try {
+                    await adminDeleteProduct(productId);
+                    setMessage({ type: 'success', text: `"${productTitle}" deleted` });
+                    loadProducts(productSearch);
+                } catch (e) { setMessage({ type: 'error', text: 'Failed to delete: ' + e.message }); }
+            },
+        });
+    };
+    const handleDeleteDepartment = (deptId, deptName) => {
+        setConfirmDialog({
+            title: 'Delete Store',
+            message: `Delete store "${deptName}"? All staff will be disassociated. This cannot be undone.`,
+            onConfirm: async () => {
+                try {
+                    await adminDeleteDepartment(deptId);
+                    setMessage({ type: 'success', text: `Store "${deptName}" deleted` });
+                    setSelectedDeptDetail(null);
+                    loadDepartments();
+                } catch (e) { setMessage({ type: 'error', text: 'Failed to delete store: ' + e.message }); }
+            },
+        });
     };
     const handleLogout = () => { adminLogout(); window.location.href = '/admin'; };
     const handleUserClick = async (userId) => {
@@ -1659,7 +1705,6 @@ export default function AdminDashboard() {
                                                                         size={130}
                                                                         data={[
                                                                             { label: 'Delivery', value: selectedDeptDetail.delivery_orders || 0, color: '#3b82f6' },
-                                                                            { label: 'Walk-in', value: selectedDeptDetail.walkin_orders || 0, color: '#10b981' },
                                                                         ]}
                                                                     />
                                                                 </div>
@@ -1669,8 +1714,8 @@ export default function AdminDashboard() {
                                                                         <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#3b82f6' }}>{selectedDeptDetail.delivery_orders || 0}</p>
                                                                     </div>
                                                                     <div>
-                                                                        <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 4 }}>Walk-in Orders</p>
-                                                                        <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#10b981' }}>{selectedDeptDetail.walkin_orders || 0}</p>
+                                                                        <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.65rem', textTransform: 'uppercase', marginBottom: 4 }}>Total Revenue</p>
+                                                                        <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#10b981' }}>PHP {(selectedDeptDetail.total_revenue || 0).toFixed(2)}</p>
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -1691,7 +1736,7 @@ export default function AdminDashboard() {
                                                                                 const isLowStock = prod.stock <= 5;
                                                                                 return (
                                                                                     <div key={prod.id}
-                                                                                        onClick={() => handleLowStockClick({ ...prod, seller_name: selectedDeptDetail.department.name })}
+                                                                                        onClick={() => handleLowStockClick({ ...prod, seller_name: selectedDeptDetail.department.name, _dept_id: selectedDeptDetail.department.id })}
                                                                                         style={{
                                                                                             padding: 12, borderRadius: 10,
                                                                                             background: 'var(--admin-card-bg)',
@@ -1810,23 +1855,14 @@ export default function AdminDashboard() {
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            {/* Delivery vs Walk-in Earnings */}
-                                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Delivery vs Walk-in Earnings</h3>
-                                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
-                                                                    <LineChart
-                                                                        data={selectedDeptDetail.delivery_earnings || []}
-                                                                        labelKey="date" valueKey="amount"
-                                                                        title="Delivery Earnings" color="#3b82f6" height={150}
-                                                                    />
-                                                                </div>
-                                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
-                                                                    <LineChart
-                                                                        data={selectedDeptDetail.walkin_earnings || []}
-                                                                        labelKey="date" valueKey="amount"
-                                                                        title="Walk-in Earnings" color="#10b981" height={150}
-                                                                    />
-                                                                </div>
+                                                            {/* Delivery Earnings */}
+                                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Monthly Earnings</h3>
+                                                            <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', marginBottom: 20 }}>
+                                                                <LineChart
+                                                                    data={selectedDeptDetail.delivery_earnings || []}
+                                                                    labelKey="date" valueKey="amount"
+                                                                    title="Delivery Earnings" color="#3b82f6" height={150}
+                                                                />
                                                             </div>
                                                             {/* Staff List — Clickable */}
                                                             <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Staff ({selectedDeptDetail.staff?.length || 0})</h3>
@@ -1888,6 +1924,22 @@ export default function AdminDashboard() {
                                                             ) : (
                                                                 <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: 20 }}>No staff members</p>
                                                             )}
+                                                            {/* Delete Store Button */}
+                                                            <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--admin-border)' }}>
+                                                                <button
+                                                                    onClick={() => handleDeleteDepartment(selectedDeptDetail.department.id, selectedDeptDetail.department.name)}
+                                                                    style={{
+                                                                        width: '100%', padding: '11px 0', borderRadius: 10,
+                                                                        background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                                                                        color: '#ef4444', fontWeight: 700, fontSize: '0.88rem',
+                                                                        cursor: 'pointer', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                                    }}
+                                                                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; }}
+                                                                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                                                                >
+                                                                    Delete Store
+                                                                </button>
+                                                            </div>
                                                             {/* Staff Detail Popup — overlays the store detail */}
                                                             {(selectedStaffDetail || staffDetailLoading) && (
                                                                 <div style={{
@@ -1908,24 +1960,18 @@ export default function AdminDashboard() {
                                                                         // Build line graph data from seller transactions
                                                                         const txnsByMonth = {};
                                                                         const deliveriesByMonth = {};
-                                                                        const walkinsByMonth = {};
                                                                         sellerTxns.forEach(t => {
                                                                             try {
                                                                                 const d = new Date(t.created_at);
                                                                                 const key = d.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' });
                                                                                 txnsByMonth[key] = (txnsByMonth[key] || 0) + 1;
-                                                                                if (t.purchase_type === 'delivery') {
-                                                                                    deliveriesByMonth[key] = (deliveriesByMonth[key] || 0) + 1;
-                                                                                } else {
-                                                                                    walkinsByMonth[key] = (walkinsByMonth[key] || 0) + 1;
-                                                                                }
+                                                                                deliveriesByMonth[key] = (deliveriesByMonth[key] || 0) + 1;
                                                                             } catch { }
                                                                         });
                                                                         const lineData = Object.entries(txnsByMonth)
-                                                                            .map(([date, count]) => ({ date, count, deliveries: deliveriesByMonth[date] || 0, walkins: walkinsByMonth[date] || 0 }))
+                                                                            .map(([date, count]) => ({ date, count, deliveries: deliveriesByMonth[date] || 0 }))
                                                                             .slice(-8);
-                                                                        const totalDeliveries = sellerTxns.filter(t => t.purchase_type === 'delivery').length;
-                                                                        const totalWalkins = sellerTxns.filter(t => t.purchase_type !== 'delivery').length;
+                                                                        const totalDeliveries = sellerTxns.length;
                                                                         return (
                                                                             <>
                                                                                 <button onClick={() => { setSelectedStaffDetail(null); }} style={{
@@ -1977,8 +2023,8 @@ export default function AdminDashboard() {
                                                                                         background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
                                                                                         textAlign: 'center',
                                                                                     }}>
-                                                                                        <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#10b981' }}>{totalWalkins}</p>
-                                                                                        <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem', textTransform: 'uppercase' }}>Walk-ins</p>
+                                                                                        <p style={{ fontSize: '1.3rem', fontWeight: 800, color: '#3b82f6' }}>{totalDeliveries}</p>
+                                                                                        <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem', textTransform: 'uppercase' }}>Deliveries</p>
                                                                                     </div>
                                                                                 </div>
                                                                                 {/* Activity line graph */}
@@ -1989,22 +2035,13 @@ export default function AdminDashboard() {
                                                                                         title="Monthly Order Activity" color="#6366f1" height={200} prefix=""
                                                                                     />
                                                                                 </div>
-                                                                                {/* Delivery vs Walk-in line */}
-                                                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                                                                                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
-                                                                                        <LineChart
-                                                                                            data={lineData}
-                                                                                            labelKey="date" valueKey="deliveries"
-                                                                                            title="Delivery Orders" color="#3b82f6" height={150} prefix=""
-                                                                                        />
-                                                                                    </div>
-                                                                                    <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
-                                                                                        <LineChart
-                                                                                            data={lineData}
-                                                                                            labelKey="date" valueKey="walkins"
-                                                                                            title="Walk-in Orders" color="#10b981" height={150} prefix=""
-                                                                                        />
-                                                                                    </div>
+                                                                                {/* Delivery Activity Line */}
+                                                                                <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', marginBottom: 20 }}>
+                                                                                    <LineChart
+                                                                                        data={lineData}
+                                                                                        labelKey="date" valueKey="deliveries"
+                                                                                        title="Delivery Orders" color="#3b82f6" height={150} prefix=""
+                                                                                    />
                                                                                 </div>
                                                                                 {/* Recent transactions */}
                                                                                 {sellerTxns.length > 0 && (
@@ -2028,9 +2065,9 @@ export default function AdminDashboard() {
                                                                                                         <p style={{ fontWeight: 600 }}>PHP {(t.amount || 0).toFixed(2)}</p>
                                                                                                         <span style={{
                                                                                                             padding: '2px 8px', borderRadius: 10, fontSize: '0.65rem', fontWeight: 600,
-                                                                                                            background: t.purchase_type === 'delivery' ? 'rgba(59,130,246,0.12)' : 'rgba(16,185,129,0.12)',
-                                                                                                            color: t.purchase_type === 'delivery' ? '#3b82f6' : '#10b981',
-                                                                                                        }}>{t.purchase_type === 'delivery' ? 'Delivery' : 'Walk-in'}</span>
+                                                                                                            background: 'rgba(59,130,246,0.12)',
+                                                                                                            color: '#3b82f6',
+                                                                                                        }}>Delivery</span>
                                                                                                     </div>
                                                                                                 </div>
                                                                                             ))}
@@ -2507,32 +2544,24 @@ export default function AdminDashboard() {
                     {/* ===== TRANSACTIONS TAB ===== */}
                     {activeTab === 'transactions' && (() => {
                         const filteredTxns = transactions.filter(t => {
-                            if (txnTypeFilter !== 'all' && t.purchase_type !== txnTypeFilter) return false;
                             if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
                             return true;
                         });
                         const statusColors = {
                             pending: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
-                            pending_walkin: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
                             approved: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
-                            inwork: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
-                            ready: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
                             ondeliver: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
                             delivered: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
-                            picked_up: { bg: 'rgba(14,165,233,0.15)', color: '#0ea5e9' },
                             completed: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
                             undelivered: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
                             cancelled: { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
                         };
                         const statusLabels = {
-                            pending: 'Pending', pending_walkin: 'Pending', approved: 'Approved',
-                            inwork: 'In Work', ready: 'Ready', ondeliver: 'On Deliver',
-                            delivered: 'Delivered', picked_up: 'Picked Up', completed: 'Completed',
+                            pending: 'Pending', approved: 'Approved', ondeliver: 'On Deliver',
+                            delivered: 'Delivered', completed: 'Completed',
                             undelivered: 'Undelivered', cancelled: 'Cancelled',
                         };
-                        const deliveryStatuses = ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'];
-                        const walkinStatuses = ['pending_walkin', 'inwork', 'ready', 'picked_up', 'completed', 'cancelled'];
-                        const availableStatuses = txnTypeFilter === 'delivery' ? deliveryStatuses : txnTypeFilter === 'walkin' ? walkinStatuses : [...new Set([...deliveryStatuses, ...walkinStatuses])];
+                        const availableStatuses = ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'];
                         return (
                             <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -2556,18 +2585,7 @@ export default function AdminDashboard() {
                                 </div>
                                 {/* Filter Buttons */}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Type:</span>
-                                    {[{ key: 'all', label: 'All' }, { key: 'delivery', label: 'Delivery' }, { key: 'walkin', label: 'Walk-in' }].map(f => (
-                                        <button key={f.key} onClick={() => { setTxnTypeFilter(f.key); setTxnStatusFilter('all'); }} style={{
-                                            padding: '6px 14px', borderRadius: 8, border: '1px solid',
-                                            borderColor: txnTypeFilter === f.key ? 'var(--admin-accent)' : 'var(--admin-border)',
-                                            background: txnTypeFilter === f.key ? 'var(--admin-active-bg)' : 'transparent',
-                                            color: txnTypeFilter === f.key ? 'var(--admin-active-text)' : 'var(--admin-text-secondary)',
-                                            fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter, sans-serif',
-                                            transition: 'all 0.15s',
-                                        }}>{f.label}</button>
-                                    ))}
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginLeft: 12, marginRight: 4 }}>Status:</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Status:</span>
                                     <select
                                         value={txnStatusFilter}
                                         onChange={e => setTxnStatusFilter(e.target.value)}
@@ -2588,14 +2606,13 @@ export default function AdminDashboard() {
                                     <table className="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th>
+                                                <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Date</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {filteredTxns.map(t => {
                                                 const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
                                                 const sLabel = statusLabels[t.status] || t.status;
-                                                const isDelivery = t.purchase_type === 'delivery';
                                                 return (
                                                     <tr key={t.id}>
                                                         <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
@@ -2608,13 +2625,6 @@ export default function AdminDashboard() {
                                                                 padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
                                                                 background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
                                                             }}>{sLabel}</span>
-                                                        </td>
-                                                        <td>
-                                                            <span style={{
-                                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                                background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
-                                                                color: isDelivery ? '#3b82f6' : '#f59e0b', whiteSpace: 'nowrap',
-                                                            }}>{isDelivery ? <><Truck size={14} /> Delivery</> : <><Store size={14} /> Walk-in</>}</span>
                                                         </td>
                                                         <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                             {new Date(t.created_at).toLocaleString()}
@@ -2673,7 +2683,7 @@ export default function AdminDashboard() {
                                             <table className="data-table">
                                                 <thead>
                                                     <tr>
-                                                        <th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Created</th><th>Actions</th>
+                                                        <th>Product</th><th>Price</th><th>Stock</th><th>Created</th><th>Actions</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -2700,24 +2710,6 @@ export default function AdminDashboard() {
                                                                         style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
                                                                 ) : <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>}
                                                             </td>
-                                                            <td>
-                                                                {editProductId === p.id ? (
-                                                                    <select defaultValue={p.is_active.toString()}
-                                                                        onChange={e => setEditProductData({ ...editProductData, is_active: e.target.value === 'true' })}
-                                                                        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }}>
-                                                                        <option value="true">Active</option>
-                                                                        <option value="false">Inactive</option>
-                                                                    </select>
-                                                                ) : (
-                                                                    <span style={{
-                                                                        padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                                        background: p.is_active ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                                        color: p.is_active ? '#10b981' : '#ef4444',
-                                                                    }}>
-                                                                        {p.is_active ? 'Active' : 'Inactive'}
-                                                                    </span>
-                                                                )}
-                                                            </td>
                                                             <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                                 {new Date(p.created_at).toLocaleDateString()}
                                                             </td>
@@ -2728,8 +2720,12 @@ export default function AdminDashboard() {
                                                                         <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(null); setEditProductData({}); }} style={{ padding: '4px 8px' }}>No</button>
                                                                     </div>
                                                                 ) : (
-                                                                    <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
-                                                                        style={{ fontSize: '0.75rem' }}>Edit</button>
+                                                                    <div style={{ display: 'flex', gap: 4 }}>
+                                                                        <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
+                                                                            style={{ fontSize: '0.75rem' }}>Edit</button>
+                                                                        <button className="btn btn-sm" onClick={() => handleDeleteProduct(p.id, p.title)}
+                                                                            style={{ fontSize: '0.75rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>Delete</button>
+                                                                    </div>
                                                                 )}
                                                             </td>
                                                         </tr>
@@ -4004,18 +4000,18 @@ export default function AdminDashboard() {
                                             </div>
                                         </div>
 
-                                        {/* Walk-in vs Delivery Dual Line Chart */}
+                                        {/* Delivery Items Processed Chart */}
                                         <div style={{
                                             padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)',
                                             border: '1px solid var(--admin-border)', marginBottom: 24,
                                         }}>
-                                            <DualLineChart
+                                            <LineChart
                                                 data={[...(userDetail.report?.daily || [])].reverse().slice(0, 14)}
                                                 labelKey="date"
-                                                valueKey1="walkin_items" color1="#10b981" label1="Walk-in"
-                                                valueKey2="delivery_items" color2="#3b82f6" label2="Delivery"
-                                                title="Items Processed (Walk-in vs Delivery)"
-                                                height={200}
+                                                valueKey="delivery_items"
+                                                color="#3b82f6"
+                                                title="Delivery Items Processed (Last 14 Days)"
+                                                height={200} prefix=""
                                             />
                                         </div>
                                     </>
@@ -4178,10 +4174,9 @@ export default function AdminDashboard() {
                                                             }}>{p.quantity_processed} processed</span>
                                                             <span style={{
                                                                 fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4,
-                                                                background: p.purchase_type === 'walkin' ? 'rgba(16,185,129,0.1)' : 'rgba(59,130,246,0.1)',
-                                                                color: p.purchase_type === 'walkin' ? '#10b981' : '#3b82f6', fontWeight: 600,
-                                                                textTransform: 'capitalize',
-                                                            }}>{p.purchase_type}</span>
+                                                                background: 'rgba(59,130,246,0.1)',
+                                                                color: '#3b82f6', fontWeight: 600,
+                                                            }}>Delivery</span>
                                                         </div>
                                                         <p style={{ fontSize: '0.6rem', color: 'var(--admin-text-muted)', marginTop: 2 }}>
                                                             Last: {new Date(p.last_handled).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
@@ -4251,6 +4246,48 @@ export default function AdminDashboard() {
                             to { transform: translateX(0); }
                         }
                     `}</style>
+                </>
+            )}
+            {/* ===== CONFIRM DIALOG ===== */}
+            {confirmDialog && (
+                <>
+                    <div style={{
+                        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+                        zIndex: 600,
+                    }} onClick={() => setConfirmDialog(null)} />
+                    <div style={{
+                        position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        zIndex: 601, padding: '20px', pointerEvents: 'none',
+                    }}>
+                        <div style={{
+                            background: 'var(--admin-bg)', borderRadius: 16, padding: 28,
+                            width: 400, maxWidth: '90vw', border: '1px solid var(--admin-border)',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.5)', pointerEvents: 'auto',
+                            animation: 'fadeScaleIn 0.18s ease-out',
+                        }}>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: 10 }}>{confirmDialog.title}</h3>
+                            <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem', marginBottom: 24, lineHeight: 1.5 }}>{confirmDialog.message}</p>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                                <button
+                                    onClick={async () => { const fn = confirmDialog.onConfirm; setConfirmDialog(null); await fn(); }}
+                                    style={{
+                                        flex: 1, padding: '10px 0', borderRadius: 10, border: 'none',
+                                        background: '#ef4444', color: '#fff', fontWeight: 700,
+                                        fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                    }}
+                                >Confirm</button>
+                                <button
+                                    onClick={() => setConfirmDialog(null)}
+                                    style={{
+                                        flex: 1, padding: '10px 0', borderRadius: 10,
+                                        border: '1px solid var(--admin-border)', background: 'transparent',
+                                        color: 'var(--admin-text-secondary)', fontWeight: 700,
+                                        fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                    }}
+                                >Cancel</button>
+                            </div>
+                        </div>
+                    </div>
                 </>
             )}
             {/* ===== GLOBAL RESTOCK REQUEST MODAL ===== */}

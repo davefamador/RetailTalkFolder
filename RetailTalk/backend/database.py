@@ -61,12 +61,12 @@ def search_similar_products(query_embedding: np.ndarray, top_k: int = 50):
     embedding_str = embedding_to_pgvector(query_embedding)
     
     query = """
-        SELECT 
-            id, seller_id, title, description, price, images,
+        SELECT
+            id, seller_id, title, description, price, stock, images,
             embedding::text as embedding_text,
             1 - (embedding <=> %s::vector) as similarity
         FROM products
-        WHERE is_active = true AND embedding IS NOT NULL
+        WHERE is_active = true AND status = 'approved' AND stock > 0 AND embedding IS NOT NULL
         ORDER BY embedding <=> %s::vector
         LIMIT %s
     """
@@ -77,7 +77,7 @@ def search_similar_products(query_embedding: np.ndarray, top_k: int = 50):
             rows = cur.fetchall()
     finally:
         conn.close()
-    
+
     results = []
     for row in rows:
         results.append({
@@ -86,11 +86,12 @@ def search_similar_products(query_embedding: np.ndarray, top_k: int = 50):
             "title": row["title"],
             "description": row["description"],
             "price": float(row["price"]),
+            "stock": int(row["stock"]),
             "images": row["images"] or [],
             "embedding": pgvector_to_embedding(row["embedding_text"]),
             "similarity": float(row["similarity"]),
         })
-    
+
     return results
 
 
@@ -110,7 +111,7 @@ def search_similar_products_filtered(
     embedding_str = embedding_to_pgvector(query_embedding)
     
     # Build dynamic WHERE clause
-    conditions = ["is_active = true", "embedding IS NOT NULL"]
+    conditions = ["is_active = true", "status = 'approved'", "stock > 0", "embedding IS NOT NULL"]
     filter_params = []
 
     if price_min is not None:
@@ -140,7 +141,7 @@ def search_similar_products_filtered(
 
     query = f"""
         SELECT
-            id, seller_id, title, description, price, images,
+            id, seller_id, title, description, price, stock, images,
             embedding::text as embedding_text,
             1 - (embedding <=> %s::vector) as similarity
         FROM products
@@ -155,7 +156,7 @@ def search_similar_products_filtered(
             rows = cur.fetchall()
     finally:
         conn.close()
-    
+
     results = []
     for row in rows:
         results.append({
@@ -164,11 +165,12 @@ def search_similar_products_filtered(
             "title": row["title"],
             "description": row["description"],
             "price": float(row["price"]),
+            "stock": int(row["stock"]),
             "images": row["images"] or [],
             "embedding": pgvector_to_embedding(row["embedding_text"]),
             "similarity": float(row["similarity"]),
         })
-    
+
     return results
 
 

@@ -437,31 +437,43 @@ export default function DeliveryPage() {
                                 {active.length === 0 ? (
                                     <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24, color: 'var(--text-muted)' }}>No active deliveries</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
-                                        {active.map(o => (
-                                            <div key={o.transaction_id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                    {renderProductImage(o.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{o.product_title}</h4>
-                                                            <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
+                                    <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+                                        {active.map(g => (
+                                            <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(59,130,246,0.3)' }}>
+                                                {/* Group header */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
                                                         </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {o.buyer_name} | Seller: {o.seller_name} | Fee: PHP {o.delivery_fee.toFixed(2)}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                                                            📞 {o.buyer_contact || 'N/A'}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: o.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: o.delivery_address ? 600 : 400 }}>
-                                                            📍 {o.delivery_address || 'No address set'}
-                                                        </p>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
                                                     </div>
+                                                    <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
+                                                </div>
+                                                {/* Items in box */}
+                                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                                    {(g.items || []).map((item, idx) => (
+                                                        <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
+                                                            {renderProductImage(item.product_images)}
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                            </div>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Totals */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                                    <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
+                                                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 8 }}>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(o.transaction_id, 'delivered')}
+                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'delivered')}
                                                         style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>Delivered</button>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(o.transaction_id, 'undelivered')}
+                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'undelivered')}
                                                         style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', fontWeight: 600 }}>Undelivered</button>
                                                 </div>
                                             </div>
@@ -476,30 +488,42 @@ export default function DeliveryPage() {
                                 {available.length === 0 ? (
                                     <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No orders available for pickup</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gap: 12 }}>
-                                        {available.map(o => (
-                                            <div key={o.transaction_id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                    {renderProductImage(o.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{o.product_title}</h4>
-                                                            <span style={{ ...STATUS_COLORS.approved, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>Approved</span>
+                                    <div style={{ display: 'grid', gap: 16 }}>
+                                        {available.map(g => (
+                                            <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(16,185,129,0.3)' }}>
+                                                {/* Group header */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
                                                         </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {o.buyer_name} | Seller: {o.seller_name} | Qty: {o.quantity} | Fee: PHP {o.delivery_fee.toFixed(2)}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                                                            📞 {o.buyer_contact || 'N/A'}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: o.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: o.delivery_address ? 600 : 400 }}>
-                                                            📍 {o.delivery_address || 'No address set'}
-                                                        </p>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
                                                     </div>
+                                                    <span style={{ ...STATUS_COLORS.approved, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>Ready</span>
                                                 </div>
-                                                <button className="btn btn-primary btn-sm" onClick={() => handlePick(o.transaction_id)}
+                                                {/* Items in box */}
+                                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                                    {(g.items || []).map((item, idx) => (
+                                                        <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
+                                                            {renderProductImage(item.product_images)}
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                            </div>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Totals */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                                    <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
+                                                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
+                                                </div>
+                                                <button className="btn btn-primary btn-sm" onClick={() => handlePick(g.group_id)}
                                                     disabled={active.length >= 5} style={{ fontWeight: 600 }}>
-                                                    {active.length >= 5 ? 'Max deliveries reached' : 'Pick Up'}
+                                                    {active.length >= 5 ? 'Max deliveries reached' : '🚚 Pick Up Box'}
                                                 </button>
                                             </div>
                                         ))}
@@ -616,7 +640,7 @@ export default function DeliveryPage() {
                                                             }}>{h.status}</span>
                                                         </div>
                                                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Fee: PHP {h.delivery_fee.toFixed(2)} | Seller: {h.seller_name}
+                                                            Fee: PHP {h.delivery_fee.toFixed(2)} | Store: {h.seller_name}
                                                         </p>
                                                         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                                                             Buyer: {h.buyer_name} | Contact: {h.buyer_contact}
@@ -654,7 +678,7 @@ export default function DeliveryPage() {
                                                         }}>{h.status}</span>
                                                     </div>
                                                     <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                        Fee: PHP {h.delivery_fee.toFixed(2)} | Seller: {h.seller_name}
+                                                        Fee: PHP {h.delivery_fee.toFixed(2)} | Store: {h.seller_name}
                                                     </p>
                                                     <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                                                         Buyer: {h.buyer_name} | Contact: {h.buyer_contact}

@@ -8,6 +8,8 @@ Supports quantity (buyer selects how many to buy).
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
+import uuid
+from datetime import datetime, timezone, timedelta
 from database import get_supabase
 from routes.auth import get_current_user
 
@@ -21,7 +23,6 @@ DELIVERY_FEE = 90.00
 class BuyRequest(BaseModel):
     product_id: str
     quantity: int = 1  # How many items to buy
-    purchase_type: str = "delivery"  # 'walkin' or 'delivery'
 
 
 class TopUpRequest(BaseModel):
@@ -50,8 +51,11 @@ class TransactionResponse(BaseModel):
     delivery_user_contact: str = ""
     seller_name: str = ""
     buyer_name: str = ""
+    assigned_staff_id: str = ""
+    assigned_staff_name: str = ""
     delivery_address: str = ""
     product_images: list = []
+    group_id: str = ""
     created_at: str
 
 
@@ -98,19 +102,16 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
     if user_role != "buyer":
         raise HTTPException(status_code=403, detail="Only buyers can purchase products")
 
-    # Validate purchase_type
-    if req.purchase_type not in ("walkin", "delivery"):
-        raise HTTPException(status_code=400, detail="purchase_type must be 'walkin' or 'delivery'")
+    # Always delivery orders
 
     # For delivery orders, get buyer's delivery address
     delivery_address = ""
-    if req.purchase_type == "delivery":
-        contact = sb.table("user_contacts").select("contact_number, delivery_address").eq("user_id", user_id).execute()
-        if not contact.data:
-            raise HTTPException(status_code=400, detail="Please add your contact number and delivery address before placing a delivery order")
-        delivery_address = (contact.data[0].get("delivery_address") or "").strip()
-        if not delivery_address:
-            raise HTTPException(status_code=400, detail="Please set your delivery address before placing a delivery order")
+    contact = sb.table("user_contacts").select("contact_number, delivery_address").eq("user_id", user_id).execute()
+    if not contact.data:
+        raise HTTPException(status_code=400, detail="Please add your contact number and delivery address before placing a delivery order")
+    delivery_address = (contact.data[0].get("delivery_address") or "").strip()
+    if not delivery_address:
+        raise HTTPException(status_code=400, detail="Please set your delivery address before placing a delivery order")
 
     # 2. Get product
     product_result = sb.table("products").select("*").eq("id", req.product_id).eq("is_active", True).eq("status", "approved").execute()
@@ -142,8 +143,50 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
     unit_price = float(product["price"])
     total_price = unit_price * req.quantity
 
-    # Add delivery fee for delivery orders
-    delivery_fee = 90.00 if req.purchase_type == "delivery" else 0.0
+    # --- Group detection: find an open group for this buyer+store within 1 hour ---
+    seller_id = product["seller_id"]
+    # Determine the delivery unit (department or seller)
+    seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
+    seller_dept_id = seller_info.data[0].get("department_id") if seller_info.data else None
+
+    existing_group_id = None
+    delivery_fee = 90.00  # Default: new group
+
+    # Look for an active group for this buyer within the same store/department in the last hour.
+    # An open group has NO transaction in ondeliver/delivered/undelivered/cancelled state.
+    one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+    if seller_dept_id:
+        # Get all sellers in the same department
+        dept_sellers = sb.table("users").select("id").eq("department_id", seller_dept_id).execute()
+        dept_seller_ids = [s["id"] for s in (dept_sellers.data or [])]
+        # Find recent pending/approved transactions for this buyer from department sellers
+        recent = sb.table("product_transactions").select("group_id, status").eq(
+            "buyer_id", user_id
+        ).in_("seller_id", dept_seller_ids).in_(
+            "status", ["pending", "approved"]
+        ).gte("created_at", one_hour_ago).not_.is_("group_id", "null").execute()
+    else:
+        recent = sb.table("product_transactions").select("group_id, status").eq(
+            "buyer_id", user_id
+        ).eq("seller_id", seller_id).in_(
+            "status", ["pending", "approved"]
+        ).gte("created_at", one_hour_ago).not_.is_("group_id", "null").execute()
+
+    if recent.data:
+        # Collect candidate group ids
+        candidate_groups = set(r["group_id"] for r in recent.data if r.get("group_id"))
+        # Filter out any group that has a picked-up/done transaction
+        for gid in candidate_groups:
+            bad = sb.table("product_transactions").select("id", count="exact").eq(
+                "group_id", gid
+            ).in_("status", ["ondeliver", "delivered", "undelivered", "cancelled"]).execute()
+            if (bad.count or 0) == 0:
+                existing_group_id = gid
+                delivery_fee = 0.0  # Joining existing group — no extra delivery fee
+                break
+
+    group_id = existing_group_id if existing_group_id else str(uuid.uuid4())
     grand_total = total_price + delivery_fee
 
     if buyer_balance < grand_total:
@@ -152,20 +195,35 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
             detail=f"Insufficient balance. You have PHP {buyer_balance:.2f}, total cost is PHP {grand_total:.2f}",
         )
 
-    # 6. Amounts (no commission split — admin gets paid on successful completion)
+    # 6. Amounts
     seller_amount = total_price
     admin_commission = 0.0
 
-    # 7. Deduct from buyer (money is held until transaction completes)
+    # 7. Deduct from buyer
     new_buyer_balance = buyer_balance - grand_total
     sb.table("user_balances").update({"balance": new_buyer_balance}).eq("user_id", user_id).execute()
+
+    # Log the purchase deduction in stored_value so it appears in wallet history
+    sb.table("stored_value").insert({
+        "user_id": user_id,
+        "transaction_type": "purchase",
+        "amount": grand_total,
+        "metadata": {
+            "product_id": req.product_id,
+            "product_title": product["title"],
+            "quantity": req.quantity,
+            "product_amount": total_price,
+            "delivery_fee": delivery_fee,
+            "group_id": group_id,
+            "joined_existing_group": existing_group_id is not None,
+        },
+    }).execute()
 
     # 8. Decrement stock
     new_stock = current_stock - req.quantity
     sb.table("products").update({"stock": new_stock}).eq("id", req.product_id).execute()
 
-    # 11. Create product_transaction record
-    txn_status = "pending_walkin" if req.purchase_type == "walkin" else "pending"
+    # 9. Create product_transaction record
     txn_result = sb.table("product_transactions").insert({
         "buyer_id": user_id,
         "seller_id": product["seller_id"],
@@ -176,8 +234,9 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
         "admin_commission": admin_commission,
         "delivery_fee": delivery_fee,
         "delivery_address": delivery_address,
-        "purchase_type": req.purchase_type,
-        "status": txn_status,
+        "purchase_type": "delivery",
+        "status": "pending",
+        "group_id": group_id,
     }).execute()
 
     if not txn_result.data:
@@ -198,6 +257,7 @@ async def buy_product(req: BuyRequest, current_user: dict = Depends(get_current_
         status=txn["status"],
         purchase_type=txn.get("purchase_type", "delivery"),
         delivery_user_id=txn.get("delivery_user_id") or "",
+        group_id=txn.get("group_id") or "",
         created_at=txn["created_at"],
     )
 
@@ -275,6 +335,13 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
         b_users = sb.table("users").select("id, full_name").in_("id", list(buyer_ids)).execute()
         buyer_names = {u["id"]: u["full_name"] for u in (b_users.data or [])}
 
+    # Get assigned staff names
+    assigned_ids = set(t.get("assigned_staff_id") for t in unique_txns if t.get("assigned_staff_id"))
+    assigned_names = {}
+    if assigned_ids:
+        a_users = sb.table("users").select("id, full_name").in_("id", list(assigned_ids)).execute()
+        assigned_names = {u["id"]: u["full_name"] for u in (a_users.data or [])}
+
     return [
         TransactionResponse(
             id=t["id"],
@@ -295,7 +362,10 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
             delivery_user_contact=delivery_contacts.get(t.get("delivery_user_id", ""), ""),
             seller_name=seller_names.get(t.get("seller_id", ""), ""),
             buyer_name=buyer_names.get(t.get("buyer_id", ""), ""),
+            assigned_staff_id=t.get("assigned_staff_id") or "",
+            assigned_staff_name=assigned_names.get(t.get("assigned_staff_id", ""), ""),
             delivery_address=t.get("delivery_address", ""),
+            group_id=t.get("group_id") or "",
             created_at=t["created_at"],
         )
         for t in unique_txns
@@ -393,332 +463,7 @@ async def get_svf_history(current_user: dict = Depends(get_current_user)):
         for row in (result.data or [])
     ]
 
-
-# --- Walk-in Order Management (Staff) ---
-
-class WalkinStatusUpdate(BaseModel):
-    status: str  # 'inwork', 'ready', or 'completed' (completed only after buyer confirms pickup)
-
-
-@router.get("/staff/walkin-orders")
-async def get_staff_walkin_orders(current_user: dict = Depends(get_current_user)):
-    """Get walk-in orders for all staff in the same department/store."""
-    sb = get_supabase()
-    user_id = current_user["sub"]
-
-    # Verify seller role and get department
-    user = sb.table("users").select("role, department_id").eq("id", user_id).execute()
-    if not user.data or user.data[0]["role"] not in ("seller", "manager"):
-        raise HTTPException(status_code=403, detail="Only sellers can view walk-in orders")
-
-    dept_id = user.data[0].get("department_id")
-
-    # Get all staff in the same department
-    if dept_id:
-        staff = sb.table("users").select("id").eq("department_id", dept_id).execute()
-        seller_ids = [s["id"] for s in (staff.data or [])]
-        if user_id not in seller_ids:
-            seller_ids.append(user_id)
-    else:
-        seller_ids = [user_id]
-
-    txns = sb.table("product_transactions").select(
-        "*, products(title, price, images)"
-    ).in_("seller_id", seller_ids).eq("purchase_type", "walkin").in_(
-        "status", ["pending_walkin", "inwork", "ready", "picked_up"]
-    ).order("created_at", desc=False).execute()
-
-    if not txns.data:
-        return []
-
-    # Get buyer + assigned staff names
-    buyer_ids = set(t["buyer_id"] for t in txns.data)
-    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
-    all_user_ids = buyer_ids | assigned_ids
-    users_lookup = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
-    user_names = {u["id"]: u["full_name"] for u in (users_lookup.data or [])}
-
-    results = []
-    for t in txns.data:
-        prod = t.get("products") or {}
-        results.append({
-            "id": t["id"],
-            "buyer_id": t["buyer_id"],
-            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
-            "product_id": t["product_id"],
-            "product_title": prod.get("title", ""),
-            "product_price": float(prod.get("price", 0)),
-            "product_images": prod.get("images", []),
-            "quantity": int(t.get("quantity", 1)),
-            "amount": float(t["amount"]),
-            "status": t["status"],
-            "purchase_type": t.get("purchase_type", "walkin"),
-            "assigned_staff_id": t.get("assigned_staff_id"),
-            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
-            "created_at": t["created_at"],
-        })
-
-    return results
-
-
-@router.put("/staff/walkin-orders/{transaction_id}/status")
-async def update_walkin_order_status(
-    transaction_id: str,
-    req: WalkinStatusUpdate,
-    current_user: dict = Depends(get_current_user),
-):
-    """Staff updates walk-in order status: pending_walkin -> inwork -> ready, picked_up -> completed."""
-    sb = get_supabase()
-    user_id = current_user["sub"]
-
-    valid_transitions = {
-        "pending_walkin": "inwork",
-        "inwork": "ready",
-        "picked_up": "completed",
-    }
-
-    if req.status not in ("inwork", "ready", "completed"):
-        raise HTTPException(status_code=400, detail="Status must be 'inwork', 'ready', or 'completed' (after buyer confirms pickup).")
-
-    # Verify staff role and get department
-    user = sb.table("users").select("role, department_id").eq("id", user_id).execute()
-    if not user.data or user.data[0]["role"] not in ("seller", "manager"):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    dept_id = user.data[0].get("department_id")
-
-    # Get the transaction
-    txn = sb.table("product_transactions").select("*").eq(
-        "id", transaction_id
-    ).eq("purchase_type", "walkin").execute()
-
-    if not txn.data:
-        raise HTTPException(status_code=404, detail="Walk-in order not found")
-
-    # Verify the order belongs to the same department or to this seller
-    seller_id = txn.data[0]["seller_id"]
-    if dept_id:
-        seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
-        if not seller_info.data or seller_info.data[0].get("department_id") != dept_id:
-            raise HTTPException(status_code=403, detail="Order does not belong to your department")
-    else:
-        if seller_id != user_id:
-            raise HTTPException(status_code=403, detail="Order does not belong to you")
-
-    # Staff assignment check: if assigned to another staff, only managers can override
-    assigned_staff = txn.data[0].get("assigned_staff_id")
-    user_role = user.data[0]["role"]
-    if assigned_staff and assigned_staff != user_id and user_role == "seller":
-        raise HTTPException(status_code=403, detail="This order is assigned to another staff member")
-
-    current_status = txn.data[0]["status"]
-    expected_next = valid_transitions.get(current_status)
-
-    if expected_next != req.status:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot transition from '{current_status}' to '{req.status}'. Expected: '{expected_next}'"
-        )
-
-    # Auto-assign staff on first action
-    update_data = {"status": req.status}
-    if not assigned_staff:
-        update_data["assigned_staff_id"] = user_id
-    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
-
-    # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
-    if req.status == "completed":
-        txn_amount = float(txn.data[0].get("amount", 0))
-        # Admin gets 100% of product amount for walk-in orders
-        sb.table("admin_earnings").insert({
-            "transaction_id": transaction_id,
-            "amount": txn_amount,
-        }).execute()
-        # Credit admin's balance
-        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
-        if admin_user.data:
-            admin_id = admin_user.data[0]["id"]
-            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
-            if admin_bal.data:
-                new_admin_bal = float(admin_bal.data[0]["balance"]) + txn_amount
-                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
-
-    return {"message": f"Walk-in order updated to '{req.status}'"}
-
-
-@router.put("/buyer/walkin-confirm/{transaction_id}")
-async def buyer_confirm_walkin(
-    transaction_id: str,
-    current_user: dict = Depends(get_current_user),
-):
-    """Buyer confirms they picked up the walk-in order (ready -> picked_up)."""
-    sb = get_supabase()
-    user_id = current_user["sub"]
-
-    # Verify this is the buyer's order and it's ready
-    txn = sb.table("product_transactions").select("*").eq(
-        "id", transaction_id
-    ).eq("buyer_id", user_id).eq("purchase_type", "walkin").eq("status", "ready").execute()
-
-    if not txn.data:
-        raise HTTPException(status_code=404, detail="Walk-in order not found or not ready for confirmation")
-
-    sb.table("product_transactions").update({"status": "picked_up"}).eq("id", transaction_id).execute()
-
-    return {"message": "Walk-in order confirmed as picked up"}
-
-
-# --- Manager Walk-in Order Management ---
-
-@router.get("/manager/walkin-orders")
-async def get_manager_walkin_orders(current_user: dict = Depends(get_current_user)):
-    """Get walk-in orders for all staff in the manager's department."""
-    sb = get_supabase()
-    user_id = current_user["sub"]
-
-    user = sb.table("users").select("role, department_id").eq("id", user_id).execute()
-    if not user.data:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user_data = user.data[0]
-    if user_data["role"] not in ("seller", "manager"):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    dept_id = user_data.get("department_id")
-
-    # Fallback: look up department via departments.manager_id
-    if not dept_id:
-        dept_lookup = sb.table("departments").select("id").eq("manager_id", user_id).limit(1).execute()
-        if dept_lookup.data:
-            dept_id = dept_lookup.data[0]["id"]
-
-    if dept_id:
-        staff = sb.table("users").select("id").eq("department_id", dept_id).execute()
-        seller_ids = [s["id"] for s in (staff.data or [])]
-        if user_id not in seller_ids:
-            seller_ids.append(user_id)
-    else:
-        seller_ids = [user_id]
-
-    txns = sb.table("product_transactions").select(
-        "*, products(title, price, images)"
-    ).in_("seller_id", seller_ids).eq("purchase_type", "walkin").in_(
-        "status", ["pending_walkin", "inwork", "ready", "picked_up"]
-    ).order("created_at", desc=False).execute()
-
-    if not txns.data:
-        return []
-
-    buyer_ids = set(t["buyer_id"] for t in txns.data)
-    assigned_ids = set(t["assigned_staff_id"] for t in txns.data if t.get("assigned_staff_id"))
-    all_user_ids = buyer_ids | set(t["seller_id"] for t in txns.data) | assigned_ids
-    users_result = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
-    user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
-
-    results = []
-    for t in txns.data:
-        prod = t.get("products") or {}
-        results.append({
-            "id": t["id"],
-            "buyer_id": t["buyer_id"],
-            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
-            "seller_name": user_names.get(t["seller_id"], "Unknown"),
-            "product_id": t["product_id"],
-            "product_title": prod.get("title", ""),
-            "product_price": float(prod.get("price", 0)),
-            "product_images": prod.get("images", []),
-            "quantity": int(t.get("quantity", 1)),
-            "amount": float(t["amount"]),
-            "status": t["status"],
-            "purchase_type": t.get("purchase_type", "walkin"),
-            "assigned_staff_id": t.get("assigned_staff_id"),
-            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
-            "created_at": t["created_at"],
-        })
-
-    return results
-
-
-@router.put("/manager/walkin-orders/{transaction_id}/status")
-async def manager_update_walkin_order_status(
-    transaction_id: str,
-    req: WalkinStatusUpdate,
-    current_user: dict = Depends(get_current_user),
-):
-    """Manager updates walk-in order status: pending_walkin -> inwork -> ready, picked_up -> completed."""
-    sb = get_supabase()
-    user_id = current_user["sub"]
-
-    valid_transitions = {
-        "pending_walkin": "inwork",
-        "inwork": "ready",
-        "picked_up": "completed",
-    }
-
-    if req.status not in ("inwork", "ready", "completed"):
-        raise HTTPException(status_code=400, detail="Status must be 'inwork', 'ready', or 'completed' (after buyer confirms pickup).")
-
-    user = sb.table("users").select("role, department_id").eq("id", user_id).execute()
-    if not user.data or user.data[0]["role"] not in ("seller", "manager"):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    dept_id = user.data[0].get("department_id")
-
-    if not dept_id:
-        dept_lookup = sb.table("departments").select("id").eq("manager_id", user_id).limit(1).execute()
-        if dept_lookup.data:
-            dept_id = dept_lookup.data[0]["id"]
-
-    txn = sb.table("product_transactions").select("*").eq(
-        "id", transaction_id
-    ).eq("purchase_type", "walkin").execute()
-
-    if not txn.data:
-        raise HTTPException(status_code=404, detail="Walk-in order not found")
-
-    seller_id = txn.data[0]["seller_id"]
-    if dept_id:
-        seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
-        if not seller_info.data or seller_info.data[0].get("department_id") != dept_id:
-            raise HTTPException(status_code=403, detail="Order does not belong to your department")
-    else:
-        if seller_id != user_id:
-            raise HTTPException(status_code=403, detail="Order does not belong to you")
-
-    current_status = txn.data[0]["status"]
-    expected_next = valid_transitions.get(current_status)
-
-    if expected_next != req.status:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot transition from '{current_status}' to '{req.status}'. Expected: '{expected_next}'"
-        )
-
-    # Manager can always update; auto-assign if not yet assigned
-    update_data = {"status": req.status}
-    if not txn.data[0].get("assigned_staff_id"):
-        update_data["assigned_staff_id"] = user_id
-    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
-
-    # On completion, admin gets 100% commission on product amount (walk-in has no delivery fee)
-    if req.status == "completed":
-        txn_amount = float(txn.data[0].get("amount", 0))
-        # Admin gets 100% of product amount for walk-in orders
-        sb.table("admin_earnings").insert({
-            "transaction_id": transaction_id,
-            "amount": txn_amount,
-        }).execute()
-        # Credit admin's balance
-        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
-        if admin_user.data:
-            admin_id = admin_user.data[0]["id"]
-            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
-            if admin_bal.data:
-                new_admin_bal = float(admin_bal.data[0]["balance"]) + txn_amount
-                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
-
-    return {"message": f"Walk-in order updated to '{req.status}'"}
-
+ 
 
 # --- Delivery Order Management (Staff/Manager) ---
 
@@ -728,7 +473,7 @@ class DeliveryOrderStatusUpdate(BaseModel):
 
 @router.get("/staff/delivery-orders")
 async def get_staff_delivery_orders(current_user: dict = Depends(get_current_user)):
-    """Get delivery orders for all staff in the same department/store."""
+    """Get delivery orders grouped by group_id for all staff in the same department/store."""
     sb = get_supabase()
     user_id = current_user["sub"]
 
@@ -763,38 +508,53 @@ async def get_staff_delivery_orders(current_user: dict = Depends(get_current_use
     users_lookup = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_lookup.data or [])}
 
-    results = []
+    # Group transactions by group_id
+    groups = {}
     for t in txns.data:
+        gid = t.get("group_id") or t["id"]  # fallback: ungrouped orders use own id
         prod = t.get("products") or {}
-        results.append({
+        if gid not in groups:
+            groups[gid] = {
+                "group_id": gid,
+                "buyer_id": t["buyer_id"],
+                "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
+                "delivery_address": t.get("delivery_address", ""),
+                "status": t["status"],
+                "assigned_staff_id": t.get("assigned_staff_id"),
+                "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
+                "created_at": t["created_at"],
+                "delivery_fee": 90.0,  # flat per group
+                "items": [],
+                "total_amount": 0.0,
+            }
+        groups[gid]["items"].append({
             "id": t["id"],
-            "buyer_id": t["buyer_id"],
-            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
             "product_id": t["product_id"],
             "product_title": prod.get("title", ""),
             "product_price": float(prod.get("price", 0)),
             "product_images": prod.get("images", []),
             "quantity": int(t.get("quantity", 1)),
             "amount": float(t["amount"]),
-            "delivery_fee": float(t.get("delivery_fee", 0)),
-            "delivery_address": t.get("delivery_address", ""),
             "status": t["status"],
-            "purchase_type": t.get("purchase_type", "delivery"),
-            "assigned_staff_id": t.get("assigned_staff_id"),
-            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
-            "created_at": t["created_at"],
         })
+        groups[gid]["total_amount"] += float(t["amount"])
+        # Group status: escalate to worst (ondeliver > approved > pending)
+        current_group_status = groups[gid]["status"]
+        t_status = t["status"]
+        status_priority = {"pending": 0, "approved": 1, "ondeliver": 2}
+        if status_priority.get(t_status, 0) > status_priority.get(current_group_status, 0):
+            groups[gid]["status"] = t_status
 
-    return results
+    return list(groups.values())
 
 
-@router.put("/staff/delivery-orders/{transaction_id}/status")
+@router.put("/staff/delivery-orders/{group_id}/status")
 async def update_delivery_order_status(
-    transaction_id: str,
+    group_id: str,
     req: DeliveryOrderStatusUpdate,
     current_user: dict = Depends(get_current_user),
 ):
-    """Staff updates delivery order status: pending -> approved (ready for deliveryman pickup)."""
+    """Staff approves all pending transactions in a group (delivery box)."""
     sb = get_supabase()
     user_id = current_user["sub"]
 
@@ -807,17 +567,18 @@ async def update_delivery_order_status(
         raise HTTPException(status_code=403, detail="Access denied")
 
     dept_id = user.data[0].get("department_id")
+    user_role = user.data[0]["role"]
 
-    # Get the transaction
-    txn = sb.table("product_transactions").select("*").eq(
-        "id", transaction_id
-    ).eq("purchase_type", "delivery").execute()
+    # Get all pending transactions in this group
+    group_txns = sb.table("product_transactions").select("*").eq(
+        "group_id", group_id
+    ).eq("status", "pending").execute()
 
-    if not txn.data:
-        raise HTTPException(status_code=404, detail="Delivery order not found")
+    if not group_txns.data:
+        raise HTTPException(status_code=404, detail="No pending orders found in this group")
 
-    # Verify the order belongs to the same department or to this seller
-    seller_id = txn.data[0]["seller_id"]
+    # Verify at least one transaction belongs to this department/seller
+    seller_id = group_txns.data[0]["seller_id"]
     if dept_id:
         seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
         if not seller_info.data or seller_info.data[0].get("department_id") != dept_id:
@@ -826,31 +587,16 @@ async def update_delivery_order_status(
         if seller_id != user_id:
             raise HTTPException(status_code=403, detail="Order does not belong to you")
 
-    # Staff assignment check: if assigned to another staff, only managers can override
-    assigned_staff = txn.data[0].get("assigned_staff_id")
-    user_role = user.data[0]["role"]
-    if assigned_staff and assigned_staff != user_id and user_role == "seller":
-        raise HTTPException(status_code=403, detail="This order is assigned to another staff member")
+    # Approve all pending transactions in the group
+    update_data = {"status": "approved", "assigned_staff_id": user_id}
+    sb.table("product_transactions").update(update_data).eq("group_id", group_id).eq("status", "pending").execute()
 
-    current_status = txn.data[0]["status"]
-    if current_status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Can only approve orders with 'pending' status. Current: '{current_status}'"
-        )
-
-    # Auto-assign staff on first action
-    update_data = {"status": "approved"}
-    if not assigned_staff:
-        update_data["assigned_staff_id"] = user_id
-    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
-
-    return {"message": "Order marked as ready for delivery pickup"}
+    return {"message": f"All orders in group approved and ready for delivery pickup"}
 
 
 @router.get("/manager/delivery-orders")
 async def get_manager_delivery_orders(current_user: dict = Depends(get_current_user)):
-    """Get delivery orders for all products in the manager's department."""
+    """Get grouped delivery orders for all products in the manager's department."""
     sb = get_supabase()
     user_id = current_user["sub"]
 
@@ -875,7 +621,6 @@ async def get_manager_delivery_orders(current_user: dict = Depends(get_current_u
     if dept_id:
         staff = sb.table("users").select("id").eq("department_id", dept_id).execute()
         seller_ids = [s["id"] for s in (staff.data or [])]
-        # Include manager's own ID
         if user_id not in seller_ids:
             seller_ids.append(user_id)
     else:
@@ -899,39 +644,51 @@ async def get_manager_delivery_orders(current_user: dict = Depends(get_current_u
     users_result = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
     user_names = {u["id"]: u["full_name"] for u in (users_result.data or [])}
 
-    results = []
+    # Group transactions by group_id
+    groups = {}
     for t in txns.data:
+        gid = t.get("group_id") or t["id"]
         prod = t.get("products") or {}
-        results.append({
+        if gid not in groups:
+            groups[gid] = {
+                "group_id": gid,
+                "buyer_id": t["buyer_id"],
+                "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
+                "seller_name": user_names.get(t["seller_id"], "Unknown"),
+                "delivery_address": t.get("delivery_address", ""),
+                "status": t["status"],
+                "assigned_staff_id": t.get("assigned_staff_id"),
+                "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
+                "created_at": t["created_at"],
+                "delivery_fee": 90.0,
+                "items": [],
+                "total_amount": 0.0,
+            }
+        groups[gid]["items"].append({
             "id": t["id"],
-            "buyer_id": t["buyer_id"],
-            "buyer_name": user_names.get(t["buyer_id"], "Unknown"),
-            "seller_name": user_names.get(t["seller_id"], "Unknown"),
             "product_id": t["product_id"],
             "product_title": prod.get("title", ""),
             "product_price": float(prod.get("price", 0)),
             "product_images": prod.get("images", []),
             "quantity": int(t.get("quantity", 1)),
             "amount": float(t["amount"]),
-            "delivery_fee": float(t.get("delivery_fee", 0)),
-            "delivery_address": t.get("delivery_address", ""),
             "status": t["status"],
-            "purchase_type": t.get("purchase_type", "delivery"),
-            "assigned_staff_id": t.get("assigned_staff_id"),
-            "assigned_staff_name": user_names.get(t.get("assigned_staff_id", ""), ""),
-            "created_at": t["created_at"],
         })
+        groups[gid]["total_amount"] += float(t["amount"])
+        status_priority = {"pending": 0, "approved": 1, "ondeliver": 2}
+        if status_priority.get(t["status"], 0) > status_priority.get(groups[gid]["status"], 0):
+            groups[gid]["status"] = t["status"]
 
-    return results
+    return list(groups.values())
 
 
-@router.put("/manager/delivery-orders/{transaction_id}/status")
+@router.put("/manager/delivery-orders/{group_id}/status")
 async def manager_update_delivery_order_status(
-    transaction_id: str,
+    group_id: str,
     req: DeliveryOrderStatusUpdate,
     current_user: dict = Depends(get_current_user),
 ):
-    """Manager updates delivery order status: pending -> approved."""
+    """Manager approves all pending transactions in a group."""
     sb = get_supabase()
     user_id = current_user["sub"]
 
@@ -951,15 +708,15 @@ async def manager_update_delivery_order_status(
         if dept_lookup.data:
             dept_id = dept_lookup.data[0]["id"]
 
-    # Verify the transaction belongs to the department
-    txn = sb.table("product_transactions").select("*, products(seller_id)").eq(
-        "id", transaction_id
-    ).eq("purchase_type", "delivery").execute()
+    # Get all pending transactions in this group
+    group_txns = sb.table("product_transactions").select("*").eq(
+        "group_id", group_id
+    ).eq("status", "pending").execute()
 
-    if not txn.data:
-        raise HTTPException(status_code=404, detail="Delivery order not found")
+    if not group_txns.data:
+        raise HTTPException(status_code=404, detail="No pending orders found in this group")
 
-    seller_id = txn.data[0]["seller_id"]
+    seller_id = group_txns.data[0]["seller_id"]
     if dept_id:
         seller_info = sb.table("users").select("department_id").eq("id", seller_id).execute()
         if not seller_info.data or seller_info.data[0].get("department_id") != dept_id:
@@ -968,20 +725,11 @@ async def manager_update_delivery_order_status(
         if seller_id != user_id:
             raise HTTPException(status_code=403, detail="Order does not belong to you")
 
-    current_status = txn.data[0]["status"]
-    if current_status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Can only approve orders with 'pending' status. Current: '{current_status}'"
-        )
+    # Approve all pending transactions in the group
+    update_data = {"status": "approved", "assigned_staff_id": user_id}
+    sb.table("product_transactions").update(update_data).eq("group_id", group_id).eq("status", "pending").execute()
 
-    # Manager can always update; auto-assign if not yet assigned
-    update_data = {"status": "approved"}
-    if not txn.data[0].get("assigned_staff_id"):
-        update_data["assigned_staff_id"] = user_id
-    sb.table("product_transactions").update(update_data).eq("id", transaction_id).execute()
-
-    return {"message": "Order approved for delivery pickup"}
+    return {"message": "All orders in group approved for delivery pickup"}
 
 
 # --- Manager Reassign Order ---
@@ -1044,53 +792,55 @@ async def manager_reassign_order(
 CANCELLATION_FEE = 50.00
 
 
-@router.put("/buyer/cancel/{transaction_id}")
+@router.put("/buyer/cancel/{group_id}")
 async def buyer_cancel_order(
-    transaction_id: str,
+    group_id: str,
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Buyer cancels an order.
-    - Delivery: free cancel if pending/approved. 50 PHP fee if ondeliver (fee goes to delivery user).
-    - Walk-in: free cancel if pending_walkin. Cannot cancel if inwork/ready or later.
+    Buyer cancels all orders in a group (delivery box).
+    - Free cancel if pending/approved (not yet picked up).
+    - ₱50 cancellation fee if ondeliver; fee goes to delivery user.
     """
     sb = get_supabase()
     user_id = current_user["sub"]
 
-    txn = sb.table("product_transactions").select("*").eq(
-        "id", transaction_id
+    # Get all transactions in this group that belong to this buyer
+    group_txns = sb.table("product_transactions").select("*").eq(
+        "group_id", group_id
     ).eq("buyer_id", user_id).execute()
 
-    if not txn.data:
+    # Fallback: try treating group_id as a single transaction_id for backwards compat
+    if not group_txns.data:
+        group_txns = sb.table("product_transactions").select("*").eq(
+            "id", group_id
+        ).eq("buyer_id", user_id).execute()
+
+    if not group_txns.data:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    order = txn.data[0]
-    status = order["status"]
-    purchase_type = order.get("purchase_type", "delivery")
-    amount = float(order.get("amount", 0))
-    delivery_fee = float(order.get("delivery_fee", 0))
-    grand_total = amount + delivery_fee
+    # Determine group status (worst-case: ondeliver beats approved/pending)
+    status_priority = {"pending": 0, "approved": 1, "ondeliver": 2}
+    group_status = max((t["status"] for t in group_txns.data if t["status"] in status_priority), key=lambda s: status_priority.get(s, 0))
 
-    # Determine if cancellation is allowed and calculate refund
-    if purchase_type == "walkin":
-        if status != "pending_walkin":
-            raise HTTPException(status_code=400, detail="Walk-in orders can only be cancelled before preparation starts.")
+    # Cancellable only if pending, approved, or ondeliver
+    if group_status not in ("pending", "approved", "ondeliver"):
+        raise HTTPException(status_code=400, detail=f"Cannot cancel order group with status '{group_status}'.")
+
+    # Total refundable amount = sum of all item amounts + the delivery fee (from primary txn)
+    total_product_amount = sum(float(t.get("amount", 0)) for t in group_txns.data)
+    total_delivery_fee = sum(float(t.get("delivery_fee", 0)) for t in group_txns.data)
+    grand_total = total_product_amount + total_delivery_fee
+
+    if group_status in ("pending", "approved"):
         refund_amount = grand_total
         fee_to_delivery = 0.0
-    elif purchase_type == "delivery":
-        if status in ("pending", "approved"):
-            refund_amount = grand_total
-            fee_to_delivery = 0.0
-        elif status == "ondeliver":
-            fee_to_delivery = CANCELLATION_FEE
-            refund_amount = grand_total - fee_to_delivery
-        else:
-            raise HTTPException(status_code=400, detail=f"Cannot cancel order with status '{status}'.")
-    else:
-        raise HTTPException(status_code=400, detail="Unknown purchase type.")
+    else:  # ondeliver
+        fee_to_delivery = CANCELLATION_FEE
+        refund_amount = grand_total - fee_to_delivery
 
-    # 1. Cancel the transaction
-    sb.table("product_transactions").update({"status": "cancelled"}).eq("id", transaction_id).execute()
+    # 1. Cancel all transactions in the group
+    sb.table("product_transactions").update({"status": "cancelled"}).eq("group_id", group_id).eq("buyer_id", user_id).execute()
 
     # 2. Refund buyer
     if refund_amount > 0:
@@ -1100,28 +850,32 @@ async def buyer_cancel_order(
             sb.table("user_balances").update({"balance": new_bal}).eq("user_id", user_id).execute()
 
     # 3. Pay cancellation fee to delivery user (if mid-delivery cancel)
-    if fee_to_delivery > 0 and order.get("delivery_user_id"):
-        del_bal = sb.table("user_balances").select("balance").eq("user_id", order["delivery_user_id"]).execute()
+    delivery_user_id = next((t.get("delivery_user_id") for t in group_txns.data if t.get("delivery_user_id")), None)
+    representative_txn_id = group_txns.data[0]["id"]
+
+    if fee_to_delivery > 0 and delivery_user_id:
+        del_bal = sb.table("user_balances").select("balance").eq("user_id", delivery_user_id).execute()
         if del_bal.data:
             new_del_bal = float(del_bal.data[0]["balance"]) + fee_to_delivery
-            sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", order["delivery_user_id"]).execute()
+            sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", delivery_user_id).execute()
 
         # Log in delivery_earnings for earnings history
         sb.table("delivery_earnings").insert({
-            "delivery_user_id": order["delivery_user_id"],
-            "transaction_id": transaction_id,
+            "delivery_user_id": delivery_user_id,
+            "transaction_id": representative_txn_id,
             "amount": fee_to_delivery,
         }).execute()
 
-    # 4. Restore product stock
-    prod = sb.table("products").select("stock").eq("id", order["product_id"]).execute()
-    if prod.data:
-        new_stock = int(prod.data[0]["stock"]) + int(order.get("quantity", 1))
-        sb.table("products").update({"stock": new_stock}).eq("id", order["product_id"]).execute()
+    # 4. Restore product stock for all cancelled items
+    for t in group_txns.data:
+        prod = sb.table("products").select("stock").eq("id", t["product_id"]).execute()
+        if prod.data:
+            new_stock = int(prod.data[0]["stock"]) + int(t.get("quantity", 1))
+            sb.table("products").update({"stock": new_stock}).eq("id", t["product_id"]).execute()
 
     fee_msg = f" A cancellation fee of PHP {fee_to_delivery:.2f} was deducted." if fee_to_delivery > 0 else ""
     return {
-        "message": f"Order cancelled successfully. PHP {refund_amount:.2f} refunded to your wallet.{fee_msg}",
+        "message": f"All orders in group cancelled. PHP {refund_amount:.2f} refunded to your wallet.{fee_msg}",
         "refund_amount": refund_amount,
         "cancellation_fee": fee_to_delivery,
     }

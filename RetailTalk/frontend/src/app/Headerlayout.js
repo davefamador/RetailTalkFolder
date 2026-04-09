@@ -34,6 +34,13 @@ export default function RootLayout({ children }) {
         }
 
         setHydrated(true);
+
+        // Listen for balance-updated events (e.g. after purchase, top-up, etc.)
+        const handleBalanceUpdate = () => {
+            getBalance().then(b => setBalance(b.balance)).catch(() => { });
+        };
+        window.addEventListener('balance-updated', handleBalanceUpdate);
+        return () => window.removeEventListener('balance-updated', handleBalanceUpdate);
     }, []);
 
     const handleLogout = () => {

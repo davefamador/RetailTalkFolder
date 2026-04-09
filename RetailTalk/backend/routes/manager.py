@@ -171,12 +171,10 @@ async def list_staff(
                 staff_stats[staff_id] = {
                     "total_completed_tasks": 0,
                     "tasks_completed_today": 0,
-                    "walkin_items_today": 0,
                     "delivery_items_today": 0,
                 }
             stats = staff_stats[staff_id]
             qty = int(t.get("quantity", 1))
-            purchase_type = t.get("purchase_type", "delivery")
             stats["total_completed_tasks"] += 1
 
             try:
@@ -187,10 +185,7 @@ async def list_staff(
 
             if day_key == today_str:
                 stats["tasks_completed_today"] += 1
-                if purchase_type == "walkin":
-                    stats["walkin_items_today"] += qty
-                else:
-                    stats["delivery_items_today"] += qty
+                stats["delivery_items_today"] += qty
 
     staff_list = []
     for u in (result.data or []):
@@ -205,7 +200,6 @@ async def list_staff(
             "created_at": u["created_at"],
             "total_completed_tasks": s.get("total_completed_tasks", 0),
             "tasks_completed_today": s.get("tasks_completed_today", 0),
-            "walkin_items_today": s.get("walkin_items_today", 0),
             "delivery_items_today": s.get("delivery_items_today", 0),
         })
 
@@ -333,7 +327,6 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
     completed_count = 0
     total_items = 0
     today_tasks = 0
-    walkin_items_today = 0
     delivery_items_today = 0
     products_handled = {}
 
@@ -352,16 +345,13 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             day_key = t["created_at"][:10]
             month_key = t["created_at"][:7]
 
-        # Daily data with walk-in/delivery breakdown
+        # Daily data with delivery breakdown
         if day_key not in daily_data:
-            daily_data[day_key] = {"amount": 0, "count": 0, "walkin_items": 0, "delivery_items": 0}
+            daily_data[day_key] = {"amount": 0, "count": 0, "delivery_items": 0}
         daily_data[day_key]["amount"] += amt
         daily_data[day_key]["count"] += 1
         if is_completed:
-            if purchase_type == "walkin":
-                daily_data[day_key]["walkin_items"] += qty
-            else:
-                daily_data[day_key]["delivery_items"] += qty
+            daily_data[day_key]["delivery_items"] += qty
 
         # Monthly data
         if month_key not in monthly_data:
@@ -375,10 +365,7 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             total_items += qty
             if day_key == today_str:
                 today_tasks += 1
-                if purchase_type == "walkin":
-                    walkin_items_today += qty
-                else:
-                    delivery_items_today += qty
+                delivery_items_today += qty
 
             # Track recent products handled
             pid = t["product_id"]
@@ -396,7 +383,7 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
 
     daily = sorted(
         [{"date": k, "amount": round(v["amount"], 2), "count": v["count"],
-          "walkin_items": v["walkin_items"], "delivery_items": v["delivery_items"]}
+          "delivery_items": v["delivery_items"]}
          for k, v in daily_data.items()],
         key=lambda x: x["date"], reverse=True
     )[:30]
@@ -441,7 +428,6 @@ async def get_staff_detail(user_id: str, manager: dict = Depends(require_manager
             "total_completed_tasks": completed_count,
             "total_items_processed": total_items,
             "tasks_completed_today": today_tasks,
-            "walkin_items_today": walkin_items_today,
             "delivery_items_today": delivery_items_today,
             "daily": daily,
             "monthly": monthly,

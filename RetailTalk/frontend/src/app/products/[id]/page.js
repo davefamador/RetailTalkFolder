@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact, checkWishlist, addToWishlist, removeFromWishlist } from '../../../lib/api';
+import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact, checkWishlist, addToWishlist, removeFromWishlist, removeFromCart } from '../../../lib/api';
 
 export default function ProductDetailPage() {
     const params = useParams();
@@ -14,7 +14,6 @@ export default function ProductDetailPage() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [selectedImage, setSelectedImage] = useState(0);
-    const [purchaseType, setPurchaseType] = useState('delivery');
     const [addressModal, setAddressModal] = useState(false);
     const [contactNum, setContactNum] = useState('');
     const [deliveryAddr, setDeliveryAddr] = useState('');
@@ -73,8 +72,11 @@ export default function ProductDetailPage() {
         setError('');
         setSuccess('');
         try {
-            await buyProduct(product.id, quantity, purchaseType);
+            await buyProduct(product.id, quantity);
             setSuccess(`Successfully purchased ${quantity}x ${product.title}!`);
+            window.dispatchEvent(new Event('balance-updated'));
+            // Remove from cart if the product was there
+            removeFromCart(product.id).catch(() => {});
             const updated = await getProduct(params.id);
             setProduct(updated);
             setQuantity(1);
@@ -97,14 +99,17 @@ export default function ProductDetailPage() {
 
     const handleSaveAddressAndBuy = async () => {
         if (!contactNum.trim()) { setError('Contact number is required.'); return; }
-        if (purchaseType === 'delivery' && !deliveryAddr.trim()) { setError('Delivery address is required.'); return; }
+        if (!deliveryAddr.trim()) { setError('Delivery address is required.'); return; }
         setBuying(true);
         setError('');
         try {
             await setMyContact(contactNum.trim(), deliveryAddr.trim());
             setAddressModal(false);
-            await buyProduct(product.id, quantity, purchaseType);
+            await buyProduct(product.id, quantity);
             setSuccess(`Successfully purchased ${quantity}x ${product.title}!`);
+            window.dispatchEvent(new Event('balance-updated'));
+            // Remove from cart if the product was there
+            removeFromCart(product.id).catch(() => {});
             const updated = await getProduct(params.id);
             setProduct(updated);
             setQuantity(1);
@@ -140,7 +145,7 @@ export default function ProductDetailPage() {
 
     const images = product.images || [];
     const productTotal = parseFloat(product.price) * quantity;
-    const deliveryFee = purchaseType === 'delivery' ? 90 : 0;
+    const deliveryFee = 90;
     const grandTotal = (productTotal + deliveryFee).toFixed(2);
     const totalPrice = productTotal.toFixed(2);
     const inStock = (product.stock || 0) > 0;
@@ -319,28 +324,6 @@ export default function ProductDetailPage() {
                                     PHP {grandTotal}
                                 </span>
                             </div>
-
-                            {/* Walk-in / Delivery selector */}
-                            {user && user.role === 'buyer' && (
-                                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                                    <button type="button" onClick={() => setPurchaseType('delivery')}
-                                        style={{
-                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                            borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
-                                            background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                            color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                        }}>🚚 Delivery</button>
-                                    <button type="button" onClick={() => setPurchaseType('walkin')}
-                                        style={{
-                                            flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                            borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
-                                            background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
-                                            color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
-                                            cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                        }}>🏪 Walk-in</button>
-                                </div>
-                            )}
 
                             {user ? (
                                 user.role === 'buyer' ? (

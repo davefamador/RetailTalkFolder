@@ -155,7 +155,7 @@ async def get_seller_wishlist_report(current_user: dict = Depends(get_current_us
                     seller_ids.append(du["id"])
 
     # Get all products for these seller IDs
-    products = sb.table("products").select("id, title, images").in_("seller_id", seller_ids).execute()
+    products = sb.table("products").select("id, title, images, stock").in_("seller_id", seller_ids).execute()
     if not products.data:
         return {
             "total_products": 0,
@@ -211,6 +211,7 @@ async def get_seller_wishlist_report(current_user: dict = Depends(get_current_us
             "title": p["title"],
             "image_url": images[0] if images else "",
             "wishlist_count": count,
+            "stock": int(p.get("stock") or 0),
         })
 
     # Sort by wishlist count descending

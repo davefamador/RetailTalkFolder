@@ -294,6 +294,19 @@ def rewrite(query: str, intents: list[str], slots: dict) -> RewrittenQuery:
         # NER said PRICE_MIN but user said "under" → swap to PRICE_MAX
         slots["PRICE_MAX"] = slots.pop("PRICE_MIN")
 
+    # --- Regex fallback: extract price if NER missed it ---
+    # Covers patterns like "less than 30", "under 500", "more than 100", etc.
+    if direction is not None and "PRICE_MIN" not in slots and "PRICE_MAX" not in slots:
+        price_match = re.search(r'(\d+(?:\.\d+)?)', query)
+        if price_match:
+            price_val = price_match.group(1)
+            if direction == "max":
+                slots["PRICE_MAX"] = price_val
+                print(f"[QueryRewriter] Regex fallback: PRICE_MAX={price_val} (from '{query}')")
+            elif direction == "min":
+                slots["PRICE_MIN"] = price_val
+                print(f"[QueryRewriter] Regex fallback: PRICE_MIN={price_val} (from '{query}')")
+
     # --- Build structured filters from slots ---
     filters = {}
 

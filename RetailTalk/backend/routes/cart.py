@@ -1,12 +1,13 @@
 """
 Cart routes — shopping cart for buyers.
-Each seller in the cart adds a ₱90 delivery fee.
-Checkout creates transactions for all items in one go.
+One flat ₱90 delivery fee per unique department/store (per group).
+Checkout creates one transaction per cart item, grouped by group_id per department.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
+import uuid
 from database import get_supabase
 from routes.auth import get_current_user
 
@@ -204,22 +205,19 @@ async def clear_cart(current_user: dict = Depends(get_current_user)):
 
 
 class CheckoutRequest(BaseModel):
-    purchase_type: str = "delivery"  # 'walkin' or 'delivery'
+    pass  # Kept for backwards-compat; all orders are delivery now
 
 
 @router.post("/checkout")
 async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: dict = Depends(get_current_user)):
     """
     Checkout all items in cart.
-    - Delivery: ₱90 delivery fee per unique seller
-    - Walk-in: No delivery fee
-    - Validates contact number exists
+    - Delivery: ₱90 delivery fee per unique department (one group per department).
+    - All items in the same department share a group_id.
+    - The first item in each department group carries the delivery fee; rest are ₱0.
     """
     sb = get_supabase()
     user_id = current_user["sub"]
-
-    if req.purchase_type not in ("walkin", "delivery"):
-        raise HTTPException(status_code=400, detail="purchase_type must be 'walkin' or 'delivery'")
 
     # 1. Check user is buyer
     user_result = sb.table("users").select("role, is_banned").eq("id", user_id).execute()
@@ -237,11 +235,9 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
     if not contact.data:
         raise HTTPException(status_code=400, detail="Please add your contact number before placing an order")
 
-    delivery_address = ""
-    if req.purchase_type == "delivery":
-        delivery_address = (contact.data[0].get("delivery_address") or "").strip()
-        if not delivery_address:
-            raise HTTPException(status_code=400, detail="Please set your delivery address before placing a delivery order")
+    delivery_address = (contact.data[0].get("delivery_address") or "").strip()
+    if not delivery_address:
+        raise HTTPException(status_code=400, detail="Please set your delivery address before placing a delivery order")
 
     # 3. Get cart items with product info
     cart_data = sb.table("cart_items").select(
@@ -292,20 +288,22 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
             "delivery_unit": delivery_unit,
         })
 
-    # Delivery fee per unique department (walk-in has no delivery fee)
+    # One group_id per delivery unit — generated fresh for this checkout
     delivery_units = set(i["delivery_unit"] for i in items)
-    if req.purchase_type == "walkin":
-        total_delivery = 0
-        delivery_fee_per_item = {item["product_id"]: 0 for item in items}
-    else:
-        total_delivery = len(delivery_units) * DELIVERY_FEE_PER_DEPARTMENT
-        # Split delivery fee equally among items within each delivery unit (department)
-        delivery_fee_per_item = {}
-        for unit in delivery_units:
-            unit_items = [i for i in items if i["delivery_unit"] == unit]
-            fee_each = DELIVERY_FEE_PER_DEPARTMENT / len(unit_items)
-            for item in unit_items:
-                delivery_fee_per_item[item["product_id"]] = round(fee_each, 2)
+    group_id_map = {unit: str(uuid.uuid4()) for unit in delivery_units}
+
+    total_delivery = len(delivery_units) * DELIVERY_FEE_PER_DEPARTMENT
+
+    # Assign full ₱90 to first item per delivery unit; ₱0 to the rest
+    delivery_fee_per_item = {}
+    seen_units: set = set()
+    for item in items:
+        unit = item["delivery_unit"]
+        if unit not in seen_units:
+            delivery_fee_per_item[item["product_id"]] = DELIVERY_FEE_PER_DEPARTMENT
+            seen_units.add(unit)
+        else:
+            delivery_fee_per_item[item["product_id"]] = 0.0
 
     grand_total = products_total + total_delivery
 
@@ -329,9 +327,9 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
         d_fee = delivery_fee_per_item.get(item["product_id"], 0)
         seller_amount = amount
         admin_commission = 0.0
+        group_id = group_id_map[item["delivery_unit"]]
 
         # Create transaction
-        txn_status = "pending_walkin" if req.purchase_type == "walkin" else "pending"
         txn = sb.table("product_transactions").insert({
             "buyer_id": user_id,
             "seller_id": item["seller_id"],
@@ -342,8 +340,9 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
             "admin_commission": admin_commission,
             "delivery_fee": d_fee,
             "delivery_address": delivery_address,
-            "purchase_type": req.purchase_type,
-            "status": txn_status,
+            "purchase_type": "delivery",
+            "status": "pending",
+            "group_id": group_id,
         }).execute()
 
         if txn.data:
@@ -359,12 +358,32 @@ async def checkout_cart(req: CheckoutRequest = CheckoutRequest(), current_user: 
     new_balance = buyer_balance - grand_total
     sb.table("user_balances").update({"balance": new_balance}).eq("user_id", user_id).execute()
 
+    # Log the cart checkout as a single purchase entry in wallet history
+    try:
+        sb.table("stored_value").insert({
+            "user_id": user_id,
+            "transaction_type": "purchase",
+            "amount": grand_total,
+            "metadata": {
+                "order_type": "cart_checkout",
+                "item_count": len(items),
+                "departments": len(delivery_units),
+                "products_total": round(products_total, 2),
+                "delivery_fee": total_delivery,
+                "transaction_ids": [str(tid) for tid in transaction_ids],
+                "group_ids": list(group_id_map.values()),
+            },
+        }).execute()
+    except Exception:
+        pass  # Log failure must not block cart clearing
+
     # 8. Clear cart
     sb.table("cart_items").delete().eq("buyer_id", user_id).execute()
 
     return {
         "message": "Order placed successfully!",
         "transaction_ids": transaction_ids,
+        "group_ids": list(group_id_map.values()),
         "products_total": round(products_total, 2),
         "delivery_fee": total_delivery,
         "grand_total": round(grand_total, 2),

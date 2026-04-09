@@ -75,6 +75,7 @@ class SearchResultItem(BaseModel):
     title: str
     description: str
     price: float
+    stock: int = 0
     image_url: str
     seller_id: str
     # Scoring components
@@ -176,6 +177,13 @@ def _run_search_pipeline(
 
     print(f"[Search]   '{search_text}': {len(raw_candidates)} raw candidates")
 
+    # Hard post-filter: enforce price constraints even if pgvector missed them
+    # (safety net for cases where the DB filter didn't apply, e.g. no-filter branch)
+    if filters.get("price_max") is not None:
+        raw_candidates = [c for c in raw_candidates if float(c["price"]) <= filters["price_max"]]
+    if filters.get("price_min") is not None:
+        raw_candidates = [c for c in raw_candidates if float(c["price"]) >= filters["price_min"]]
+
     MIN_SIMILARITY_THRESHOLD = 0.20
     candidates = raw_candidates if show_all else [c for c in raw_candidates if c["similarity"] >= MIN_SIMILARITY_THRESHOLD]
     if not candidates:
@@ -201,23 +209,26 @@ def _run_search_pipeline(
     else:
         w_r, w_c, w_s = 0.0, 0.05, 0.95
 
-    MIN_RANKER_SCORE = 0.30
+    MIN_RELEVANCE_SCORE = 0.75
     scored = []
     for idx, (cand, cls) in enumerate(zip(candidates, classifications)):
         label = cls["label"]
         r_score = float(ranker_scores[idx])
         sim = float(cand["similarity"])
-        if not show_all and ranker_service._loaded and r_score < MIN_RANKER_SCORE:
+        rel = _compute_blended_score(r_score, _label_to_priority_weight(label), sim, w_r, w_c, w_s)
+        # All labels (including Exact) must meet the minimum relevance threshold.
+        # Irrelevant products are shown only if they score >= 0.75; otherwise dropped.
+        if not show_all and rel < MIN_RELEVANCE_SCORE:
             continue
         if not show_all and label == "Substitute" and not include_substitutes:
             continue
         if not show_all and label == "Complement" and not include_complements:
             continue
-        rel = _compute_blended_score(r_score, _label_to_priority_weight(label), sim, w_r, w_c, w_s)
         scored.append(SearchResultItem(
             id=str(cand["id"]), title=cand["title"],
             description=cand.get("description") or "",
             price=float(cand["price"]),
+            stock=int(cand.get("stock", 0)),
             image_url=_first_image(cand.get("images")),
             seller_id=str(cand["seller_id"]),
             similarity=round(sim, 4), ranker_score=round(r_score, 4),
@@ -318,7 +329,7 @@ async def _fallback_text_search(
     all_results = []
 
     for group in rewritten.search_groups:
-        qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved")
+        qb = sb.table("products").select("*").eq("is_active", True).eq("status", "approved").gt("stock", 0)
         qb = qb.or_(f"title.ilike.%{group.search_text}%,description.ilike.%{group.search_text}%")
         if "price_max" in group.filters:
             qb = qb.lte("price", group.filters["price_max"])

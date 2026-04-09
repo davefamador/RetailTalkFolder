@@ -91,7 +91,7 @@ export default function WalletPage() {
 
     // Compute SVF summary
     const totalDeposits = svfHistory.filter(s => s.transaction_type === 'deposit').reduce((sum, s) => sum + s.amount, 0);
-    const totalDebits = svfHistory.filter(s => s.transaction_type === 'withdrawal').reduce((sum, s) => sum + s.amount, 0);
+    const totalDebits = svfHistory.filter(s => s.transaction_type === 'withdrawal' || s.transaction_type === 'purchase').reduce((sum, s) => sum + s.amount, 0);
 
     if (!authChecked) {
         return (
@@ -232,10 +232,22 @@ export default function WalletPage() {
                                                 borderRadius: 12,
                                                 fontSize: '0.8rem',
                                                 fontWeight: 600,
-                                                background: entry.transaction_type === 'deposit' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                                                color: entry.transaction_type === 'deposit' ? '#10b981' : '#ef4444',
+                                                background: entry.transaction_type === 'deposit'
+                                                    ? 'rgba(16,185,129,0.15)'
+                                                    : entry.transaction_type === 'purchase'
+                                                    ? 'rgba(245,158,11,0.15)'
+                                                    : 'rgba(239,68,68,0.15)',
+                                                color: entry.transaction_type === 'deposit'
+                                                    ? '#10b981'
+                                                    : entry.transaction_type === 'purchase'
+                                                    ? '#f59e0b'
+                                                    : '#ef4444',
                                             }}>
-                                                {entry.transaction_type === 'deposit' ? '↑ Deposit' : '↓ Withdrawal'}
+                                                {entry.transaction_type === 'deposit'
+                                                    ? '↑ Deposit'
+                                                    : entry.transaction_type === 'purchase'
+                                                    ? `🛒 Purchase${entry.metadata?.product_title ? ` — ${entry.metadata.product_title}` : ''}`
+                                                    : '↓ Withdrawal'}
                                             </span>
                                         </td>
                                         <td style={{
