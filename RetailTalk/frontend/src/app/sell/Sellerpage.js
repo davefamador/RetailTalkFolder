@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
-import SearchContent from '../components/SearchContent';
 import {
     LayoutDashboard, Tag, ShoppingCart, Truck, Package,
     Search, ClipboardList, Heart, LogOut, TrendingUp, DollarSign,
@@ -385,7 +384,6 @@ export default function SellPage() {
 
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
 
-                    <SidebarItem icon={Search} label="Search" active={activeSection === 'search'} onClick={() => setActiveSection('search')} />
                     <SidebarItem icon={ClipboardList} label="Order History" active={activeSection === 'orderhistory'} onClick={() => setActiveSection('orderhistory')} />
                     <SidebarItem icon={Heart} label="Wishlist Analytics" active={activeSection === 'wishlist'} onClick={() => { setActiveSection('wishlist'); loadWishlistReport(); }} />
                     <SidebarItem icon={DollarSign} label="Salary" active={activeSection === 'salary'} onClick={() => { setActiveSection('salary'); loadSalaryInfo(); loadDashboardData(); }} />
@@ -638,9 +636,6 @@ export default function SellPage() {
                         )}
                     </div>
                 )}
-
-                {/* ===== SEARCH TAB (embedded) ===== */}
-                {activeSection === 'search' && <SearchContent />}
 
                 {/* ===== ORDER HISTORY TAB ===== */}
                 {activeSection === 'orderhistory' && (() => {
