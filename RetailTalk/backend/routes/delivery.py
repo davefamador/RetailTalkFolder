@@ -63,6 +63,12 @@ class EarningsDay(BaseModel):
     count: int
 
 
+class TransactionHistoryItem(BaseModel):
+    type: str
+    date: str
+    amount: float
+
+
 class EarningsResponse(BaseModel):
     total_earnings: float
     total_deliveries: int
@@ -73,6 +79,7 @@ class EarningsResponse(BaseModel):
     daily_delivery_count: list[EarningsDay]
     weekly_delivery_count: list[EarningsDay]
     monthly_delivery_count: list[EarningsDay]
+    history: list[TransactionHistoryItem] = []
 
 
 class StatusUpdateRequest(BaseModel):
@@ -285,6 +292,7 @@ async def pick_order(group_id: str, delivery_user: dict = Depends(require_delive
         )
 
     # Verify all transactions in the group are approved and unassigned
+    used_fallback = False
     group_txns = sb.table("product_transactions").select("*").eq(
         "group_id", group_id
     ).execute()
@@ -294,6 +302,7 @@ async def pick_order(group_id: str, delivery_user: dict = Depends(require_delive
         group_txns = sb.table("product_transactions").select("*").eq(
             "id", group_id
         ).execute()
+        used_fallback = True
 
     if not group_txns.data:
         raise HTTPException(status_code=404, detail="Order group not found")
@@ -305,10 +314,16 @@ async def pick_order(group_id: str, delivery_user: dict = Depends(require_delive
             raise HTTPException(status_code=400, detail="This order group is already assigned to another delivery user")
 
     # Assign all transactions in group to delivery user
-    sb.table("product_transactions").update({
-        "delivery_user_id": user_id,
-        "status": "ondeliver",
-    }).eq("group_id", group_id).execute()
+    if used_fallback:
+        sb.table("product_transactions").update({
+            "delivery_user_id": user_id,
+            "status": "ondeliver",
+        }).eq("id", group_id).execute()
+    else:
+        sb.table("product_transactions").update({
+            "delivery_user_id": user_id,
+            "status": "ondeliver",
+        }).eq("group_id", group_id).execute()
 
     return {"message": "Order group picked up! Deliver all items to the buyer."}
 
@@ -327,6 +342,7 @@ async def update_delivery_status(
         raise HTTPException(status_code=400, detail="Status must be 'delivered' or 'undelivered'")
 
     # Verify this group belongs to this delivery user
+    used_fallback = False
     group_txns = sb.table("product_transactions").select("*").eq(
         "group_id", group_id
     ).eq("delivery_user_id", user_id).eq("status", "ondeliver").execute()
@@ -336,12 +352,16 @@ async def update_delivery_status(
         group_txns = sb.table("product_transactions").select("*").eq(
             "id", group_id
         ).eq("delivery_user_id", user_id).eq("status", "ondeliver").execute()
+        used_fallback = True
 
     if not group_txns.data:
         raise HTTPException(status_code=404, detail="Order group not found or not assigned to you")
 
     # Update all transactions in group
-    sb.table("product_transactions").update({"status": req.status}).eq("group_id", group_id).eq("delivery_user_id", user_id).execute()
+    if used_fallback:
+        sb.table("product_transactions").update({"status": req.status}).eq("id", group_id).eq("delivery_user_id", user_id).execute()
+    else:
+        sb.table("product_transactions").update({"status": req.status}).eq("group_id", group_id).eq("delivery_user_id", user_id).execute()
 
     buyer_id = group_txns.data[0]["buyer_id"]
     representative_txn_id = group_txns.data[0]["id"]
@@ -461,6 +481,25 @@ async def get_earnings(delivery_user: dict = Depends(require_delivery)):
             key=lambda x: x.date, reverse=True
         )[:30]
 
+    withdrawals = sb.table("stored_value").select("*").eq("user_id", user_id).execute()
+    hist = []
+    for e in all_data:
+        hist.append(TransactionHistoryItem(
+            type="Delivery Fee",
+            date=e["created_at"],
+            amount=float(e["amount"])
+        ))
+    for w in withdrawals.data or []:
+        if w.get("amount"):
+            # A withdrawal is a deduction from the delivery wallet
+            ttype = w.get("transaction_type", "Withdrawal").capitalize()
+            hist.append(TransactionHistoryItem(
+                type=ttype,
+                date=w["created_at"],
+                amount=abs(float(w["amount"]))
+            ))
+    hist.sort(key=lambda x: x.date, reverse=True)
+
     return EarningsResponse(
         total_earnings=round(total_earnings, 2),
         total_deliveries=total_deliveries,
@@ -471,6 +510,7 @@ async def get_earnings(delivery_user: dict = Depends(require_delivery)):
         daily_delivery_count=to_list(daily_data),
         weekly_delivery_count=to_list(weekly_data),
         monthly_delivery_count=to_list(monthly_data),
+        history=hist
     )
 
 

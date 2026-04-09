@@ -1,7 +1,21 @@
 /**
- * layout.js — Root Layout (Next.js App Router entry point)
- *
- * Next.js requires this file to be named "layout.js" for routing.
- * The actual layout component lives in Headerlayout.js for readability.
+ * layout.js — Root Layout (Server Component, required by Next.js App Router)
+ * The navbar client logic lives in Headerlayout.js
  */
-export { default } from './Headerlayout';
+import './globals.css';
+import Headerlayout from './Headerlayout';
+
+export const metadata = {
+    title: 'RetailTalk - An NLP for querying e-commerce product',
+    description: 'An NLP for querying e-commerce product. BERT-powered intelligent product search.',
+};
+
+export default function RootLayout({ children }) {
+    return (
+        <html lang="en">
+            <body>
+                <Headerlayout>{children}</Headerlayout>
+            </body>
+        </html>
+    );
+}

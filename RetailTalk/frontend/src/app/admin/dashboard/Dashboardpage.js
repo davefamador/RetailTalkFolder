@@ -4,11 +4,11 @@ import {
     LayoutDashboard, Users, Store, Truck, Clock, CreditCard,
     Box, ClipboardList, TrendingUp, Search, LogOut, Timer, CalendarDays,
     ShoppingCart, DollarSign, ShoppingBag, Briefcase, UserCheck,
-    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download, Heart,
+    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download, Heart, ChevronDown
 } from 'lucide-react';
 import {
     getStoredAdmin, adminLogout, adminGetDashboard, adminGetUsers,
-    adminBanUser, adminDeleteUser, adminGetTransactions, adminGetReports,
+    adminBanUser, adminDeleteUser, adminUpdateUserDepartment, adminGetTransactions, adminGetReports,
     adminGetProducts, adminUpdateProduct, adminDeleteProduct, adminGetUserDetail,
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminUpdateDepartment, adminDeleteDepartment, adminRegisterManager,
@@ -180,6 +180,166 @@ function DualLineChart({ data, labelKey, valueKey1, valueKey2, color1 = '#10b981
                 <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem' }}>No data yet</p>
             ) : (
                 <canvas ref={canvasRef} style={{ width: '100%', height }} />
+            )}
+        </div>
+    );
+}
+// ── Multi Line Chart Component ───────────────────────────
+function MultiLineChart({ data, labelKey, lines, title, height = 220, prefix = '' }) {
+    const canvasRef = useRef(null);
+    const [tooltip, setTooltip] = useState(null);
+
+    useEffect(() => {
+        if (!canvasRef.current || !data || data.length === 0) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = canvas.parentElement.clientWidth;
+        const h = canvas.height = height;
+        ctx.clearRect(0, 0, w, h);
+        const padding = { top: 24, right: 20, bottom: 40, left: 50 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+        
+        let maxVal = 1;
+        data.forEach(d => {
+            lines.forEach(line => {
+                const val = d[line.key] || 0;
+                if (val > maxVal) maxVal = val;
+            });
+        });
+        
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartH * i / 4);
+            ctx.strokeStyle = 'rgba(136,136,160,0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(padding.left, y); ctx.lineTo(w - padding.right, y); ctx.stroke();
+            ctx.fillStyle = 'rgba(136,136,160,0.5)';
+            ctx.font = '11px Inter, system-ui';
+            ctx.textAlign = 'right';
+            ctx.fillText(prefix + (maxVal * (4 - i) / 4).toFixed(0), padding.left - 8, y + 4);
+        }
+        
+        const stepX = data.length > 1 ? chartW / (data.length - 1) : chartW;
+        
+        const drawLine = (key, color) => {
+            const points = data.map((d, i) => ({
+                x: padding.left + i * stepX,
+                y: padding.top + chartH - ((d[key] || 0) / maxVal) * chartH,
+            }));
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+            ctx.stroke();
+            points.forEach(p => {
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill();
+            });
+        };
+        
+        lines.forEach(line => drawLine(line.key, line.color));
+        
+        ctx.fillStyle = 'rgba(136,136,160,0.6)';
+        ctx.font = '10px Inter, system-ui';
+        ctx.textAlign = 'center';
+        data.forEach((d, i) => {
+            const x = padding.left + i * stepX;
+            const lbl = d[labelKey] || '';
+            const label = lbl.length > 14 ? lbl.slice(-14) : lbl;
+            ctx.save();
+            ctx.translate(x, h - 15);
+            ctx.rotate(-0.4);
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+        });
+        
+    }, [data, labelKey, lines, height]);
+
+    const handleMouseMove = (e) => {
+        if (!canvasRef.current || !data || data.length === 0) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        const w = canvasRef.current.width;
+        const padding = { top: 24, right: 20, bottom: 40, left: 50 };
+        const chartW = w - padding.left - padding.right;
+        const stepX = data.length > 1 ? chartW / (data.length - 1) : chartW;
+        
+        let closestIdx = -1;
+        let minDist = Infinity;
+        
+        data.forEach((_, i) => {
+            const pointX = padding.left + i * stepX;
+            if (Math.abs(x - pointX) < minDist) {
+                minDist = Math.abs(x - pointX);
+                closestIdx = i;
+            }
+        });
+        
+        if (closestIdx !== -1 && minDist < stepX) {
+            const tooltipData = [];
+            lines.forEach(line => {
+                const val = data[closestIdx][line.key] || 0;
+                if (val > 0) {
+                    tooltipData.push({ key: line.key, val, color: line.color });
+                }
+            });
+            setTooltip({
+                x: x,
+                y: y,
+                w: w,
+                date: data[closestIdx][labelKey],
+                items: tooltipData.sort((a,b) => b.val - a.val)
+            });
+        } else {
+            setTooltip(null);
+        }
+    };
+    
+    return (
+        <div style={{ position: 'relative' }}>
+            <h4 style={{ marginBottom: 12, fontSize: '0.9rem', color: 'var(--admin-text-secondary)' }}>{title}</h4>
+            {(!data || data.length === 0) ? (
+                <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem' }}>No data yet</p>
+            ) : (
+                <>
+                    <canvas 
+                       ref={canvasRef} 
+                       style={{ width: '100%', height }} 
+                       onMouseMove={handleMouseMove}
+                       onMouseLeave={() => setTooltip(null)}
+                    />
+                    {tooltip && tooltip.items.length > 0 && (
+                        <div style={{
+                            position: 'absolute',
+                            left: tooltip.x > tooltip.w / 2 ? tooltip.x - 170 : tooltip.x + 15,
+                            top: Math.max(10, tooltip.y - 15),
+                            background: 'var(--admin-card-bg)',
+                            border: '1px solid var(--admin-border)',
+                            borderRadius: 8,
+                            padding: '10px 14px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                            zIndex: 10,
+                            pointerEvents: 'none',
+                            minWidth: 150
+                        }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)', marginBottom: 6, fontWeight: 600 }}>{tooltip.date}</div>
+                            {tooltip.items.map((item, idx) => (
+                                <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: item.color }} />
+                                        <span style={{ fontSize: '0.8rem', color: 'var(--admin-text)' }}>{item.key}</span>
+                                    </div>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--admin-text)' }}>{item.val}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </>
             )}
         </div>
     );
@@ -452,6 +612,8 @@ export default function AdminDashboard() {
     const [transactions, setTransactions] = useState([]);
     const [txnSearch, setTxnSearch] = useState('');
     const [reports, setReports] = useState(null);
+    const [selectedReportStore, setSelectedReportStore] = useState('');
+    const [storeSearchText, setStoreSearchText] = useState('');
     const [message, setMessage] = useState({ type: '', text: '' });
     // Products state
     const [products, setProducts] = useState([]);
@@ -664,7 +826,7 @@ export default function AdminDashboard() {
     };
     useEffect(() => {
         if (!authChecked) return;
-        if (activeTab === 'users') loadUsers('', userRoleFilter);
+        if (activeTab === 'users') { loadUsers('', userRoleFilter); loadDepartments(); }
         if (activeTab === 'transactions') loadTransactions();
         if (activeTab === 'reports') loadReports();
         if (activeTab === 'products') loadProducts();
@@ -791,6 +953,14 @@ export default function AdminDashboard() {
             loadUsers(userSearch, userRoleFilter);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
+    const handleChangeDepartment = async (userId, departmentId) => {
+        try {
+            await adminUpdateUserDepartment(userId, departmentId);
+            setMessage({ type: 'success', text: departmentId ? 'User assigned to store' : 'User removed from store' });
+            loadUsers(userSearch, userRoleFilter);
+            loadDepartments();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    };
     const handleDeleteUser = (userId, userName) => {
         setConfirmDialog({
             title: 'Delete User',
@@ -886,7 +1056,7 @@ export default function AdminDashboard() {
     const handleDeleteDepartment = (deptId, deptName) => {
         setConfirmDialog({
             title: 'Delete Store',
-            message: `Delete store "${deptName}"? All staff will be disassociated. This cannot be undone.`,
+            message: `Delete store "${deptName}"? The store must have no staff or managers assigned. This cannot be undone.`,
             onConfirm: async () => {
                 try {
                     await adminDeleteDepartment(deptId);
@@ -1287,7 +1457,7 @@ export default function AdminDashboard() {
                                 <table className="data-table">
                                     <thead>
                                         <tr>
-                                            <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th>
+                                            <th>Name</th><th>Email</th><th>Role</th><th>Store</th><th>Joined</th><th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -1327,15 +1497,33 @@ export default function AdminDashboard() {
                                                     </span>
                                                 </td>
                                                 <td>
-                                                    <span style={{
-                                                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                                                        padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                        background: u.is_banned ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
-                                                        color: u.is_banned ? '#ef4444' : '#10b981',
-                                                    }}>
-                                                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: u.is_banned ? '#ef4444' : '#10b981' }}></span>
-                                                        {u.is_banned ? 'Banned' : 'Active'}
-                                                    </span>
+                                                    {(u.role === 'seller' || u.role === 'manager') ? (
+                                                        <select
+                                                            value={u.department_id || ''}
+                                                            onClick={e => e.stopPropagation()}
+                                                            onChange={e => { e.stopPropagation(); handleChangeDepartment(u.id, e.target.value); }}
+                                                            style={{
+                                                                padding: '4px 8px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600,
+                                                                border: '1px solid var(--admin-border)',
+                                                                background: u.department_id ? 'rgba(139,92,246,0.1)' : 'rgba(148,163,184,0.1)',
+                                                                color: u.department_id ? '#8b5cf6' : 'var(--admin-text-muted)',
+                                                                cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                                maxWidth: 140,
+                                                            }}
+                                                        >
+                                                            <option value="">No Store</option>
+                                                            {departments.map(d => (
+                                                                <option key={d.id} value={d.id}>{d.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : (
+                                                        <span style={{
+                                                            padding: '4px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
+                                                            background: 'rgba(148,163,184,0.1)', color: 'var(--admin-text-muted)',
+                                                        }}>
+                                                            N/A
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                     {new Date(u.created_at).toLocaleDateString()}
@@ -1477,6 +1665,19 @@ export default function AdminDashboard() {
                                                 <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#f59e0b' }}>PHP {(dept.total_revenue || 0).toFixed(2)}</p>
                                             </div>
                                         </div>
+                                        <button
+                                            onClick={e => { e.stopPropagation(); handleDeleteDepartment(dept.id, dept.name); }}
+                                            style={{
+                                                width: '100%', padding: '8px 0', borderRadius: 8,
+                                                background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)',
+                                                color: '#ef4444', fontWeight: 600, fontSize: '0.78rem',
+                                                cursor: 'pointer', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                            }}
+                                            onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)'; }}
+                                        >
+                                            Delete Store
+                                        </button>
                                     </div>
                                 ))}
                             </div>
@@ -2545,8 +2746,17 @@ export default function AdminDashboard() {
                     {activeTab === 'transactions' && (() => {
                         const filteredTxns = transactions.filter(t => {
                             if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
+                            if (txnTypeFilter !== 'all') {
+                                const tType = t.purchase_type || 'delivery';
+                                if (tType !== txnTypeFilter) return false;
+                            }
                             return true;
                         });
+
+                        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+                        const recentTxns = filteredTxns.filter(t => new Date(t.created_at).getTime() >= oneDayAgo);
+                        const otherTxns = filteredTxns.filter(t => new Date(t.created_at).getTime() < oneDayAgo);
+
                         const statusColors = {
                             pending: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
                             approved: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
@@ -2585,7 +2795,22 @@ export default function AdminDashboard() {
                                 </div>
                                 {/* Filter Buttons */}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Status:</span>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Filter Type:</span>
+                                    <select
+                                        value={txnTypeFilter}
+                                        onChange={e => setTxnTypeFilter(e.target.value)}
+                                        style={{
+                                            padding: '6px 12px', borderRadius: 8,
+                                            border: '1px solid var(--admin-border)',
+                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
+                                            fontSize: '0.78rem', fontFamily: 'Inter, sans-serif', cursor: 'pointer',
+                                        }}
+                                    >
+                                        <option value="all">All Types</option>
+                                        <option value="delivery">Delivery</option>
+                                        <option value="restock">Restock</option>
+                                    </select>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4, marginLeft: 8 }}>Filter Status:</span>
                                     <select
                                         value={txnStatusFilter}
                                         onChange={e => setTxnStatusFilter(e.target.value)}
@@ -2602,39 +2827,115 @@ export default function AdminDashboard() {
                                         ))}
                                     </select>
                                 </div>
+
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '24px 0 12px' }}>Recent Transactions (Last 24 Hours)</h3>
                                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                    <table className="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Buyer</th><th>Seller</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Date</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {filteredTxns.map(t => {
-                                                const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
-                                                const sLabel = statusLabels[t.status] || t.status;
-                                                return (
-                                                    <tr key={t.id}>
-                                                        <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                        <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
-                                                        <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
-                                                        <td>{t.quantity || 1}</td>
-                                                        <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
-                                                        <td>
-                                                            <span style={{
-                                                                padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                                background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
-                                                            }}>{sLabel}</span>
-                                                        </td>
-                                                        <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                            {new Date(t.created_at).toLocaleString()}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                    {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
+                                    <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {recentTxns.map(t => {
+                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                    const sLabel = statusLabels[t.status] || t.status;
+                                                    const typeLabel = t.purchase_type ? t.purchase_type.charAt(0).toUpperCase() + t.purchase_type.slice(1) : 'Delivery';
+                                                    return (
+                                                        <tr key={t.id}>
+                                                            <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                            <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
+                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
+                                                            <td>{t.quantity || 1}</td>
+                                                            <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                                    background: typeLabel === 'Restock' ? 'rgba(139,92,246,0.15)' : 'rgba(14,165,233,0.15)',
+                                                                    color: typeLabel === 'Restock' ? '#8b5cf6' : '#0ea5e9'
+                                                                }}>
+                                                                    {typeLabel}
+                                                                </span>
+                                                            </td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
+                                                                }}>{sLabel}</span>
+                                                            </td>
+                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
+                                                                {new Date(t.created_at).toLocaleString()}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {recentTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No recent transactions</p></div>}
+                                </div>
+
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>All Transactions</h3>
+                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                    <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {otherTxns.map(t => {
+                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                    const sLabel = statusLabels[t.status] || t.status;
+                                                    const typeLabel = t.purchase_type ? t.purchase_type.charAt(0).toUpperCase() + t.purchase_type.slice(1) : 'Delivery';
+                                                    return (
+                                                        <tr key={t.id}>
+                                                            <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                            <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
+                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
+                                                            <td>{t.quantity || 1}</td>
+                                                            <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                                    background: typeLabel === 'Restock' ? 'rgba(139,92,246,0.15)' : 'rgba(14,165,233,0.15)',
+                                                                    color: typeLabel === 'Restock' ? '#8b5cf6' : '#0ea5e9'
+                                                                }}>
+                                                                    {typeLabel}
+                                                                </span>
+                                                            </td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
+                                                                }}>{sLabel}</span>
+                                                            </td>
+                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
+                                                                {new Date(t.created_at).toLocaleString()}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {otherTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No past transactions found</p></div>}
                                 </div>
                             </div>
                         );
@@ -2916,6 +3217,18 @@ export default function AdminDashboard() {
                                                 ['Total Revenue', `PHP ${reports.total_revenue.toFixed(2)}`],
                                                 ['Total Orders', reports.total_orders],
                                                 ['Average Order Value', `PHP ${reports.avg_transaction_value.toFixed(2)}`],
+                                                ['Overall Expected Revenue', `PHP ${reports.overall_expected_revenue?.toFixed(2) || '0.00'}`],
+                                                [],
+                                                ['EXPECTED & CURRENT REVENUE BREAKDOWN BY STORE'],
+                                                ['Store Name', 'Expected Revenue', 'Current Revenue'],
+                                                ...(reports.store_reports || []).map(s => [s.store_name, `PHP ${s.expected_revenue?.toFixed(2) || '0.00'}`, `PHP ${s.current_revenue?.toFixed(2) || '0.00'}`]),
+                                                [],
+                                                ['PRODUCT REVENUE BY STORE'],
+                                                ['Store Name', 'Product Title', 'Expected Revenue', 'Current Revenue'],
+                                                ...(reports.product_reports || []).map(p => {
+                                                    const store = (reports.store_reports || []).find(s => s.store_id === p.store_id) || {};
+                                                    return [store.store_name || 'Unknown Store', p.product_title, `PHP ${p.expected_revenue?.toFixed(2) || '0.00'}`, `PHP ${p.current_revenue?.toFixed(2) || '0.00'}`];
+                                                }),
                                                 [],
                                                 ['TOP SELLERS'],
                                                 ['Seller Name', 'Total Sales', 'Transaction Count'],
@@ -2954,9 +3267,100 @@ export default function AdminDashboard() {
                                 <>
                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 32 }}>
                                         <StatCard icon={DollarSign} label="Total Revenue" value={`PHP ${reports.total_revenue.toFixed(2)}`} color="#f59e0b" />
+                                        <StatCard icon={Package} label="Overall Expected Revenue" value={`PHP ${reports.overall_expected_revenue?.toFixed(2) || '0.00'}`} color="#8b5cf6" />
                                         <StatCard icon={ShoppingCart} label="Total Orders" value={reports.total_orders} color="#10b981" />
                                         <StatCard icon={Ruler} label="Avg Order Value" value={`PHP ${reports.avg_transaction_value.toFixed(2)}`} color="#0ea5e9" />
                                     </div>
+                                    
+                                    <div className="card" style={{ padding: 24, marginBottom: 32 }}>
+                                        <h4 style={{ marginBottom: 16, fontWeight: 700 }}>Expected & Current Revenue Breakdown</h4>
+                                        <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
+                                            <div style={{ flex: 1, maxWidth: 400 }}>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 6 }}>Search & Select Store</label>
+                                                <div style={{ position: 'relative', width: '100%' }}>
+                                                    <Search style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', zIndex: 2 }} size={16} />
+                                                    <input
+                                                        type="text"
+                                                        list="store-search-datalist"
+                                                        className="input-field"
+                                                        placeholder="Type to search store..."
+                                                        value={storeSearchText}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setStoreSearchText(val);
+                                                            const match = reports.store_reports?.find(s => s.store_name === val);
+                                                            setSelectedReportStore(match ? match.store_id : '');
+                                                        }}
+                                                        style={{
+                                                            width: '100%',
+                                                            paddingLeft: 36,
+                                                            paddingRight: 36,
+                                                            background: 'var(--admin-card-bg)', // Matches panel background
+                                                            border: '1px solid var(--admin-border-color)',
+                                                            color: 'var(--admin-text-primary)'
+                                                        }}
+                                                    />
+                                                    <ChevronDown style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', zIndex: 2 }} size={16} />
+                                                </div>
+                                                <datalist id="store-search-datalist">
+                                                    {reports.store_reports && reports.store_reports.map(s => (
+                                                        <option key={s.store_id} value={s.store_name} />
+                                                    ))}
+                                                </datalist>
+                                            </div>
+                                        </div>
+                                        
+                                        <div>
+                                            {selectedReportStore ? (() => {
+                                                const store = reports.store_reports.find(s => s.store_id === selectedReportStore);
+                                                const storeProducts = reports.product_reports?.filter(p => p.store_id === selectedReportStore) || [];
+                                                return store ? (
+                                                    <>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+                                                            <div style={{ padding: 16, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+                                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4, fontWeight: 600 }}>Store Expected Revenue</p>
+                                                                <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#8b5cf6' }}>PHP {store.expected_revenue?.toFixed(2) || '0.00'}</p>
+                                                            </div>
+                                                            <div style={{ padding: 16, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 10 }}>
+                                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 4, fontWeight: 600 }}>Store Current Revenue</p>
+                                                                <p style={{ fontSize: '1.2rem', fontWeight: 800, color: '#10b981' }}>PHP {store.current_revenue?.toFixed(2) || '0.00'}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        {storeProducts.length > 0 ? (
+                                                            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                                                                <table className="data-table">
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product Title</th>
+                                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Expected Revenue</th>
+                                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Current Revenue</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        {storeProducts.map((p, i) => (
+                                                                            <tr key={i}>
+                                                                                <td style={{ fontWeight: 500 }}>{p.product_title}</td>
+                                                                                <td style={{ color: '#6366f1' }}>PHP {p.expected_revenue?.toFixed(2) || '0.00'}</td>
+                                                                                <td style={{ color: '#10b981' }}>PHP {p.current_revenue?.toFixed(2) || '0.00'}</td>
+                                                                            </tr>
+                                                                        ))}
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        ) : (
+                                                            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No products found for this store.</p>
+                                                        )}
+                                                    </>
+                                                ) : null;
+                                            })() : (
+                                                 <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+                                                     Type and select a store above to view its detailed expected and current revenue.
+                                                 </div>
+                                            )}
+                                        </div>
+                                    </div>
+
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
                                         <div className="card" style={{ padding: 24 }}>
                                             <LineChart
@@ -2979,18 +3383,20 @@ export default function AdminDashboard() {
                                             {reports.top_sellers.length === 0 ? (
                                                 <p style={{ color: 'var(--admin-text-muted)' }}>No sellers yet</p>
                                             ) : (
-                                                <table className="data-table">
-                                                    <thead><tr><th>Seller</th><th>Sales</th><th>Orders</th></tr></thead>
-                                                    <tbody>
-                                                        {reports.top_sellers.map((s, i) => (
-                                                            <tr key={i}>
-                                                                <td style={{ fontWeight: 500 }}>{s.seller_name}</td>
-                                                                <td style={{ color: '#10b981' }}>PHP {s.total_sales.toFixed(2)}</td>
-                                                                <td>{s.transaction_count}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
+                                                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                                                    <table className="data-table">
+                                                        <thead><tr><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Sales</th><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Orders</th></tr></thead>
+                                                        <tbody>
+                                                            {reports.top_sellers.map((s, i) => (
+                                                                <tr key={i}>
+                                                                    <td style={{ fontWeight: 500 }}>{s.seller_name}</td>
+                                                                    <td style={{ color: '#10b981' }}>PHP {s.total_sales.toFixed(2)}</td>
+                                                                    <td>{s.transaction_count}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
                                             )}
                                         </div>
                                         <div className="card" style={{ padding: 24 }}>
@@ -2998,18 +3404,20 @@ export default function AdminDashboard() {
                                             {reports.top_products.length === 0 ? (
                                                 <p style={{ color: 'var(--admin-text-muted)' }}>No products sold yet</p>
                                             ) : (
-                                                <table className="data-table">
-                                                    <thead><tr><th>Product</th><th>Sold</th><th>Revenue</th></tr></thead>
-                                                    <tbody>
-                                                        {reports.top_products.map((p, i) => (
-                                                            <tr key={i}>
-                                                                <td style={{ fontWeight: 500 }}>{p.product_title}</td>
-                                                                <td>{p.times_sold}x</td>
-                                                                <td style={{ color: '#10b981' }}>PHP {p.total_revenue.toFixed(2)}</td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
+                                                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                                                    <table className="data-table">
+                                                        <thead><tr><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Sold</th><th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Revenue</th></tr></thead>
+                                                        <tbody>
+                                                            {reports.top_products.map((p, i) => (
+                                                                <tr key={i}>
+                                                                    <td style={{ fontWeight: 500 }}>{p.product_title}</td>
+                                                                    <td>{p.times_sold}x</td>
+                                                                    <td style={{ color: '#10b981' }}>PHP {p.total_revenue.toFixed(2)}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
@@ -3034,48 +3442,45 @@ export default function AdminDashboard() {
                                         gap: 16, marginBottom: 32,
                                     }}>
                                         <StatCard icon={Truck} label="Total Deliveries" value={deliveriesStats.total_deliveries} color="#0ea5e9" />
-                                        <StatCard icon={Timer} label="Avg Delivery Time" value={deliveriesStats.avg_delivery_time ? `${deliveriesStats.avg_delivery_time.toFixed(1)}h` : 'N/A'} color="#8b5cf6" />
-                                        <StatCard icon={CalendarDays} label="Deliveries This Month" value={deliveriesStats.deliveries_by_month.length > 0 ? deliveriesStats.deliveries_by_month[deliveriesStats.deliveries_by_month.length - 1].count : 0} color="#f59e0b" />
+                                        <StatCard icon={CalendarDays} label="Deliveries This Month" value={(() => {
+                                            const d = new Date();
+                                            const currMonth = d.toLocaleString('default', { month: 'short' });
+                                            const monthData = deliveriesStats.deliveries_by_month.find(m => m.date === currMonth);
+                                            return monthData ? Object.entries(monthData).reduce((sum, [k,v]) => k!=='date' ? sum+v : sum, 0) : 0;
+                                        })()} color="#f59e0b" />
                                     </div>
                                     {/* Charts Section */}
-                                    <div style={{
-                                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
-                                        gap: 24, marginBottom: 32,
-                                    }}>
-                                        <div className="card" style={{ padding: 24 }}>
-                                            <LineChart
-                                                data={deliveriesStats.deliveries_by_day.slice(-14)}
-                                                labelKey="date"
-                                                valueKey="count"
-                                                title="Deliveries Per Day (Last 14 Days)"
-                                                color="#0ea5e9"
-                                                height={220}
-                                                prefix=""
-                                            />
-                                        </div>
-                                        <div className="card" style={{ padding: 24 }}>
-                                            <LineChart
-                                                data={deliveriesStats.deliveries_by_week.slice(-12)}
-                                                labelKey="date"
-                                                valueKey="count"
-                                                title="Deliveries Per Week (Last 12 Weeks)"
-                                                color="#8b5cf6"
-                                                height={220}
-                                                prefix=""
-                                            />
-                                        </div>
-                                        <div className="card" style={{ padding: 24 }}>
-                                            <LineChart
-                                                data={deliveriesStats.deliveries_by_month}
-                                                labelKey="date"
-                                                valueKey="count"
-                                                title="Deliveries Per Month"
-                                                color="#f59e0b"
-                                                height={220}
-                                                prefix=""
-                                            />
-                                        </div>
-                                    </div>
+                                    {(() => {
+                                        const colors = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#f43f5e', '#6366f1', '#14b8a6', '#84cc16'];
+                                        const chartLines = deliveriesStats.deliverymen.map((dm, idx) => ({ key: dm.full_name, color: colors[idx % colors.length] }));
+                                        return (
+                                            <div style={{
+                                                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
+                                                gap: 24, marginBottom: 32,
+                                            }}>
+                                                <div className="card" style={{ padding: 24 }}>
+                                                    <MultiLineChart
+                                                        data={deliveriesStats.deliveries_by_day.map(d => ({ ...d, date: d.date.substring(5) }))}
+                                                        labelKey="date"
+                                                        lines={chartLines}
+                                                        title="Deliveries Per Day (Last 14 Days)"
+                                                        height={220}
+                                                        prefix=""
+                                                    />
+                                                </div>
+                                                <div className="card" style={{ padding: 24 }}>
+                                                    <MultiLineChart
+                                                        data={deliveriesStats.deliveries_by_month}
+                                                        labelKey="date"
+                                                        lines={chartLines}
+                                                        title="Deliveries Per Month"
+                                                        height={220}
+                                                        prefix=""
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     {/* Deliverymen List */}
                                     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                                         <div style={{ padding: 24, borderBottom: '1px solid var(--admin-border)' }}>
@@ -3347,7 +3752,7 @@ export default function AdminDashboard() {
                                             {(!wishlistReport?.by_store || wishlistReport.by_store.length === 0) ? (
                                                 <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
                                             ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 300, overflowY: 'auto', paddingRight: 6 }}>
                                                     {wishlistReport.by_store.map((s, i) => {
                                                         const maxC = wishlistReport.by_store[0]?.wishlist_count || 1;
                                                         return (
@@ -3379,7 +3784,7 @@ export default function AdminDashboard() {
                                             {(!wishlistReport?.top_buyers || wishlistReport.top_buyers.length === 0) ? (
                                                 <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
                                             ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 300, overflowY: 'auto', paddingRight: 6 }}>
                                                     {wishlistReport.top_buyers.map((b, i) => (
                                                         <div key={b.buyer_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: i < wishlistReport.top_buyers.length - 1 ? '1px solid var(--admin-border)' : 'none' }}>
                                                             <span style={{
@@ -3403,22 +3808,22 @@ export default function AdminDashboard() {
 
                                     {/* Top Wishlisted Products */}
                                     <div className="card" style={{ marginBottom: 24 }}>
-                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Top Wishlisted Products</h3>
+                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Top Wishlisted Products (Top 10)</h3>
                                         {(!wishlistReport?.top_products || wishlistReport.top_products.length === 0) ? (
                                             <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No data yet</p>
                                         ) : (
-                                            <div style={{ overflowX: 'auto' }}>
+                                            <div style={{ maxHeight: 350, overflowY: 'auto' }}>
                                                 <table className="data-table">
                                                     <thead>
                                                         <tr>
-                                                            <th>#</th>
-                                                            <th>Product</th>
-                                                            <th>Store</th>
-                                                            <th style={{ textAlign: 'right' }}>Wishlists</th>
+                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>#</th>
+                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store</th>
+                                                            <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1, textAlign: 'right' }}>Wishlists</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {wishlistReport.top_products.map((prod, i) => (
+                                                        {wishlistReport.top_products.slice(0, 10).map((prod, i) => (
                                                             <tr key={prod.product_id}>
                                                                 <td>
                                                                     <span style={{
@@ -3456,16 +3861,16 @@ export default function AdminDashboard() {
 
                                     {/* Recent Wishlist Activity */}
                                     <div className="card">
-                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Recent Wishlist Activity</h3>
+                                        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Recent Wishlist Activity (Top 10)</h3>
                                         {(!wishlistReport?.recent_activity || wishlistReport.recent_activity.length === 0) ? (
                                             <p style={{ color: 'var(--admin-text-muted)', textAlign: 'center', padding: 24 }}>No activity yet</p>
                                         ) : (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                                                {wishlistReport.recent_activity.map((a, i) => (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 350, overflowY: 'auto' }}>
+                                                {wishlistReport.recent_activity.slice(0, 10).map((a, i) => (
                                                     <div key={i} style={{
                                                         display: 'flex', alignItems: 'center', gap: 12,
                                                         padding: '10px 0',
-                                                        borderBottom: i < wishlistReport.recent_activity.length - 1 ? '1px solid var(--admin-border)' : 'none',
+                                                        borderBottom: i < Math.min(wishlistReport.recent_activity.length, 10) - 1 ? '1px solid var(--admin-border)' : 'none',
                                                     }}>
                                                         <div style={{
                                                             width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
@@ -3697,7 +4102,7 @@ export default function AdminDashboard() {
                                     </button>
                                 </div>
                             </div>
-{/* Transaction History */}
+                            {/* Transaction History */}
                             <div style={{
                                 background: 'var(--admin-card-bg)', borderRadius: 14,
                                 border: '1px solid var(--admin-border)', overflow: 'hidden',
@@ -3972,7 +4377,7 @@ export default function AdminDashboard() {
                                         <p style={{ fontSize: '0.85rem', fontWeight: 700 }}>{userDetail.report.total_transactions}</p>
                                     </div>
                                 </div>
-                                                                {/* ===== SELLER INFOGRAPHICS (only for sellers) ===== */}
+                                {/* ===== SELLER INFOGRAPHICS (only for sellers) ===== */}
                                 {userDetail.user.role === 'seller' && (
                                     <>
                                         {/* Seller Report Stat Cards */}
@@ -4016,7 +4421,7 @@ export default function AdminDashboard() {
                                         </div>
                                     </>
                                 )}
-{/* Report Graphs */}
+                                {/* Report Graphs */}
                                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}><TrendingUp size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />Reports</h3>
                                 <div style={{ marginBottom: 24 }}>
                                     {/* Daily Line Chart - 14 Days */}

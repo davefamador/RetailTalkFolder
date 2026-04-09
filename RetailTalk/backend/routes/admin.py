@@ -42,6 +42,10 @@ class BanRequest(BaseModel):
     is_banned: bool
 
 
+class UpdateDepartmentRequest(BaseModel):
+    department_id: Optional[str] = None  # None means remove from department
+
+
 class DashboardResponse(BaseModel):
     total_users: int
     total_products: int
@@ -92,6 +96,20 @@ class TopProduct(BaseModel):
     total_revenue: float
 
 
+class StoreReport(BaseModel):
+    store_id: str
+    store_name: str
+    expected_revenue: float
+    current_revenue: float
+
+class ProductReport(BaseModel):
+    product_id: str
+    product_title: str
+    store_id: str
+    store_name: str
+    expected_revenue: float
+    current_revenue: float
+
 class ReportsResponse(BaseModel):
     total_revenue: float
     total_sales_volume: float
@@ -101,6 +119,9 @@ class ReportsResponse(BaseModel):
     top_sellers: list[TopSeller]
     top_products: list[TopProduct]
     monthly_income: list[DailyIncome]
+    overall_expected_revenue: float = 0.0
+    store_reports: list[StoreReport] = []
+    product_reports: list[ProductReport] = []
 
 
 class AdminProductResponse(BaseModel):
@@ -221,6 +242,43 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
 
     sb.table("users").update({"is_banned": req.is_banned}).eq("id", user_id).execute()
     return {"message": f"User {'banned' if req.is_banned else 'unbanned'} successfully"}
+
+
+@router.put("/users/{user_id}/department")
+async def update_user_department(user_id: str, req: UpdateDepartmentRequest, admin: dict = Depends(require_admin)):
+    """Assign or remove a user from a department/store. Only for seller and manager roles."""
+    sb = get_supabase()
+
+    target = sb.table("users").select("id, role, department_id").eq("id", user_id).execute()
+    if not target.data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user = target.data[0]
+    if user["role"] not in ("seller", "manager"):
+        raise HTTPException(status_code=400, detail="Only staff (seller) and manager users can be assigned to a store")
+
+    if req.department_id:
+        dept = sb.table("departments").select("id, manager_id").eq("id", req.department_id).execute()
+        if not dept.data:
+            raise HTTPException(status_code=404, detail="Store not found")
+        # If assigning a manager, ensure the department doesn't already have a different manager
+        if user["role"] == "manager" and dept.data[0].get("manager_id") and dept.data[0]["manager_id"] != user_id:
+            raise HTTPException(status_code=400, detail="This store already has a manager assigned")
+
+    # Remove from old department if was a manager there
+    if user["role"] == "manager" and user.get("department_id"):
+        sb.table("departments").update({"manager_id": None}).eq("manager_id", user_id).execute()
+
+    # Update user's department
+    sb.table("users").update({"department_id": req.department_id}).eq("id", user_id).execute()
+
+    # If assigning a manager to a new department, set them as the department's manager
+    if user["role"] == "manager" and req.department_id:
+        sb.table("departments").update({"manager_id": user_id}).eq("id", req.department_id).execute()
+
+    if req.department_id:
+        return {"message": "User assigned to store successfully"}
+    return {"message": "User removed from store successfully"}
 
 
 @router.delete("/users/{user_id}")
@@ -399,7 +457,35 @@ async def admin_reports(admin: dict = Depends(require_admin)):
             top_products=[], monthly_income=[],
         )
 
+    products_res = sb.table("products").select("id, title, seller_id, price, stock, is_active, status").execute()
+    
+    overall_expected_revenue = 0.0
+    store_expected = {}
+    product_expected = {}
+    
+    for p in (products_res.data or []):
+        if not p.get("is_active") or p.get("status") != "approved":
+            continue
+            
+        p_revenue = float(p.get("price", 0)) * int(p.get("stock", 0))
+        overall_expected_revenue += p_revenue
+        
+        sid = p.get("seller_id")
+        if sid:
+            if sid not in store_expected:
+                store_expected[sid] = 0.0
+            store_expected[sid] += p_revenue
+            
+        product_expected[p.get("id")] = {
+            "title": p.get("title", "Unknown"),
+            "seller_id": sid,
+            "expected_revenue": p_revenue
+        }
+
     seller_ids = set(t["seller_id"] for t in txns.data)
+    if products_res.data:
+        seller_ids.update(p["seller_id"] for p in products_res.data if p.get("seller_id"))
+        
     users_result = sb.table("users").select("id, full_name, department_id").in_("id", list(seller_ids)).execute()
     user_map = {u["id"]: u for u in users_result.data} if users_result.data else {}
 
@@ -496,6 +582,32 @@ async def admin_reports(admin: dict = Depends(require_admin)):
 
     avg_val = total_volume / len(txns.data) if txns.data else 0
 
+    store_reports = []
+    all_store_ids = set(seller_data.keys()).union(store_expected.keys())
+    for sid in all_store_ids:
+        store_reports.append(StoreReport(
+            store_id=sid,
+            store_name=get_seller_display_name(sid),
+            expected_revenue=round(store_expected.get(sid, 0.0), 2),
+            current_revenue=round(seller_data.get(sid, {}).get("total", 0.0), 2)
+        ))
+        
+    product_reports = []
+    all_product_ids = set(product_data.keys()).union(product_expected.keys())
+    for pid in all_product_ids:
+        pd = product_expected.get(pid, {})
+        title = pd.get("title") or product_data.get(pid, {}).get("title", "Unknown")
+        sid = pd.get("seller_id") or "Unknown"
+        
+        product_reports.append(ProductReport(
+            product_id=pid,
+            product_title=title,
+            store_id=sid,
+            store_name=get_seller_display_name(sid) if sid != "Unknown" else "Unknown",
+            expected_revenue=round(pd.get("expected_revenue", 0.0), 2),
+            current_revenue=round(product_data.get(pid, {}).get("revenue", 0.0), 2)
+        ))
+
     return ReportsResponse(
         total_revenue=round(total_income, 2),
         total_sales_volume=round(total_volume, 2),
@@ -505,6 +617,9 @@ async def admin_reports(admin: dict = Depends(require_admin)):
         top_sellers=top_sellers,
         top_products=top_products,
         monthly_income=monthly_income,
+        overall_expected_revenue=round(overall_expected_revenue, 2),
+        store_reports=store_reports,
+        product_reports=product_reports
     )
 
 
@@ -1244,15 +1359,22 @@ async def update_department(dept_id: str, req: DepartmentUpdateRequest, admin: d
 
 @router.delete("/departments/{dept_id}")
 async def delete_department(dept_id: str, admin: dict = Depends(require_admin)):
-    """Delete a department and disassociate its staff (sets their department_id to NULL)."""
+    """Delete a department only if no staff or manager are still assigned."""
     sb = get_supabase()
-    dept = sb.table("departments").select("id, name").eq("id", dept_id).execute()
+    dept = sb.table("departments").select("id, name, manager_id").eq("id", dept_id).execute()
     if not dept.data:
         raise HTTPException(status_code=404, detail="Department not found")
-    # Disassociate staff so they are not orphaned
-    sb.table("users").update({"department_id": None}).eq("department_id", dept_id).execute()
+
+    # Check if any staff (sellers) are still assigned
+    staff = sb.table("users").select("id").eq("department_id", dept_id).execute()
+    if staff.data:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete this store while staff or managers are still assigned. Remove all members first."
+        )
+
     sb.table("departments").delete().eq("id", dept_id).execute()
-    return {"message": f"Department '{dept.data[0]['name']}' deleted"}
+    return {"message": f"Store '{dept.data[0]['name']}' deleted"}
 
 
 # --- Admin Delete Product ---
@@ -1529,10 +1651,8 @@ class Deliveryman(BaseModel):
 
 class DeliveriesStatsResponse(BaseModel):
     total_deliveries: int
-    avg_delivery_time: Optional[float]
-    deliveries_by_day: list[DeliveryStatsDay]
-    deliveries_by_week: list[DeliveryStatsDay]
-    deliveries_by_month: list[DeliveryStatsDay]
+    deliveries_by_day: list[dict]
+    deliveries_by_month: list[dict]
     deliverymen: list[Deliveryman]
 
 
@@ -1559,9 +1679,7 @@ async def get_deliveries_stats(admin: dict = Depends(require_admin)):
     if not txns.data:
         return DeliveriesStatsResponse(
             total_deliveries=0,
-            avg_delivery_time=None,
             deliveries_by_day=[],
-            deliveries_by_week=[],
             deliveries_by_month=[],
             deliverymen=[]
         )
@@ -1580,10 +1698,18 @@ async def get_deliveries_stats(admin: dict = Depends(require_admin)):
         user_details = {u["id"]: u for u in (users_result.data or [])}
 
     # Calculate stats
-    delivery_times = []
-    deliveries_by_date = {}
-    deliveries_by_week = {}
-    deliveries_by_month = {}
+    from datetime import datetime, timedelta
+    today = datetime.now(timezone.utc)
+    
+    last_14_days = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(13, -1, -1)]
+    days_dict = {day: {"date": day} for day in last_14_days}
+
+    current_year = today.year
+    months_dict = {}
+    for i in range(1, 13):
+        m_str = f"{current_year}-{i:02d}"
+        months_dict[m_str] = {"date": datetime(current_year, i, 1).strftime("%b")}
+
     deliverymen_map = {}
 
     for t in txns.data:
@@ -1600,62 +1726,45 @@ async def get_deliveries_stats(admin: dict = Depends(require_admin)):
                 "email": user_info.get("email", ""),
                 "contact_number": contacts.get(delivery_user_id, ""),
                 "total_deliveries": 0,
-                "completed_count": 0,
-                "delivery_times": []
+                "completed_count": 0
             }
 
         deliverymen_map[delivery_user_id]["total_deliveries"] += 1
 
-        # Track delivery time if status is delivered
         if t.get("status") == "delivered":
             deliverymen_map[delivery_user_id]["completed_count"] += 1
-            created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-            if t.get("updated_at"):
-                updated = datetime.fromisoformat(t["updated_at"].replace("Z", "+00:00"))
-                time_diff = (updated - created).total_seconds() / 3600  # hours
-                deliverymen_map[delivery_user_id]["delivery_times"].append(time_diff)
-                delivery_times.append(time_diff)
+
+        dm_name = deliverymen_map[delivery_user_id]["full_name"]
 
         # Count by date
         created_date = t["created_at"].split("T")[0]
-        deliveries_by_date[created_date] = deliveries_by_date.get(created_date, 0) + 1
-
-        # Count by week (ISO week)
-        created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-        week_key = created.strftime("%Y-W%U")
-        deliveries_by_week[week_key] = deliveries_by_week.get(week_key, 0) + 1
+        if created_date in days_dict:
+            days_dict[created_date][dm_name] = days_dict[created_date].get(dm_name, 0) + 1
 
         # Count by month
+        created = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
         month_key = created.strftime("%Y-%m")
-        deliveries_by_month[month_key] = deliveries_by_month.get(month_key, 0) + 1
+        if month_key in months_dict:
+            months_dict[month_key][dm_name] = months_dict[month_key].get(dm_name, 0) + 1
 
-    # Calculate average delivery time
-    avg_delivery_time = sum(delivery_times) / len(delivery_times) if delivery_times else None
-
-    # Format deliveries breakdown
-    days_list = [{"date": date, "count": count} for date, count in sorted(deliveries_by_date.items())]
-    weeks_list = [{"date": week, "count": count} for week, count in sorted(deliveries_by_week.items())]
-    months_list = [{"date": month, "count": count} for month, count in sorted(deliveries_by_month.items())]
+    days_list = list(days_dict.values())
+    months_list = list(months_dict.values())
 
     # Build deliverymen list
     deliverymen_list = []
     for user_id, data in deliverymen_map.items():
-        avg_time = sum(data["delivery_times"]) / len(data["delivery_times"]) if data["delivery_times"] else None
         deliverymen_list.append(Deliveryman(
             user_id=user_id,
             full_name=data["full_name"],
             email=data["email"],
             contact_number=data["contact_number"],
             total_deliveries=data["total_deliveries"],
-            avg_delivery_time=avg_time,
             completed_count=data["completed_count"]
         ))
 
     return DeliveriesStatsResponse(
         total_deliveries=len(txns.data),
-        avg_delivery_time=avg_delivery_time,
         deliveries_by_day=days_list,
-        deliveries_by_week=weeks_list,
         deliveries_by_month=months_list,
         deliverymen=deliverymen_list
     )

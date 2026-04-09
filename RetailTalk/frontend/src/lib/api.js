@@ -297,6 +297,13 @@ export async function adminDeleteUser(userId) {
     return apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
 }
 
+export async function adminUpdateUserDepartment(userId, departmentId) {
+    return apiFetch(`/admin/users/${userId}/department`, {
+        method: 'PUT',
+        body: JSON.stringify({ department_id: departmentId || null }),
+    });
+}
+
 export async function adminGetTransactions(search = '', type = '', status = '', dateRange = '', specificDate = '') {
     let url = `/admin/transactions?search=${encodeURIComponent(search)}`;
     if (type) url += `&txn_type=${encodeURIComponent(type)}`;
