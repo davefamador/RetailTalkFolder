@@ -799,38 +799,73 @@ export default function ManagerDashboard() {
 
                                 <div style={{
                                     display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                                    gap: 16, marginBottom: 32,
+                                    gap: 16, marginBottom: 24,
                                 }}>
-                                    <StatCard icon={<Users size={16} />} label="Total Staff" value={stats.total_staff || 0} color="#6366f1" />
-                                    <StatCard icon={<Package size={16} />} label="Total Products" value={stats.total_products || 0} color="#0ea5e9" />
-                                    <StatCard icon={<Coins size={16} />} label="Total Revenue" value={`₱${(stats.total_revenue || 0).toFixed(2)}`} color="#f59e0b" />
-                                    <StatCard icon={<RefreshCw size={16} />} label="Pending Restocks" value={stats.pending_restocks || 0} color="#ef4444" />
+                                    <StatCard icon={<Users size={20} />} label="Total Staff" value={stats.total_staff || 0} color="#6366f1" />
+                                    <StatCard icon={<Package size={20} />} label="Total Products" value={stats.total_products || 0} color="#0ea5e9" />
+                                    <StatCard icon={<Coins size={20} />} label="Total Revenue" value={`₱${(stats.total_revenue || 0).toFixed(2)}`} color="#10b981" />
+                                    <StatCard icon={<RefreshCw size={20} />} label="Pending Restocks" value={stats.pending_restocks || 0} color="#f59e0b" />
                                 </div>
 
-                                {/* Charts */}
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+                                {/* Main Content Layout */}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, marginBottom: 24 }}>
+                                    
+                                    {/* Hero Chart */}
                                     <div className="card" style={{ padding: 24 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>Daily Revenue (14 Days)</h3>
+                                            <div style={{ padding: '4px 10px', background: 'rgba(99,102,241,0.1)', color: '#6366f1', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700 }}>
+                                                Last 14 Days
+                                            </div>
+                                        </div>
                                         <LineChart
                                             data={[...(stats.daily_sales || [])].slice(-14)}
                                             labelKey="date" valueKey="amount"
-                                            title="Daily Sales (14 Days)" color="#6366f1"
+                                            color="#6366f1"
                                         />
                                     </div>
-                                    <div className="card" style={{ padding: 24 }}>
-                                        <LineChart
-                                            data={stats.monthly_sales || []}
-                                            labelKey="date" valueKey="amount"
-                                            title="Monthly Sales" color="#f59e0b"
-                                        />
+
+                                    {/* Actionable items */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                        <h4 style={{ fontWeight: 700, margin: 0 }}>Pending Actions</h4>
+                                        <div onClick={() => setActiveTab('restock')} className="card-hover-fx" style={{ cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <RefreshCw size={22} />
+                                            </div>
+                                            <div>
+                                                <p style={{ fontSize: '1.2rem', fontWeight: 800 }}>{stats.pending_restocks || 0}</p>
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Restocks to Review</p>
+                                            </div>
+                                        </div>
+                                        <div onClick={() => setActiveTab('delivery_orders')} className="card-hover-fx" style={{ cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 12, padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(59,130,246,0.1)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Truck size={22} />
+                                            </div>
+                                            <div>
+                                                <p style={{ fontSize: '1.2rem', fontWeight: 800 }}>
+                                                    {(() => {
+                                                        const pendingGroups = mgrDeliveryOrders.filter(g => g.status === 'pending');
+                                                        return pendingGroups.length;
+                                                    })()}
+                                                </p>
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Box Orders to Assign</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="card" style={{ padding: 24 }}>
-                                    <LineChart
-                                        data={stats.weekly_sales || []}
-                                        labelKey="date" valueKey="amount"
-                                        title="Weekly Sales" color="#0ea5e9"
-                                    />
+                                {/* Store User Demographics */}
+                                <div>
+                                    <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 16 }}>Store Network Demographics</h3>
+                                    <div style={{
+                                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                        gap: 16, marginBottom: 24,
+                                    }}>
+                                        <StatCard icon={<ShoppingCart size={20} />} label="Store Buyers" value={stats.store_buyers || 0} color="#ec4899" />
+                                        <StatCard icon={<Users size={20} />} label="Store Staff" value={stats.store_staff || 0} color="#6366f1" />
+                                        <StatCard icon={<Building2 size={20} />} label="Store Managers" value={stats.store_managers || 1} color="#8b5cf6" />
+                                        <StatCard icon={<Truck size={20} />} label="Store Delivery" value={stats.store_delivery || 0} color="#f97316" />
+                                    </div>
                                 </div>
                             </>
                         ) : (

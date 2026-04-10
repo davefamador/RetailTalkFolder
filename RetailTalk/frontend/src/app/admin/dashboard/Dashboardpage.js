@@ -705,7 +705,22 @@ export default function AdminDashboard() {
         loadAdminBalance();
     }, []);
     const loadDashboard = async () => {
-        try { setStats(await adminGetDashboard()); } catch (e) { console.error(e); }
+        try {
+            const [dashStats, rep] = await Promise.all([
+                adminGetDashboard(),
+                adminGetReports()
+            ]);
+            setStats(dashStats);
+            setReports(rep);
+            try {
+                const [pProducts, pRemovals] = await Promise.all([
+                    adminGetPendingProducts(),
+                    adminGetPendingRemovals()
+                ]);
+                setPendingProducts(pProducts);
+                setPendingRemovals(pRemovals);
+            } catch (e) { console.error(e); }
+        } catch (e) { console.error(e); }
     };
     const loadAdminBalance = async () => {
         try {
@@ -1343,18 +1358,81 @@ export default function AdminDashboard() {
                             {stats ? (
                                 <>
                                     <div style={{
-                                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                                        gap: 16, marginBottom: 32,
+                                        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                                        gap: 20, marginBottom: 32,
                                     }}>
-                                        <StatCard icon={Users} label="Total Users" value={stats.total_users} color="#6366f1" />
-                                        <StatCard icon={Package} label="Active Products" value={stats.total_products} color="#0ea5e9" />
-                                        <StatCard icon={ShoppingCart} label="Completed Orders" value={stats.total_orders} color="#10b981" />
-                                        <StatCard icon={Receipt} label="Transaction Orders" value={stats.total_transaction_orders || 0} color="#0ea5e9" />
                                         <StatCard icon={DollarSign} label="Total Earnings" value={`PHP ${(stats.total_admin_earnings || 0).toFixed(2)}`} color="#f59e0b" />
-                                        <StatCard icon={ShoppingBag} label="Total Buyers" value={stats.total_buyers || 0} color="#10b981" />
-                                        <StatCard icon={Store} label="Stores" value={stats.total_departments || 0} color="#8b5cf6" />
-                                        <StatCard icon={Briefcase} label="Managers" value={stats.total_managers || 0} color="#ec4899" />
-                                        <StatCard icon={UserCheck} label="Staff" value={stats.total_staff || 0} color="#14b8a6" />
+                                        <StatCard icon={ShoppingCart} label="Orders (Completed)" value={`${stats.total_orders}`} color="#10b981" />
+                                        <StatCard icon={Package} label="Active Products" value={stats.total_products} color="#0ea5e9" />
+                                        <StatCard icon={Users} label="Total Users" value={stats.total_users} color="#6366f1" />
+                                    </div>
+                                    
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 24, marginBottom: 32 }}>
+                                        {/* Main Chart Area */}
+                                        <div className="card" style={{ padding: 24, flex: '2 1 500px' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                                                <h4 style={{ fontWeight: 700 }}>Revenue Trend (14 Days)</h4>
+                                                <button onClick={() => setActiveTab('reports')} style={{ fontSize: '0.8rem', color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>More Details...</button>
+                                            </div>
+                                            {reports?.daily_income ? (
+                                                <LineChart
+                                                    data={[...reports.daily_income].reverse().slice(-14)}
+                                                    labelKey="date" valueKey="income"
+                                                    title="" color="#8b5cf6" height={250}
+                                                />
+                                            ) : (
+                                                <div style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div className="spinner" style={{ width: 30, height: 30 }} />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Demographics Area */}
+                                        <div className="card" style={{ padding: 24, flex: '1 1 300px', display: 'flex', flexDirection: 'column' }}>
+                                            <h4 style={{ fontWeight: 700, marginBottom: 'auto' }}>User Demographics</h4>
+                                            <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
+                                                <DonutChart 
+                                                    size={200}
+                                                    title=""
+                                                    data={[
+                                                        { label: 'Buyer', value: stats.total_buyers || 0, color: '#10b981' },
+                                                        { label: 'Staff', value: stats.total_staff || 0, color: '#6366f1' },
+                                                        { label: 'Manager', value: stats.total_managers || 0, color: '#ec4899' },
+                                                        { label: 'Delivery', value: stats.total_delivery || 0, color: '#f59e0b' }
+                                                    ].filter(d => d.value > 0)}
+                                                />
+                                            </div>
+                                            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'var(--admin-hover)', borderRadius: 10 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                                    <Store size={18} color="#8b5cf6" />
+                                                    <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Active Stores</span>
+                                                </div>
+                                                <span style={{ fontSize: '1rem', fontWeight: 800 }}>{stats.total_departments || 0}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Actionable items */}
+                                    <h4 style={{ fontWeight: 700, marginBottom: 16 }}>Pending Actions</h4>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+                                        <div onClick={() => setActiveTab('pending')} className="card-hover-fx" style={{ cursor: 'pointer', background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 12, padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(245,158,11,0.1)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Package size={22} />
+                                            </div>
+                                            <div>
+                                                <p style={{ fontSize: '1.2rem', fontWeight: 800 }}>{pendingProducts ? pendingProducts.length : '...'}</p>
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>Products Awaiting Approval</p>
+                                            </div>
+                                        </div>
+                                        <div onClick={() => setActiveTab('pending')} className="card-hover-fx" style={{ cursor: 'pointer', background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', borderRadius: 12, padding: 20, display: 'flex', alignItems: 'center', gap: 16 }}>
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: 'rgba(239,68,68,0.1)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <AlertTriangle size={22} />
+                                            </div>
+                                            <div>
+                                                <p style={{ fontSize: '1.2rem', fontWeight: 800 }}>{pendingRemovals ? pendingRemovals.length : '...'}</p>
+                                                <p style={{ fontSize: '0.8rem', color: 'var(--admin-text-muted)', fontWeight: 600 }}>Requests for Removal</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </>
                             ) : (
