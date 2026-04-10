@@ -208,10 +208,10 @@ export async function getBuyerRecommendations() {
 }
 
 // --- Transactions ---
-export async function buyProduct(productId, quantity = 1, purchaseType = 'delivery') {
+export async function buyProduct(productId, quantity = 1) {
     return apiFetch('/transactions/buy', {
         method: 'POST',
-        body: JSON.stringify({ product_id: productId, quantity, purchase_type: purchaseType }),
+        body: JSON.stringify({ product_id: productId, quantity }),
     });
 }
 
@@ -297,6 +297,13 @@ export async function adminDeleteUser(userId) {
     return apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
 }
 
+export async function adminUpdateUserDepartment(userId, departmentId) {
+    return apiFetch(`/admin/users/${userId}/department`, {
+        method: 'PUT',
+        body: JSON.stringify({ department_id: departmentId || null }),
+    });
+}
+
 export async function adminGetTransactions(search = '', type = '', status = '', dateRange = '', specificDate = '') {
     let url = `/admin/transactions?search=${encodeURIComponent(search)}`;
     if (type) url += `&txn_type=${encodeURIComponent(type)}`;
@@ -319,6 +326,10 @@ export async function adminUpdateProduct(productId, data) {
         method: 'PUT',
         body: JSON.stringify(data),
     });
+}
+
+export async function adminDeleteProduct(productId) {
+    return apiFetch(`/admin/products/${productId}`, { method: 'DELETE' });
 }
 
 export async function adminGetUserDetail(userId) {
@@ -377,10 +388,10 @@ export async function clearCart() {
     return apiFetch('/cart/clear', { method: 'DELETE' });
 }
 
-export async function checkoutCart(purchaseType = 'delivery') {
+export async function checkoutCart() {
     return apiFetch('/cart/checkout', {
         method: 'POST',
-        body: JSON.stringify({ purchase_type: purchaseType }),
+        body: JSON.stringify({}),
     });
 }
 
@@ -467,6 +478,10 @@ export async function adminUpdateDepartment(deptId, data) {
     });
 }
 
+export async function adminDeleteDepartment(deptId) {
+    return apiFetch(`/admin/departments/${deptId}`, { method: 'DELETE' });
+}
+
 // --- Admin: Product Removal Approval ---
 export async function adminGetPendingRemovals() {
     return apiFetch('/admin/pending-removals');
@@ -500,9 +515,9 @@ export async function adminGetRestockRequests(departmentId = '', status = '') {
     return apiFetch(url);
 }
 
-// --- Buyer: Cancel Order ---
-export async function cancelOrder(transactionId) {
-    return apiFetch(`/transactions/buyer/cancel/${transactionId}`, { method: 'PUT' });
+// --- Buyer: Cancel Order (group-level) ---
+export async function cancelOrder(groupId) {
+    return apiFetch(`/transactions/buyer/cancel/${groupId}`, { method: 'PUT' });
 }
 
 // --- Manager: Product Removal Request ---
@@ -610,18 +625,6 @@ export async function getRestockDeliveryHistory() {
     return apiFetch('/restock/delivery-history');
 }
 
-// --- Walk-in Orders (Staff) ---
-export async function getStaffWalkinOrders() {
-    return apiFetch('/transactions/staff/walkin-orders');
-}
-
-export async function updateWalkinOrderStatus(transactionId, status) {
-    return apiFetch(`/transactions/staff/walkin-orders/${transactionId}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({ status }),
-    });
-}
-
 // --- Delivery Orders (Staff/Manager) ---
 export async function getStaffDeliveryOrders() {
     return apiFetch('/transactions/staff/delivery-orders');
@@ -645,22 +648,6 @@ export async function managerUpdateDeliveryOrderStatus(transactionId, status) {
     });
 }
 
-export async function buyerConfirmWalkin(transactionId) {
-    return apiFetch(`/transactions/buyer/walkin-confirm/${transactionId}`, {
-        method: 'PUT',
-    });
-}
-
-export async function getManagerWalkinOrders() {
-    return apiFetch('/transactions/manager/walkin-orders');
-}
-
-export async function managerUpdateWalkinOrderStatus(transactionId, status) {
-    return apiFetch(`/transactions/manager/walkin-orders/${transactionId}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({ status }),
-    });
-}
 
 // --- Manager Reassign ---
 export async function managerReassignOrder(transactionId, staffId) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffWalkinOrders, updateWalkinOrderStatus, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
+import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
 import {
     LayoutDashboard, Tag, ShoppingCart, Truck, Package,
     Search, ClipboardList, Heart, LogOut, TrendingUp, DollarSign,
@@ -60,11 +60,7 @@ export default function SellPage() {
     const [restockNotes, setRestockNotes] = useState('');
     const [restockRequests, setRestockRequests] = useState([]);
     const [restockLoading, setRestockLoading] = useState(false);
-    // Walk-in orders state
-    const [walkinOrders, setWalkinOrders] = useState([]);
-    const [walkinLoading, setWalkinLoading] = useState(false);
-    const [staffWalkinFilter, setStaffWalkinFilter] = useState('all');
-    const [staffWalkinSearch, setStaffWalkinSearch] = useState('');
+    // Delivery orders state
     // Delivery orders state
     const [deliveryOrders, setDeliveryOrders] = useState([]);
     const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -76,6 +72,7 @@ export default function SellPage() {
     // Dashboard state
     const [sellerBalance, setSellerBalance] = useState(0);
     const [sellerTxns, setSellerTxns] = useState([]);
+    const [orderHistoryStatusFilter, setOrderHistoryStatusFilter] = useState('all');
     // Wishlist analytics
     const [wishlistReport, setWishlistReport] = useState(null);
     const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -104,7 +101,7 @@ export default function SellPage() {
     const loadInitialData = async () => {
         setInitialLoading(true);
         try {
-            await Promise.all([loadProducts(), loadRestockRequests(), loadWalkinOrders(), loadDeliveryOrders(), loadDashboardData(), loadWishlistReport()]);
+            await Promise.all([loadProducts(), loadRestockRequests(), loadDeliveryOrders(), loadDashboardData(), loadWishlistReport()]);
         } finally {
             setInitialLoading(false);
         }
@@ -161,13 +158,6 @@ export default function SellPage() {
         } catch (err) { console.error(err); }
     };
 
-    const loadWalkinOrders = async () => {
-        try {
-            const data = await getStaffWalkinOrders();
-            setWalkinOrders(data);
-        } catch (err) { console.error(err); }
-    };
-
     const handleRestockSubmit = async () => {
         if (!restockProductId || !restockQuantity || parseInt(restockQuantity) < 1) {
             setError('Please select a product and enter a valid quantity');
@@ -206,17 +196,6 @@ export default function SellPage() {
             loadDashboardData();
         } catch (err) { setError(err.message); }
         finally { setDeliveryLoading(false); }
-    };
-
-    const handleWalkinStatusUpdate = async (txnId, newStatus) => {
-        setWalkinLoading(true);
-        try {
-            await updateWalkinOrderStatus(txnId, newStatus);
-            setSuccess(`Order updated to "${newStatus}"`);
-            loadWalkinOrders();
-            if (newStatus === 'completed') loadDashboardData();
-        } catch (err) { setError(err.message); }
-        finally { setWalkinLoading(false); }
     };
 
     const resetForm = () => {
@@ -378,8 +357,7 @@ export default function SellPage() {
                 <nav style={{ padding: '16px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeSection === 'dashboard'} onClick={() => setActiveSection('dashboard')} />
                     <SidebarItem icon={Tag} label="Products" active={activeSection === 'products'} onClick={() => setActiveSection('products')} />
-                    <SidebarItem icon={ShoppingCart} label="Walk-in Orders" active={activeSection === 'walkin'} onClick={() => setActiveSection('walkin')} badge={walkinOrders.length} />
-                    <SidebarItem icon={Truck} label="Delivery Orders" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={deliveryOrders.filter(o => o.status === 'pending').length} />
+                    <SidebarItem icon={Truck} label="Delivery Orders" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={deliveryOrders.filter(g => g.status === 'pending').length} />
                     <SidebarItem icon={Package} label="Restock" active={activeSection === 'restock'} onClick={() => setActiveSection('restock')} badge={restockRequests.length} />
 
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
@@ -436,7 +414,7 @@ export default function SellPage() {
                 )}
 
                 {/* Loading state for initial data */}
-                {initialLoading && (activeSection === 'dashboard' || activeSection === 'products' || activeSection === 'walkin' || activeSection === 'delivery' || activeSection === 'restock') && (
+                {initialLoading && (activeSection === 'dashboard' || activeSection === 'products' || activeSection === 'delivery' || activeSection === 'restock') && (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16 }}>
                         <div className="spinner" style={{ width: 40, height: 40 }}></div>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Loading data...</p>
@@ -487,13 +465,10 @@ export default function SellPage() {
                                     <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Low Stock</div>
                                     <div style={{ fontSize: '1.5rem', fontWeight: 800, color: lowStock.length > 0 ? '#ef4444' : '#10b981' }}>{lowStock.length}</div>
                                 </div>
-                                <div className="card" style={{ padding: 20, textAlign: 'center' }}>
-                                    <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Pending Walk-in</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24' }}>{walkinOrders.length}</div>
-                                </div>
+
                                 <div className="card" style={{ padding: 20, textAlign: 'center' }}>
                                     <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Pending Delivery</div>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24' }}>{deliveryOrders.filter(o => o.status === 'pending').length}</div>
+                                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#fbbf24' }}>{deliveryOrders.filter(g => g.status === 'pending').length}</div>
                                 </div>
                             </div>
 
@@ -520,7 +495,7 @@ export default function SellPage() {
                     <div>
                         <div style={{ marginBottom: 24 }}>
                             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 8 }}><Heart size={24} /> Wishlist Analytics</h1>
-                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>See which products buyers are saving</p>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Store-wide wishlist insights — shared across all staff in your department</p>
                         </div>
 
                         {wishlistLoading ? (
@@ -617,14 +592,33 @@ export default function SellPage() {
                                                         </div>
 
                                                         {/* Count badge */}
-                                                        <div style={{
-                                                            display: 'flex', alignItems: 'center', gap: 4,
-                                                            padding: '4px 10px', borderRadius: 20, flexShrink: 0,
-                                                            background: 'rgba(239,68,68,0.1)',
-                                                            color: '#ef4444', fontWeight: 700, fontSize: '0.85rem',
-                                                        }}>
-                                                            <Heart size={14} />
-                                                            <span>{prod.wishlist_count}</span>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                                                            <div style={{
+                                                                display: 'flex', alignItems: 'center', gap: 4,
+                                                                padding: '4px 10px', borderRadius: 20,
+                                                                background: 'rgba(239,68,68,0.1)',
+                                                                color: '#ef4444', fontWeight: 700, fontSize: '0.85rem',
+                                                            }}>
+                                                                <Heart size={14} />
+                                                                <span>{prod.wishlist_count}</span>
+                                                            </div>
+                                                            {(() => {
+                                                                const s = prod.stock ?? 0;
+                                                                const isOut = s === 0;
+                                                                const isLow = s > 0 && s <= 5;
+                                                                return (
+                                                                    <div style={{
+                                                                        display: 'flex', alignItems: 'center', gap: 4,
+                                                                        padding: '3px 8px', borderRadius: 20,
+                                                                        background: isOut ? 'rgba(239,68,68,0.1)' : isLow ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
+                                                                        color: isOut ? '#ef4444' : isLow ? '#f59e0b' : '#10b981',
+                                                                        fontWeight: 600, fontSize: '0.75rem',
+                                                                    }}>
+                                                                        <Package size={12} />
+                                                                        <span>{s} {isOut ? 'out' : isLow ? 'low' : 'in stock'}</span>
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                         </div>
                                                     </div>
                                                 );
@@ -640,117 +634,86 @@ export default function SellPage() {
                 {/* ===== ORDER HISTORY TAB ===== */}
                 {activeSection === 'orderhistory' && (() => {
                     const storeOrders = sellerTxns.filter(t => t.buyer_id !== user?.id);
-                    const statusColors = {
-                        pending: { bg: 'rgba(251,191,36,0.15)', color: '#f59e0b' },
-                        approved: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
-                        ondeliver: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1' },
-                        delivered: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
-                        pending_walkin: { bg: 'rgba(251,191,36,0.15)', color: '#f59e0b' },
-                        inwork: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1' },
-                        ready: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
-                        picked_up: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
-                        completed: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
+                    const [ohStatusFilter, setOhStatusFilter] = [orderHistoryStatusFilter, setOrderHistoryStatusFilter];
+                    const filteredOrders = storeOrders.filter(t => {
+                        if (ohStatusFilter !== 'all' && t.status !== ohStatusFilter) return false;
+                        return true;
+                    });
+                    const statusClr = {
+                        pending: '#f59e0b', approved: '#10b981', ondeliver: '#3b82f6',
+                        delivered: '#10b981', completed: '#10b981',
+                        undelivered: '#ef4444', cancelled: '#94a3b8',
                     };
-                    const statusLabel = (s) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                    const allStatuses = [...new Set(storeOrders.map(t => t.status))].sort();
                     return (
-                        <>
+                        <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                                 <div>
                                     <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Order History</h1>
-                                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>All purchases made in your store</p>
+                                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Store-wide purchase history — shared across all staff</p>
                                 </div>
-                                <div style={{
-                                    background: 'var(--card-bg)', padding: '8px 16px', borderRadius: 10,
-                                    border: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)',
-                                }}>
-                                    {storeOrders.length} order{storeOrders.length !== 1 ? 's' : ''}
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <select
+                                        value={ohStatusFilter} onChange={e => setOhStatusFilter(e.target.value)}
+                                        style={{
+                                            padding: '10px 14px', borderRadius: 10,
+                                            background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                            color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                        }}
+                                    >
+                                        <option value="all">All Statuses</option>
+                                        {allStatuses.map(s => (
+                                            <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                                        ))}
+                                    </select>
+                                    <div style={{
+                                        background: 'var(--card-bg)', padding: '8px 16px', borderRadius: 10,
+                                        border: '1px solid var(--border-color)', fontSize: '0.85rem', color: 'var(--text-secondary)',
+                                    }}>
+                                        {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+                                    </div>
                                 </div>
                             </div>
 
-                            {storeOrders.length === 0 ? (
+                            {filteredOrders.length === 0 ? (
                                 <div className="card" style={{ padding: 60, textAlign: 'center' }}>
                                     <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📋</div>
                                     <h3 style={{ fontWeight: 700, marginBottom: 6 }}>No orders yet</h3>
                                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Purchases made in your store will appear here</p>
                                 </div>
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    {storeOrders.map(order => {
-                                        const img = order.product_images?.[0];
-                                        const sc = statusColors[order.status] || { bg: 'rgba(107,114,128,0.15)', color: '#6b7280' };
-                                        const date = new Date(order.created_at);
-                                        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                                        const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-                                        return (
-                                            <div key={order.id} className="card" style={{
-                                                padding: 16, display: 'flex', gap: 14, alignItems: 'center',
-                                                transition: 'all 0.2s',
-                                            }}>
-                                                {/* Product Image */}
-                                                <div style={{
-                                                    width: 56, height: 56, borderRadius: 10, overflow: 'hidden',
-                                                    background: 'var(--bg-secondary)', flexShrink: 0,
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                }}>
-                                                    {img ? (
-                                                        <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        <Package size={24} style={{ color: 'var(--text-muted)' }} />
-                                                    )}
-                                                </div>
-
-                                                {/* Product & Buyer Info */}
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                        {order.product_title || 'Unknown Product'}
-                                                    </div>
-                                                    <div style={{ display: 'flex', gap: 12, fontSize: '0.8rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
-                                                        <span>Buyer: <strong style={{ color: 'var(--text-primary)' }}>{order.buyer_name || 'Unknown'}</strong></span>
-                                                        <span>Qty: <strong style={{ color: 'var(--text-primary)' }}>{order.quantity}</strong></span>
+                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Buyer</th><th>Staff</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredOrders.map(t => (
+                                                <tr key={t.id}>
+                                                    <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.assigned_staff_name || 'Unassigned'}</td>
+                                                    <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
+                                                    <td>{t.quantity}</td>
+                                                    <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
+                                                    <td>
                                                         <span style={{
-                                                            background: order.purchase_type === 'delivery' ? 'rgba(99,102,241,0.12)' : 'rgba(16,185,129,0.12)',
-                                                            color: order.purchase_type === 'delivery' ? '#6366f1' : '#10b981',
-                                                            padding: '1px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
-                                                        }}>
-                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{order.purchase_type === 'delivery' ? <><Truck size={12} /> Delivery</> : <><ShoppingCart size={12} /> Walk-in</>}</span>
-                                                        </span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Amount */}
-                                                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 90 }}>
-                                                    <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--accent-primary)' }}>
-                                                        ₱{(order.amount + (order.delivery_fee || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                    </div>
-                                                    {order.delivery_fee > 0 && (
-                                                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
-                                                            incl. ₱{order.delivery_fee.toFixed(2)} delivery
-                                                        </div>
-                                                    )}
-                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                                        Earned: ₱{(order.seller_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                    </div>
-                                                </div>
-
-                                                {/* Status & Date */}
-                                                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 100 }}>
-                                                    <span style={{
-                                                        display: 'inline-block', padding: '3px 10px', borderRadius: 8,
-                                                        background: sc.bg, color: sc.color, fontSize: '0.75rem', fontWeight: 700,
-                                                        marginBottom: 4,
-                                                    }}>
-                                                        {statusLabel(order.status)}
-                                                    </span>
-                                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                                        {dateStr} {timeStr}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                                                            padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                            background: `${statusClr[t.status] || '#94a3b8'}15`,
+                                                            color: statusClr[t.status] || '#94a3b8',
+                                                        }}>{t.status.replace(/_/g, ' ')}</span>
+                                                    </td>
+                                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                        {new Date(t.created_at).toLocaleDateString()}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
                                 </div>
                             )}
-                        </>
+                        </div>
                     );
                 })()}
 
@@ -904,7 +867,7 @@ export default function SellPage() {
                             <p>Click "+ New Product" to create your first listing</p>
                         </div>
                     ) : (
-                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                             <table className="data-table">
                                 <thead>
                                     <tr>
@@ -912,8 +875,6 @@ export default function SellPage() {
                                         <th>Title</th>
                                         <th>Price</th>
                                         <th>Stock</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -940,39 +901,25 @@ export default function SellPage() {
                                             <td style={{ fontWeight: 500 }}>{p.title}</td>
                                             <td style={{ color: 'var(--accent-secondary)' }}>PHP {parseFloat(p.price).toFixed(2)}</td>
                                             <td>
-                                                <span style={{
-                                                    fontWeight: 600,
-                                                    color: (p.stock || 0) > 0 ? 'var(--accent-success)' : 'var(--accent-danger)',
-                                                }}>
-                                                    {p.stock || 0}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                {!p.is_active ? (
-                                                    <span className="label" style={{ background: 'rgba(255,71,87,0.15)', color: 'var(--accent-danger)' }}>
-                                                        Deleted
-                                                    </span>
-                                                ) : (
-                                                    <span className="label" style={
-                                                        p.status === 'approved'
-                                                            ? { background: 'rgba(16,185,129,0.15)', color: '#10b981' }
-                                                            : p.status === 'unapproved'
-                                                                ? { background: 'rgba(239,68,68,0.15)', color: '#ef4444' }
-                                                                : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }
-                                                    }>
-                                                        {p.status === 'approved' ? 'Approved' : p.status === 'unapproved' ? 'Unapproved' : 'Pending'}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td>
-                                                <div style={{ display: 'flex', gap: 6 }}>
-                                                    {p.is_active && (
-                                                        <>
-                                                            <button className="btn btn-outline btn-sm" onClick={() => startEdit(p)}>Edit</button>
-                                                            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p.id)}>Delete</button>
-                                                        </>
-                                                    )}
-                                                </div>
+                                                {(() => {
+                                                    const s = p.stock || 0;
+                                                    const isOut = s === 0;
+                                                    const isLow = s > 0 && s <= 5;
+                                                    return (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+                                                            <span style={{ fontWeight: 700, fontSize: '1rem', color: isOut ? '#ef4444' : isLow ? '#f59e0b' : '#10b981' }}>
+                                                                {s}
+                                                            </span>
+                                                            <span style={{
+                                                                fontSize: '0.65rem', fontWeight: 600, padding: '1px 6px', borderRadius: 4,
+                                                                background: isOut ? 'rgba(239,68,68,0.12)' : isLow ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
+                                                                color: isOut ? '#ef4444' : isLow ? '#f59e0b' : '#10b981',
+                                                            }}>
+                                                                {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
                                         </tr>
                                     ))}
@@ -993,12 +940,12 @@ export default function SellPage() {
                         cancelled: { bg: 'rgba(148,163,184,0.1)', color: '#94a3b8', label: 'Cancelled' },
                     };
                     let filtered = deliveryOrders;
-                    if (staffDeliveryFilter !== 'all') filtered = filtered.filter(o => o.status === staffDeliveryFilter);
+                    if (staffDeliveryFilter !== 'all') filtered = filtered.filter(g => g.status === staffDeliveryFilter);
                     if (staffDeliverySearch.trim()) {
                         const q = staffDeliverySearch.toLowerCase();
-                        filtered = filtered.filter(o =>
-                            (o.product_title || '').toLowerCase().includes(q) ||
-                            (o.buyer_name || '').toLowerCase().includes(q)
+                        filtered = filtered.filter(g =>
+                            (g.buyer_name || '').toLowerCase().includes(q) ||
+                            (g.items || []).some(item => (item.product_title || '').toLowerCase().includes(q))
                         );
                     }
                     return (
@@ -1006,7 +953,7 @@ export default function SellPage() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                             <div>
                                 <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Delivery Orders</h1>
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage delivery orders — mark as ready for pickup</p>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage delivery boxes — approve entire groups for pickup</p>
                             </div>
                             <div style={{ display: 'flex', gap: 8 }}>
                                 <input
@@ -1036,161 +983,70 @@ export default function SellPage() {
                         {filtered.length === 0 ? (
                             <div className="empty-state"><h3>No delivery orders</h3><p>Delivery orders from buyers will appear here</p></div>
                         ) : (
-                            <div style={{ display: 'grid', gap: 12 }}>
-                                {filtered.map(order => {
-                                    const sc = deliveryColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
-                                    const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
+                            <div style={{ display: 'grid', gap: 16 }}>
+                                {filtered.map(group => {
+                                    const sc = deliveryColors[group.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: group.status };
                                     return (
-                                        <div key={order.id} className="card" style={{ padding: 20 }}>
-                                            <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                {productImage && (
-                                                    <div style={{
-                                                        width: 64, height: 64, borderRadius: 10, overflow: 'hidden',
-                                                        background: 'var(--bg-secondary)', flexShrink: 0,
-                                                    }}>
-                                                        <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                            onError={e => e.target.style.display = 'none'} />
+                                        <div key={group.group_id} className="card" style={{ padding: 20, border: group.status === 'pending' ? '1px solid rgba(251,191,36,0.3)' : undefined }}>
+                                            {/* Group header */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 4 }}>📦 Delivery Box</div>
+                                                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                        Buyer: <strong>{group.buyer_name}</strong>
                                                     </div>
-                                                )}
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                        <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{order.product_title}</h4>
-                                                        <span style={{
-                                                            padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                            background: sc.bg, color: sc.color, flexShrink: 0,
-                                                        }}>{sc.label}</span>
-                                                    </div>
-                                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                        Buyer: {order.buyer_name} | Qty: {order.quantity} | PHP {order.amount.toFixed(2)}
-                                                        {order.delivery_fee > 0 && ` | Fee: PHP ${order.delivery_fee.toFixed(2)}`}
-                                                    </p>
-                                                    {order.delivery_address && (
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                                                            📍 {order.delivery_address}
-                                                        </p>
+                                                    {group.delivery_address && (
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 3, fontWeight: 600 }}>
+                                                            📍 {group.delivery_address}
+                                                        </div>
                                                     )}
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                                                        {new Date(group.created_at).toLocaleString()}
+                                                    </div>
                                                 </div>
+                                                <span style={{
+                                                    padding: '4px 14px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
+                                                    background: sc.bg, color: sc.color, flexShrink: 0,
+                                                }}>{sc.label}</span>
                                             </div>
+                                            {/* Items list */}
+                                            <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                                                {(group.items || []).map((item, idx) => {
+                                                    const img = item.product_images && item.product_images.length > 0 ? item.product_images[0] : null;
+                                                    return (
+                                                        <div key={item.id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < group.items.length - 1 ? 8 : 0 }}>
+                                                            {img ? (
+                                                                <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+                                                                    <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                                                </div>
+                                                            ) : (
+                                                                <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--bg-card)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', color: 'var(--text-muted)' }}>No img</div>
+                                                            )}
+                                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                            </div>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            {/* Footer */}
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                    {new Date(order.created_at).toLocaleString()}
-                                                </span>
-                                                {order.status === 'pending' && (
+                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                    Total: <strong>PHP {group.total_amount?.toFixed(2)}</strong>
+                                                    <span style={{ marginLeft: 10, color: 'var(--accent-primary)', fontWeight: 600 }}>
+                                                        + PHP {group.delivery_fee?.toFixed(2)} delivery fee
+                                                    </span>
+                                                </div>
+                                                {group.status === 'pending' && (
                                                     <button
                                                         className="btn btn-primary btn-sm"
                                                         disabled={deliveryLoading}
-                                                        onClick={() => handleDeliveryStatusUpdate(order.id, 'approved')}
+                                                        onClick={() => handleDeliveryStatusUpdate(group.group_id, 'approved')}
                                                         style={{ fontWeight: 600 }}
                                                     >
-                                                        Mark Ready
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                    );
-                })()}
-
-                {/* ===== WALK-IN ORDERS TAB ===== */}
-                {activeSection === 'walkin' && !initialLoading && (() => {
-                    const walkinColors = {
-                        pending_walkin: { bg: 'rgba(251,191,36,0.1)', color: '#fbbf24', label: 'Pending' },
-                        inwork: { bg: 'rgba(59,130,246,0.1)', color: '#3b82f6', label: 'In Work' },
-                        ready: { bg: 'rgba(139,92,246,0.1)', color: '#8b5cf6', label: 'Ready' },
-                        picked_up: { bg: 'rgba(14,165,233,0.1)', color: '#0ea5e9', label: 'Picked Up' },
-                        completed: { bg: 'rgba(16,185,129,0.1)', color: '#10b981', label: 'Completed' },
-                    };
-                    let filtered = walkinOrders;
-                    if (staffWalkinFilter !== 'all') filtered = filtered.filter(o => o.status === staffWalkinFilter);
-                    if (staffWalkinSearch.trim()) {
-                        const q = staffWalkinSearch.toLowerCase();
-                        filtered = filtered.filter(o =>
-                            (o.product_title || '').toLowerCase().includes(q) ||
-                            (o.buyer_name || '').toLowerCase().includes(q)
-                        );
-                    }
-                    const nextStatus = { pending_walkin: 'inwork', inwork: 'ready', picked_up: 'completed' };
-                    const nextLabel = { pending_walkin: 'Start Working', inwork: 'Mark Ready', picked_up: 'Mark Completed' };
-                    return (
-                    <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <div>
-                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Walk-in Orders</h1>
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Walk-in orders from buyers</p>
-                            </div>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                <input
-                                    type="text" placeholder="Search orders..."
-                                    value={staffWalkinSearch} onChange={e => setStaffWalkinSearch(e.target.value)}
-                                    style={{
-                                        width: 180, padding: '8px 12px', borderRadius: 8,
-                                        background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
-                                        color: 'var(--text-primary)', fontSize: '0.82rem',
-                                    }}
-                                />
-                                <button className="btn btn-outline btn-sm" onClick={loadWalkinOrders}>Refresh</button>
-                            </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-                            {[{ key: 'all', label: 'All' }, ...Object.entries(walkinColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (
-                                <button key={f.key} onClick={() => setStaffWalkinFilter(f.key)} style={{
-                                    padding: '5px 14px', borderRadius: 8, border: '1px solid',
-                                    borderColor: staffWalkinFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
-                                    background: staffWalkinFilter === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                    color: staffWalkinFilter === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
-                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.15s',
-                                }}>{f.label}</button>
-                            ))}
-                        </div>
-                        {filtered.length === 0 ? (
-                            <div className="empty-state"><h3>No walk-in orders</h3><p>Walk-in orders from buyers will appear here</p></div>
-                        ) : (
-                            <div style={{ display: 'grid', gap: 12 }}>
-                                {filtered.map(order => {
-                                    const sc = walkinColors[order.status] || { bg: 'var(--bg-secondary)', color: 'var(--text-muted)', label: order.status };
-                                    const productImage = order.product_images && order.product_images.length > 0 ? order.product_images[0] : null;
-                                    return (
-                                        <div key={order.id} className="card" style={{ padding: 20 }}>
-                                            <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                {productImage && (
-                                                    <div style={{
-                                                        width: 64, height: 64, borderRadius: 10, overflow: 'hidden',
-                                                        background: 'var(--bg-secondary)', flexShrink: 0,
-                                                    }}>
-                                                        <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                                            onError={e => e.target.style.display = 'none'} />
-                                                    </div>
-                                                )}
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                        <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{order.product_title}</h4>
-                                                        <span style={{
-                                                            padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
-                                                            background: sc.bg, color: sc.color, flexShrink: 0,
-                                                        }}>{sc.label}</span>
-                                                    </div>
-                                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                        Buyer: {order.buyer_name} | Qty: {order.quantity} | PHP {order.amount.toFixed(2)}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                    {new Date(order.created_at).toLocaleString()}
-                                                </span>
-                                                {nextStatus[order.status] && (
-                                                    <button
-                                                        className="btn btn-primary btn-sm"
-                                                        disabled={walkinLoading}
-                                                        onClick={() => handleWalkinStatusUpdate(order.id, nextStatus[order.status])}
-                                                        style={{ fontWeight: 600 }}
-                                                    >
-                                                        {nextLabel[order.status]}
+                                                        ✓ Approve Box
                                                     </button>
                                                 )}
                                             </div>

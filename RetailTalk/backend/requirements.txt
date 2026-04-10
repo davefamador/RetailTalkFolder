@@ -21,3 +21,6 @@ python-multipart==0.0.9
 
 # CORS & other
 pydantic[email]==2.9.0
+
+# HuggingFace Hub (for downloading model weights at build time)
+huggingface_hub>=0.24.0

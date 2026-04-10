@@ -155,6 +155,7 @@ export default function SearchContent() {
         try {
             await buyProduct(selectedProduct.id, quantity, purchaseType);
             setPurchased(true);
+            window.dispatchEvent(new Event('balance-updated'));
         } catch (err) {
             setPurchaseError(err.message || 'Failed to complete purchase.');
         } finally {
@@ -327,25 +328,7 @@ export default function SearchContent() {
                                     )}
                                     {user && user.role === 'buyer' && (
                                         <>
-                                            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                                                <button type="button" onClick={() => setPurchaseType('delivery')} style={{
-                                                    flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                    borderColor: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--border-color)',
-                                                    background: purchaseType === 'delivery' ? 'rgba(99,102,241,0.15)' : 'transparent',
-                                                    color: purchaseType === 'delivery' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                                                    cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                }}>Delivery</button>
-                                                <button type="button" onClick={() => setPurchaseType('walkin')} style={{
-                                                    flex: 1, padding: '10px', borderRadius: 8, border: '1px solid',
-                                                    borderColor: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--border-color)',
-                                                    background: purchaseType === 'walkin' ? 'rgba(251,191,36,0.15)' : 'transparent',
-                                                    color: purchaseType === 'walkin' ? 'var(--accent-warning)' : 'var(--text-secondary)',
-                                                    cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem',
-                                                }}>Walk-in</button>
-                                            </div>
-                                            {purchaseType === 'delivery' && (
-                                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>+ PHP 90.00 delivery fee per department store</p>
-                                            )}
+                                            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>+ PHP 90.00 delivery fee per department store</p>
                                             <button className="btn btn-success" onClick={handlePurchase} disabled={purchaseLoading}
                                                 style={{ width: '100%', padding: '12px', fontSize: '1rem', opacity: purchaseLoading ? 0.6 : 1, cursor: purchaseLoading ? 'not-allowed' : 'pointer' }}>
                                                 {purchaseLoading ? 'Processing...' : `Buy for PHP ${(parseFloat(selectedProduct.price) * quantity).toFixed(2)}`}

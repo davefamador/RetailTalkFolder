@@ -75,6 +75,7 @@ export default function DeliveryPage() {
     const [restockActive, setRestockActive] = useState([]);
     const [restockHistory, setRestockHistory] = useState([]);
     const [historyFilter, setHistoryFilter] = useState('delivery');
+    const [historyTab, setHistoryTab] = useState('delivery');
 
     useEffect(() => {
         const u = getStoredUser();
@@ -162,67 +163,98 @@ export default function DeliveryPage() {
         );
     }
 
-    // Line chart component (right = newest, left = oldest)
-    const LineChart = ({ data, valueKey = 'amount' }) => {
-        if (!data || data.length === 0) return <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No data yet</p>;
-        // Take last 14 items, reversed so index 0 = oldest (leftmost), last = newest (rightmost)
-        const chartData = data.slice(0, 14).reverse();
-        const maxVal = Math.max(...chartData.map(d => d[valueKey] || 0), 1);
-        const svgW = 560, svgH = 140, padX = 10, padY = 20;
+    // Single line chart component with gap filling
+    const LineChart = ({ data, period, valueKey = 'amount' }) => {
+        if (!data) return null;
+        let points = [];
+        const svgW = 600, svgH = 160, padX = 20, padY = 20;
         const plotW = svgW - padX * 2, plotH = svgH - padY * 2;
-        const points = chartData.map((d, i) => ({
-            x: padX + (chartData.length > 1 ? (i / (chartData.length - 1)) * plotW : plotW / 2),
-            y: padY + plotH - ((d[valueKey] || 0) / maxVal) * plotH,
-            val: d[valueKey] || 0,
-            date: d.date?.slice(-5) || '',
-        }));
-        // Build smooth SVG path
-        let linePath = '';
-        if (points.length === 1) {
-            linePath = `M${points[0].x},${points[0].y}`;
-        } else {
-            linePath = `M${points[0].x},${points[0].y}`;
+
+        if (period === 'daily') {
+            for (let i = 13; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                const backendDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                const label = (d.getMonth() + 1) + '-' + d.getDate();
+                const matched = data.find(x => x.date === backendDate);
+                points.push({
+                    label,
+                    val: matched ? matched[valueKey] : 0,
+                });
+            }
+        } else if (period === 'monthly') {
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const year = new Date().getFullYear();
+            months.forEach((m, i) => {
+                const backendDate = year + '-' + String(i + 1).padStart(2, '0');
+                const matched = data.find(x => x.date === backendDate);
+                points.push({
+                    label: m,
+                    val: matched ? matched[valueKey] : 0,
+                });
+            });
+        } else { return null; }
+
+        const maxVal = Math.max(...points.map(d => d.val), valueKey === 'count' ? 5 : 1);
+
+        points = points.map((p, i) => {
+            const cx = padX + (i / (points.length - 1)) * plotW;
+            return {
+                ...p,
+                x: cx,
+                y: padY + plotH - (p.val / maxVal) * plotH,
+            };
+        });
+
+        const getLinePath = () => {
+            if (points.length === 0) return '';
+            if (points.length === 1) return `M${points[0].x},${points[0].y}`;
+            let path = `M${points[0].x},${points[0].y}`;
             for (let i = 1; i < points.length; i++) {
                 const cpx = (points[i - 1].x + points[i].x) / 2;
-                linePath += ` C${cpx},${points[i - 1].y} ${cpx},${points[i].y} ${points[i].x},${points[i].y}`;
+                path += ` C${cpx},${points[i - 1].y} ${cpx},${points[i].y} ${points[i].x},${points[i].y}`;
             }
-        }
-        // Area fill path (fill under the line)
-        const areaPath = linePath + ` L${points[points.length - 1].x},${padY + plotH} L${points[0].x},${padY + plotH} Z`;
+            return path;
+        };
+
+        const path = getLinePath();
+        const color = valueKey === 'amount' ? 'var(--accent-primary, #6c63ff)' : '#10b981';
+        
+        // Area path
+        const areaPath = points.length > 1 ? path + ` L${points[points.length - 1].x},${padY + plotH} L${points[0].x},${padY + plotH} Z` : '';
         const gradId = `lineGrad_${valueKey}`;
+
         return (
-            <div style={{ position: 'relative', width: '100%' }}>
-                <svg viewBox={`0 0 ${svgW} ${svgH}`} style={{ width: '100%', height: 'auto' }} preserveAspectRatio="xMidYMid meet">
+            <div style={{ position: 'relative', width: '100%', marginTop: 10 }}>
+                <svg viewBox={`0 0 ${svgW} ${svgH + 20}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
                     <defs>
                         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="rgba(108,99,255,0.35)" />
-                            <stop offset="100%" stopColor="rgba(108,99,255,0.02)" />
+                            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0.02" />
                         </linearGradient>
                     </defs>
-                    {/* Grid lines */}
                     {[0, 0.25, 0.5, 0.75, 1].map((frac, i) => (
-                        <line key={i} x1={padX} y1={padY + plotH * (1 - frac)} x2={padX + plotW} y2={padY + plotH * (1 - frac)}
-                            stroke="var(--border-color)" opacity="0.5" strokeWidth="1" />
-                    ))}
-                    {/* Area fill */}
-                    <path d={areaPath} fill={`url(#${gradId})`} />
-                    {/* Line */}
-                    <path d={linePath} fill="none" stroke="var(--accent-primary, #6c63ff)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                    {/* Data points */}
-                    {points.map((p, i) => (
                         <g key={i}>
-                            <circle cx={p.x} cy={p.y} r="4" fill="var(--accent-primary, #6c63ff)" stroke="#1a1a2e" strokeWidth="2" />
-                            {/* Value label */}
-                            <text x={p.x} y={p.y - 10} textAnchor="middle" fill="var(--text-secondary)" fontSize="8" fontWeight="600" fontFamily="Inter, sans-serif">
-                                {valueKey === 'amount' ? `₱${p.val}` : p.val}
-                            </text>
+                            <line x1={padX} y1={padY + plotH * (1 - frac)} x2={padX + plotW} y2={padY + plotH * (1 - frac)}
+                                stroke="var(--border-color)" strokeOpacity="0.3" strokeWidth="1" strokeDasharray="4 4" />
                         </g>
                     ))}
-                    {/* X-axis labels */}
+                    {/* Area fill */}
+                    {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
+                    {/* Path */}
+                    <path d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    {/* Points and Labels */}
                     {points.map((p, i) => (
-                        <text key={`lbl-${i}`} x={p.x} y={svgH - 2} textAnchor="middle" fill="var(--text-muted)" fontSize="7" fontFamily="Inter, sans-serif">
-                            {p.date}
-                        </text>
+                        <g key={i}>
+                            <circle cx={p.x} cy={p.y} r="4" fill={color} stroke="var(--bg-card)" strokeWidth="2" />
+                            <text x={p.x} y={svgH + 10} textAnchor="middle" fill="var(--text-muted)" fontSize="9" fontWeight="600" fontFamily="Inter, sans-serif">
+                                {p.label}
+                            </text>
+                            {/* Values */}
+                            {p.val > 0 && <text x={p.x} y={p.y - 8} textAnchor="middle" fill={color} fontSize="8" fontWeight="700">
+                                {valueKey === 'amount' ? `₱${p.val}` : p.val}
+                            </text>}
+                        </g>
                     ))}
                 </svg>
             </div>
@@ -269,6 +301,7 @@ export default function DeliveryPage() {
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
 
                     <SidebarItem icon="💰" label="Transactions" active={activeSection === 'transactions'} onClick={() => setActiveSection('transactions')} />
+                    <SidebarItem icon="🕒" label="History" active={activeSection === 'history'} onClick={() => setActiveSection('history')} />
                 </nav>
 
                 <div style={{
@@ -370,7 +403,7 @@ export default function DeliveryPage() {
                                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginTop: 28, marginBottom: 12 }}>Delivery Report</h2>
                                 {/* Graph period toggle */}
                                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                                    {['daily', 'weekly', 'monthly'].map(p => (
+                                    {['daily', 'monthly'].map(p => (
                                         <button key={p} onClick={() => setGraphPeriod(p)} style={{
                                             padding: '8px 18px', borderRadius: 10, fontSize: '0.85rem', fontWeight: 600,
                                             border: '1px solid',
@@ -385,13 +418,13 @@ export default function DeliveryPage() {
                                 {/* Earnings graph */}
                                 <div className="card" style={{ padding: 20, marginBottom: 16 }}>
                                     <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Earnings ({graphPeriod})</h4>
-                                    <LineChart data={earnings[graphPeriod]} valueKey="amount" />
+                                    <LineChart data={earnings[graphPeriod]} period={graphPeriod} valueKey="amount" />
                                 </div>
 
                                 {/* Delivery count graph */}
                                 <div className="card" style={{ padding: 20 }}>
                                     <h4 style={{ marginBottom: 10, fontWeight: 700 }}>Deliveries Count ({graphPeriod})</h4>
-                                    <LineChart data={earnings[`${graphPeriod}_delivery_count`]} valueKey="count" />
+                                    <LineChart data={earnings[graphPeriod]} period={graphPeriod} valueKey="count" />
                                 </div>
                             </>
                         )}
@@ -414,7 +447,6 @@ export default function DeliveryPage() {
                             {[
                                 { key: 'delivery', label: 'Product Delivery' },
                                 { key: 'restock', label: 'Restock Delivery' },
-                                { key: 'history', label: 'History' },
                             ].map(f => (
                                 <button key={f.key} onClick={() => setHistoryFilter(f.key)} style={{
                                     padding: '8px 18px', borderRadius: 10, fontSize: '0.85rem', fontWeight: 600,
@@ -437,31 +469,43 @@ export default function DeliveryPage() {
                                 {active.length === 0 ? (
                                     <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24, color: 'var(--text-muted)' }}>No active deliveries</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
-                                        {active.map(o => (
-                                            <div key={o.transaction_id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                    {renderProductImage(o.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{o.product_title}</h4>
-                                                            <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
+                                    <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+                                        {active.map(g => (
+                                            <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(59,130,246,0.3)' }}>
+                                                {/* Group header */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
                                                         </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {o.buyer_name} | Seller: {o.seller_name} | Fee: PHP {o.delivery_fee.toFixed(2)}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                                                            📞 {o.buyer_contact || 'N/A'}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: o.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: o.delivery_address ? 600 : 400 }}>
-                                                            📍 {o.delivery_address || 'No address set'}
-                                                        </p>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
                                                     </div>
+                                                    <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
+                                                </div>
+                                                {/* Items in box */}
+                                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                                    {(g.items || []).map((item, idx) => (
+                                                        <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
+                                                            {renderProductImage(item.product_images)}
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                            </div>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Totals */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                                    <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
+                                                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 8 }}>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(o.transaction_id, 'delivered')}
+                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'delivered')}
                                                         style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>Delivered</button>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(o.transaction_id, 'undelivered')}
+                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'undelivered')}
                                                         style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', fontWeight: 600 }}>Undelivered</button>
                                                 </div>
                                             </div>
@@ -476,30 +520,42 @@ export default function DeliveryPage() {
                                 {available.length === 0 ? (
                                     <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No orders available for pickup</div>
                                 ) : (
-                                    <div style={{ display: 'grid', gap: 12 }}>
-                                        {available.map(o => (
-                                            <div key={o.transaction_id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                    {renderProductImage(o.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{o.product_title}</h4>
-                                                            <span style={{ ...STATUS_COLORS.approved, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>Approved</span>
+                                    <div style={{ display: 'grid', gap: 16 }}>
+                                        {available.map(g => (
+                                            <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(16,185,129,0.3)' }}>
+                                                {/* Group header */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
                                                         </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {o.buyer_name} | Seller: {o.seller_name} | Qty: {o.quantity} | Fee: PHP {o.delivery_fee.toFixed(2)}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                                                            📞 {o.buyer_contact || 'N/A'}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: o.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: o.delivery_address ? 600 : 400 }}>
-                                                            📍 {o.delivery_address || 'No address set'}
-                                                        </p>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
                                                     </div>
+                                                    <span style={{ ...STATUS_COLORS.approved, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>Ready</span>
                                                 </div>
-                                                <button className="btn btn-primary btn-sm" onClick={() => handlePick(o.transaction_id)}
+                                                {/* Items in box */}
+                                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                                    {(g.items || []).map((item, idx) => (
+                                                        <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
+                                                            {renderProductImage(item.product_images)}
+                                                            <div style={{ flex: 1 }}>
+                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                            </div>
+                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {/* Totals */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                                    <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
+                                                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
+                                                </div>
+                                                <button className="btn btn-primary btn-sm" onClick={() => handlePick(g.group_id)}
                                                     disabled={active.length >= 5} style={{ fontWeight: 600 }}>
-                                                    {active.length >= 5 ? 'Max deliveries reached' : 'Pick Up'}
+                                                    {active.length >= 5 ? 'Max deliveries reached' : '🚚 Pick Up Box'}
                                                 </button>
                                             </div>
                                         ))}
@@ -583,87 +639,74 @@ export default function DeliveryPage() {
                             </div>
                         )}
 
-                        {/* === History === */}
-                        {historyFilter === 'history' && (
+                    </div>
+                )}
+
+                {/* ===== HISTORY ===== */}
+                {activeSection === 'history' && !loading && (
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                             <div>
-                                {/* Sub-filter for delivery vs restock history */}
-                                <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                                    {[{ key: 'delivery', label: 'Product Delivery' }, { key: 'restock', label: 'Restock' }].map(f => (
-                                        <button key={f.key} onClick={() => setHistoryFilter('history_' + f.key)} className="btn btn-sm" style={{
-                                            background: historyFilter === 'history_' + f.key ? 'rgba(108,99,255,0.2)' : 'var(--bg-secondary)',
-                                            color: historyFilter === 'history_' + f.key ? 'var(--accent-primary)' : 'var(--text-muted)',
-                                            border: historyFilter === 'history_' + f.key ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                                            fontWeight: 600,
-                                        }}>{f.label}</button>
-                                    ))}
-                                </div>
-
-                                {/* Show product delivery history by default */}
-                                {history.length === 0 && restockHistory.length === 0 ? (
-                                    <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No history yet</div>
-                                ) : (
-                                    <div style={{ display: 'grid', gap: 12 }}>
-                                        {history.map(h => (
-                                            <div key={h.transaction_id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-                                                    {renderProductImage(h.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{h.product_title}</h4>
-                                                            <span style={{
-                                                                ...(STATUS_COLORS[h.status] || {}),
-                                                                padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0,
-                                                            }}>{h.status}</span>
-                                                        </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Fee: PHP {h.delivery_fee.toFixed(2)} | Seller: {h.seller_name}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {h.buyer_name} | Contact: {h.buyer_contact}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.8rem', color: h.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: h.delivery_address ? 600 : 400 }}>
-                                                            📍 {h.delivery_address || 'No address set'}
-                                                        </p>
-                                                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                                                            {new Date(h.created_at).toLocaleString()}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Delivery History</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>View past product and restock deliveries</p>
                             </div>
-                        )}
+                            <button className="btn btn-outline btn-sm" onClick={loadAll}>Refresh</button>
+                        </div>
 
-                        {historyFilter === 'history_delivery' && (
+                        {/* Filter buttons */}
+                        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                            {[{ key: 'delivery', label: 'Product Delivery' }, { key: 'restock', label: 'Restock' }].map(f => (
+                                <button key={f.key} onClick={() => setHistoryTab(f.key)} style={{
+                                    padding: '8px 18px', borderRadius: 10, fontSize: '0.85rem', fontWeight: 600,
+                                    border: '1px solid',
+                                    borderColor: historyTab === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
+                                    background: historyTab === f.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: historyTab === f.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
+                                }}>{f.label}</button>
+                            ))}
+                        </div>
+
+                        {historyTab === 'delivery' && (
                             history.length === 0 ? (
                                 <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No delivery history yet</div>
                             ) : (
-                                <div style={{ display: 'grid', gap: 12 }}>
+                                <div style={{ display: 'grid', gap: 16 }}>
                                     {history.map(h => (
-                                        <div key={h.transaction_id} className="card" style={{ padding: 20 }}>
-                                            <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-                                                {renderProductImage(h.product_images)}
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                        <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{h.product_title}</h4>
-                                                        <span style={{
-                                                            ...(STATUS_COLORS[h.status] || {}),
-                                                            padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0,
-                                                        }}>{h.status}</span>
+                                        <div key={h.group_id} className="card" style={{ padding: 20 }}>
+                                            {/* Group header */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
+                                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                        Buyer: {h.buyer_name} | Store: {h.seller_name}
                                                     </div>
-                                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                        Fee: PHP {h.delivery_fee.toFixed(2)} | Seller: {h.seller_name}
-                                                    </p>
-                                                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                        Buyer: {h.buyer_name} | Contact: {h.buyer_contact}
-                                                    </p>
-                                                    <p style={{ fontSize: '0.8rem', color: h.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 4, fontWeight: h.delivery_address ? 600 : 400 }}>
-                                                        📍 {h.delivery_address || 'No address set'}
-                                                    </p>
-                                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>{new Date(h.created_at).toLocaleString()}</p>
+                                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {h.buyer_contact}</div>
+                                                    <div style={{ fontSize: '0.8rem', color: h.delivery_address ? 'var(--accent-primary)' : 'var(--text-muted)', marginTop: 2, fontWeight: h.delivery_address ? 600 : 400 }}>📍 {h.delivery_address || 'No address set'}</div>
+                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Date: {new Date(h.created_at).toLocaleString()}</div>
                                                 </div>
+                                                <span style={{
+                                                    ...(STATUS_COLORS[h.status] || {}),
+                                                    padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0,
+                                                }}>{h.status}</span>
+                                            </div>
+                                            {/* Items in box */}
+                                            <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                                {(h.items || []).map((item, idx) => (
+                                                    <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < h.items.length - 1 ? 8 : 0 }}>
+                                                        {renderProductImage(item.product_images)}
+                                                        <div style={{ flex: 1 }}>
+                                                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                        </div>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {/* Totals */}
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                <span>Products: PHP {h.total_amount?.toFixed(2)}</span>
+                                                <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {h.delivery_fee?.toFixed(2)}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -671,7 +714,7 @@ export default function DeliveryPage() {
                             )
                         )}
 
-                        {historyFilter === 'history_restock' && (
+                        {historyTab === 'restock' && (
                             restockHistory.length === 0 ? (
                                 <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>No restock history yet</div>
                             ) : (
@@ -730,12 +773,45 @@ export default function DeliveryPage() {
                         </div>
 
                         {/* Withdraw */}
-                        <div className="card" style={{ padding: 20 }}>
+                        <div className="card" style={{ padding: 20, marginBottom: 24 }}>
                             <h3 style={{ marginBottom: 12, fontWeight: 700 }}>Withdraw Earnings</h3>
                             <div style={{ display: 'flex', gap: 10 }}>
                                 <input type="number" placeholder="Amount" value={withdrawAmt} onChange={e => setWithdrawAmt(e.target.value)} style={{ flex: 1 }} />
                                 <button className="btn btn-primary" onClick={handleWithdraw}>Withdraw</button>
                             </div>
+                        </div>
+
+                        {/* Transaction History */}
+                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>Transaction History</h2>
+                        <div className="card" style={{ padding: 20 }}>
+                            {(!earnings.history || earnings.history.length === 0) ? (
+                                <p style={{ color: 'var(--text-muted)', textAlign: 'center', margin: '20px 0' }}>No transactions found.</p>
+                            ) : (
+                                <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+                                    <thead>
+                                        <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                                            <th style={{ padding: '12px 8px', fontWeight: 600 }}>Type</th>
+                                            <th style={{ padding: '12px 8px', fontWeight: 600 }}>Date</th>
+                                            <th style={{ padding: '12px 8px', fontWeight: 600, textAlign: 'right' }}>Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {earnings.history.map((tx, idx) => (
+                                            <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                <td style={{ padding: '12px 8px', fontWeight: 500, color: tx.type === 'Withdrawal' ? '#ef4444' : 'var(--accent-primary)' }}>
+                                                    {tx.type}
+                                                </td>
+                                                <td style={{ padding: '12px 8px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                                    {new Date(tx.date).toLocaleString()}
+                                                </td>
+                                                <td style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 700 }}>
+                                                    {tx.type === 'Withdrawal' ? '-' : '+'}₱{tx.amount.toFixed(2)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 )}

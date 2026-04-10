@@ -1,6 +1,5 @@
 'use client';
 
-import './globals.css';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { getStoredUser, logout, getBalance, getStoredAdmin, adminLogout } from '../lib/api';
@@ -57,14 +56,8 @@ export default function RootLayout({ children }) {
     };
 
     return (
-        <html lang="en" data-theme={theme || 'dark'}>
-            <head>
-                <title>RetailTalk - An NLP for querying e-commerce product</title>
-                <meta name="description" content="An NLP for querying e-commerce product. BERT-powered intelligent product search." />
-                <meta name="viewport" content="width=device-width, initial-scale=1" />
-            </head>
-            <body>
-                {!hideNav && <nav className="navbar">
+        <>
+            {!hideNav && <nav className="navbar">
                     <a href="/" className="navbar-brand" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <img src="/logo.png" alt="RetailTalk Logo" style={{ height: '32px', width: '32px' }} />
                         RetailTalk
@@ -163,8 +156,7 @@ export default function RootLayout({ children }) {
                         ) : null}
                     </div>
                 </nav>}
-                {children}
-            </body>
-        </html>
+            {children}
+        </>
     );
 }

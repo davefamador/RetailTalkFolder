@@ -52,11 +52,6 @@ export default function TransactionsPage() {
         delivered: { label: 'Delivered', color: '#10b981' },
         undelivered: { label: 'Undelivered', color: '#ef4444' },
         cancelled: { label: 'Cancelled', color: '#94a3b8' },
-        pending_walkin: { label: 'Pending', color: '#fbbf24' },
-        inwork: { label: 'In Work', color: '#3b82f6' },
-        ready: { label: 'Ready for Pickup', color: '#8b5cf6' },
-        picked_up: { label: 'Picked Up', color: '#0ea5e9' },
-        completed: { label: 'Completed', color: '#10b981' },
     };
 
     // ── Spending by period (for bar charts) ────────────────
@@ -165,19 +160,9 @@ export default function TransactionsPage() {
                         }}
                     />
                 </div>
-                {/* Type + Status Filters */}
+                {/* Status Filter */}
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginRight: 2 }}>Type:</span>
-                    {[{ key: 'all', label: 'All' }, { key: 'delivery', label: 'Delivery' }, { key: 'walkin', label: 'Walk-in' }].map(f => (
-                        <button key={f.key} onClick={() => { setOrderTypeFilter(f.key); setOrderStatusFilter('all'); }} style={{
-                            padding: '5px 12px', borderRadius: 8, border: '1px solid',
-                            borderColor: orderTypeFilter === f.key ? 'var(--accent-primary)' : 'var(--border-color)',
-                            background: orderTypeFilter === f.key ? 'var(--accent-primary)' : 'transparent',
-                            color: orderTypeFilter === f.key ? '#fff' : 'var(--text-muted)',
-                            fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
-                        }}>{f.label}</button>
-                    ))}
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginLeft: 10, marginRight: 2 }}>Status:</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', marginRight: 2 }}>Status:</span>
                     <select
                         value={orderStatusFilter}
                         onChange={e => setOrderStatusFilter(e.target.value)}
@@ -190,18 +175,11 @@ export default function TransactionsPage() {
                     >
                         <option value="all">All</option>
                         {Object.entries(statusMap)
-                            .filter(([k]) => {
-                                if (orderTypeFilter === 'delivery') return ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'].includes(k);
-                                if (orderTypeFilter === 'walkin') return ['pending_walkin', 'inwork', 'ready', 'picked_up', 'completed', 'cancelled'].includes(k);
-                                return true;
-                            })
                             .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                     </select>
                 </div>
                 {(() => {
                     let filtered = myBuyerTxns;
-                    if (orderTypeFilter === 'delivery') filtered = filtered.filter(t => t.purchase_type === 'delivery');
-                    else if (orderTypeFilter === 'walkin') filtered = filtered.filter(t => t.purchase_type !== 'delivery');
                     if (orderStatusFilter !== 'all') filtered = filtered.filter(t => t.status === orderStatusFilter);
                     if (orderSearch.trim()) {
                         const q = orderSearch.toLowerCase();
@@ -217,7 +195,6 @@ export default function TransactionsPage() {
                             {filtered.map(t => {
                                 const productImage = t.product_images && t.product_images.length > 0 ? t.product_images[0] : null;
                                 const sInfo = statusMap[t.status] || { label: t.status, color: '#94a3b8' };
-                                const isDelivery = t.purchase_type === 'delivery';
                                 return (
                                     <div key={t.id} style={{
                                         display: 'flex', gap: 12, padding: 12, borderRadius: 10,
@@ -239,17 +216,20 @@ export default function TransactionsPage() {
                                                 {t.product_title || 'Product'}
                                             </p>
                                             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                                                {t.seller_name || 'Seller'} • Qty: {t.quantity || 1} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                                                {t.seller_name || 'Store'} • Qty: {t.quantity || 1} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
                                             </p>
+                                            {t.delivery_user_name && (
+                                                <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                    🚚 {t.delivery_user_name}
+                                                </p>
+                                            )}
                                         </div>
                                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                                             <p style={{ fontWeight: 700, fontSize: '0.85rem' }}>₱{t.amount.toFixed(2)}</p>
+                                            {t.delivery_fee > 0 && (
+                                                <p style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 1 }}>+₱{t.delivery_fee.toFixed(2)} delivery</p>
+                                            )}
                                             <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: 2 }}>
-                                                <span style={{
-                                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
-                                                    background: isDelivery ? 'rgba(59,130,246,0.12)' : 'rgba(245,158,11,0.12)',
-                                                    color: isDelivery ? '#3b82f6' : '#f59e0b',
-                                                }}>{isDelivery ? '🚚 Delivery' : '🏪 Walk-in'}</span>
                                                 <span style={{
                                                     padding: '2px 8px', borderRadius: 10, fontSize: '0.6rem', fontWeight: 600,
                                                     background: `${sInfo.color}20`, color: sInfo.color,

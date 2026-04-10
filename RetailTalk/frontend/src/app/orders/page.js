@@ -1,6 +1,6 @@
 'use client';
 
-import { getTransactionHistory, getStoredUser, buyerConfirmWalkin, cancelOrder } from '../../lib/api';
+import { getTransactionHistory, getStoredUser, cancelOrder } from '../../lib/api';
 import { useState, useEffect } from 'react';
 import { Package, ShoppingCart, Truck } from 'lucide-react';
 
@@ -8,10 +8,10 @@ export default function OrdersPage() {
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [authChecked, setAuthChecked] = useState(false);
-    const [selectedOrder, setSelectedOrder] = useState(null);
+    const [selectedGroup, setSelectedGroup] = useState(null);
     const [orderFilter, setOrderFilter] = useState('all');
-    const [confirming, setConfirming] = useState(false);
     const [cancelling, setCancelling] = useState(null);
+    const [cancelConfirmGroup, setCancelConfirmGroup] = useState(null);
     const [msg, setMsg] = useState({ type: '', text: '' });
 
     useEffect(() => {
@@ -21,48 +21,8 @@ export default function OrdersPage() {
         loadData();
     }, []);
 
-    const handleConfirmWalkin = async (txnId) => {
-        setConfirming(true);
-        setMsg({ type: '', text: '' });
-        try {
-            const res = await buyerConfirmWalkin(txnId);
-            setMsg({ type: 'success', text: res.message || 'Pickup verified!' });
-            await loadData();
-        } catch (err) {
-            setMsg({ type: 'error', text: err.message || 'Failed to verify pickup' });
-        }
-        finally { setConfirming(false); }
-    };
-
-    const handleCancelOrder = async (txn) => {
-        const walkin = isWalkin(txn);
-        const hasFee = !walkin && txn.status === 'ondeliver';
-        const confirmMsg = hasFee
-            ? 'Are you sure you want to cancel this order? A \u20B150 cancellation fee will be deducted from your refund.'
-            : 'Are you sure you want to cancel this order? You will receive a full refund.';
-        if (!window.confirm(confirmMsg)) return;
-        setCancelling(txn.id);
-        setMsg({ type: '', text: '' });
-        try {
-            const res = await cancelOrder(txn.id);
-            const parts = [];
-            if (res.message) parts.push(res.message);
-            if (res.refund_amount != null) parts.push(`Refund: \u20B1${res.refund_amount.toFixed(2)}`);
-            if (res.cancellation_fee) parts.push(`Fee: \u20B1${res.cancellation_fee.toFixed(2)}`);
-            setMsg({ type: 'success', text: parts.join(' | ') || 'Order cancelled.' });
-            setSelectedOrder(null);
-            await loadData();
-        } catch (err) {
-            setMsg({ type: 'error', text: err.message || 'Failed to cancel order' });
-        } finally {
-            setCancelling(null);
-        }
-    };
-
-    const canCancelOrder = (t) => {
-        const walkin = isWalkin(t);
-        if (walkin) return t.status === 'pending_walkin';
-        return ['pending', 'approved', 'ondeliver'].includes(t.status);
+    const canCancelGroup = (group) => {
+        return ['pending', 'approved', 'ondeliver'].includes(group.status);
     };
 
     const loadData = async () => {
@@ -73,17 +33,61 @@ export default function OrdersPage() {
         finally { setLoading(false); }
     };
 
+    const handleCancelGroup = async (group) => {
+        setCancelConfirmGroup(null);
+        setCancelling(group.group_id);
+        setMsg({ type: '', text: '' });
+        try {
+            const result = await cancelOrder(group.group_id);
+            setMsg({ type: 'success', text: result.message || 'Order group cancelled successfully.' });
+            await loadData();
+        } catch (err) {
+            setMsg({ type: 'error', text: err.message || 'Failed to cancel order.' });
+        } finally {
+            setCancelling(null);
+        }
+    };
+
     const user = getStoredUser();
     const myBuyerTxns = transactions.filter(t => t.buyer_id === user?.id);
 
-    const walkinOnlyStatuses = ['pending_walkin', 'inwork', 'ready', 'picked_up'];
-    const isWalkin = (t) => t.purchase_type === 'walkin' || walkinOnlyStatuses.includes(t.status);
-    const walkinOrders = myBuyerTxns.filter(t => isWalkin(t));
-    const deliveryOrders = myBuyerTxns.filter(t => !isWalkin(t));
+    // Group transactions by group_id into delivery boxes
+    const groupOrders = (txns) => {
+        const groups = {};
+        for (const t of txns) {
+            const gid = t.group_id || t.id;
+            if (!groups[gid]) {
+                groups[gid] = {
+                    group_id: gid,
+                    seller_name: t.seller_name || 'Seller',
+                    delivery_address: t.delivery_address || '',
+                    delivery_user_name: t.delivery_user_name || '',
+                    delivery_user_contact: t.delivery_user_contact || '',
+                    status: t.status,
+                    created_at: t.created_at,
+                    items: [],
+                    total_amount: 0,
+                    delivery_fee: 0,
+                };
+            }
+            groups[gid].items.push(t);
+            groups[gid].total_amount += t.amount;
+            groups[gid].delivery_fee += t.delivery_fee || 0;
+            // Escalate status: ondeliver > approved > pending
+            const pri = { pending: 0, approved: 1, ondeliver: 2, delivered: 3, undelivered: 4, cancelled: 5 };
+            if ((pri[t.status] ?? 0) > (pri[groups[gid].status] ?? 0)) {
+                groups[gid].status = t.status;
+            }
+            // Update delivery user info if available
+            if (t.delivery_user_name && !groups[gid].delivery_user_name) {
+                groups[gid].delivery_user_name = t.delivery_user_name;
+                groups[gid].delivery_user_contact = t.delivery_user_contact || '';
+            }
+        }
+        return Object.values(groups);
+    };
 
-    const filteredOrders = orderFilter === 'walkin' ? walkinOrders
-        : orderFilter === 'delivery' ? deliveryOrders
-        : myBuyerTxns;
+    const allGroups = groupOrders(myBuyerTxns);
 
     const statusMap = {
         pending: { label: 'Pending', color: '#fbbf24', progress: 10 },
@@ -92,11 +96,6 @@ export default function OrdersPage() {
         delivered: { label: 'Delivered', color: '#10b981', progress: 100 },
         undelivered: { label: 'Undelivered', color: '#ef4444', progress: 0 },
         cancelled: { label: 'Cancelled', color: '#94a3b8', progress: 0 },
-        pending_walkin: { label: 'Pending', color: '#fbbf24', progress: 10 },
-        inwork: { label: 'In Work', color: '#3b82f6', progress: 40 },
-        ready: { label: 'Ready for Pickup', color: '#8b5cf6', progress: 60 },
-        picked_up: { label: 'Picked Up', color: '#0ea5e9', progress: 85 },
-        completed: { label: 'Completed', color: '#10b981', progress: 100 },
     };
 
     if (!authChecked || loading) {
@@ -110,128 +109,133 @@ export default function OrdersPage() {
         );
     }
 
-    const renderOrderCard = (t) => {
-        const sInfo = statusMap[t.status] || { label: t.status, color: '#94a3b8', progress: 0 };
-        const productImage = t.product_images && t.product_images.length > 0 ? t.product_images[0] : null;
-        const walkin = isWalkin(t);
-        const isReadyForPickup = walkin && t.status === 'ready';
+    const renderGroupCard = (group) => {
+        const sInfo = statusMap[group.status] || { label: group.status, color: '#94a3b8', progress: 0 };
+        const isSingleItem = group.items.length === 1;
+        const firstItem = group.items[0];
+        const firstImage = firstItem?.product_images?.[0] || null;
 
         return (
-            <div key={t.id} onClick={() => setSelectedOrder(t)} style={{
-                display: 'flex', gap: 12, padding: 14, borderRadius: 12, cursor: 'pointer',
-                border: isReadyForPickup ? '1px solid rgba(16,185,129,0.4)' : '1px solid var(--border-color)',
-                background: isReadyForPickup ? 'rgba(16,185,129,0.04)' : 'var(--card-bg)',
+            <div key={group.group_id} onClick={() => setSelectedGroup(group)} style={{
+                padding: 16, borderRadius: 14, cursor: 'pointer',
+                border: '1px solid var(--border-color)',
+                background: 'var(--card-bg)',
                 transition: 'border-color 0.2s, transform 0.15s',
             }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = isReadyForPickup ? 'rgba(16,185,129,0.6)' : 'var(--accent-primary)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = isReadyForPickup ? 'rgba(16,185,129,0.4)' : 'var(--border-color)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.transform = 'translateY(0)'; }}
             >
-                <div style={{
-                    width: 56, height: 56, borderRadius: 10, overflow: 'hidden',
-                    background: 'var(--bg-secondary)', flexShrink: 0,
-                }}>
-                    {productImage ? (
-                        <img src={productImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            onError={e => e.target.style.display = 'none'} />
-                    ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}><Package size={24} /></div>
-                    )}
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                        <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
-                            <p style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {t.product_title || 'Product'}
+                {/* Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                    <div style={{ display: 'flex', gap: 10, flex: 1, minWidth: 0 }}>
+                        {isSingleItem && firstImage ? (
+                            <div style={{ width: 50, height: 50, borderRadius: 10, overflow: 'hidden', background: 'var(--bg-secondary)', flexShrink: 0 }}>
+                                <img src={firstImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                            </div>
+                        ) : (
+                            <div style={{
+                                width: 50, height: 50, borderRadius: 10, background: 'var(--bg-secondary)', flexShrink: 0,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem',
+                            }}>
+                                {group.items.length > 1 ? '\uD83D\uDCE6' : <Package size={22} style={{ color: 'var(--text-muted)' }} />}
+                            </div>
+                        )}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                            <p style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 2 }}>
+                                {isSingleItem ? (firstItem.product_title || 'Product') : `Delivery Box (${group.items.length} items)`}
                             </p>
                             <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                {t.seller_name || 'Seller'} • {new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
+                                {group.seller_name} {'\u2022'} {new Date(group.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}
                             </p>
                         </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                {/* Walk-in / Delivery type badge */}
-                                <span style={{
-                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.68rem', fontWeight: 600,
-                                    background: walkin ? 'rgba(251,191,36,0.12)' : 'rgba(59,130,246,0.12)',
-                                    color: walkin ? '#f59e0b' : '#3b82f6',
-                                }}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>{walkin ? <><ShoppingCart size={12} /> Walk-in</> : <><Truck size={12} /> Delivery</>}</span></span>
-                                {/* Status badge */}
-                                <span style={{
-                                    padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
-                                    background: `${sInfo.color}20`, color: sInfo.color,
-                                }}>{sInfo.label}</span>
-                            </div>
-                            <p style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: 0 }}>₱{t.amount.toFixed(2)}</p>
-                        </div>
                     </div>
-                    <div style={{ height: 3, borderRadius: 2, background: 'var(--border-color)' }}>
-                        <div style={{
-                            height: '100%', borderRadius: 2, width: `${sInfo.progress}%`,
-                            background: sInfo.color, transition: 'width 0.5s',
-                        }} />
+                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                        <span style={{
+                            padding: '2px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600,
+                            background: `${sInfo.color}20`, color: sInfo.color,
+                        }}>{sInfo.label}</span>
+                        <p style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: 0 }}>{'\u20B1'}{group.total_amount.toFixed(2)}</p>
                     </div>
-                    {t.delivery_user_name && (
-                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <Truck size={12} /> {t.delivery_user_name}
-                        </p>
-                    )}
                 </div>
 
-                {/* Confirm Pickup button on the right side for ready walk-in orders */}
-                {isReadyForPickup && (
-                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                        <button
-                            onClick={e => { e.stopPropagation(); handleConfirmWalkin(t.id); }}
-                            disabled={confirming}
-                            style={{
-                                padding: '10px 18px', borderRadius: 10, border: 'none',
-                                background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff',
-                                fontWeight: 700, fontSize: '0.8rem',
-                                cursor: confirming ? 'not-allowed' : 'pointer',
-                                opacity: confirming ? 0.6 : 1,
-                                transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
-                                whiteSpace: 'nowrap',
-                                boxShadow: '0 2px 8px rgba(16,185,129,0.3)',
-                            }}
-                            onMouseEnter={e => { if (!confirming) e.currentTarget.style.transform = 'scale(1.05)'; }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-                        >
-                            {confirming ? 'Confirming...' : '✅ Confirm Pickup'}
-                        </button>
+                {/* Multi-item: show item thumbnails */}
+                {!isSingleItem && (
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: '8px 12px', marginBottom: 10 }}>
+                        {group.items.map((item, idx) => {
+                            const img = item.product_images?.[0] || null;
+                            return (
+                                <div key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: idx < group.items.length - 1 ? 6 : 0 }}>
+                                    {img ? (
+                                        <div style={{ width: 32, height: 32, borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+                                            <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                        </div>
+                                    ) : (
+                                        <div style={{ width: 32, height: 32, borderRadius: 6, background: 'var(--bg-card)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Package size={14} style={{ color: 'var(--text-muted)' }} />
+                                        </div>
+                                    )}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                        <span style={{ fontWeight: 600, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{item.product_title}</span>
+                                    </div>
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>x{item.quantity} {'\u20B1'}{item.amount.toFixed(2)}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
 
-                {/* Cancel Order button */}
-                {canCancelOrder(t) && (
-                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                {/* Progress bar */}
+                <div style={{ height: 3, borderRadius: 2, background: 'var(--border-color)', marginBottom: 6 }}>
+                    <div style={{
+                        height: '100%', borderRadius: 2, width: `${sInfo.progress}%`,
+                        background: sInfo.color, transition: 'width 0.5s',
+                    }} />
+                </div>
+
+                {/* Footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        {group.delivery_user_name && (
+                            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <Truck size={12} /> {group.delivery_user_name}
+                            </p>
+                        )}
+                        {group.delivery_fee > 0 && (
+                            <p style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', fontWeight: 600, marginTop: 2 }}>
+                                + {'\u20B1'}{group.delivery_fee.toFixed(2)} delivery
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Cancel button */}
+                    {canCancelGroup(group) && (
                         <button
-                            onClick={e => { e.stopPropagation(); handleCancelOrder(t); }}
-                            disabled={cancelling === t.id}
+                            onClick={e => { e.stopPropagation(); setCancelConfirmGroup(group); }}
+                            disabled={cancelling === group.group_id}
                             style={{
                                 padding: '8px 14px', borderRadius: 10, border: 'none',
-                                background: (!isWalkin(t) && t.status === 'ondeliver')
+                                background: group.status === 'ondeliver'
                                     ? 'linear-gradient(135deg, #f59e0b, #d97706)'
                                     : 'linear-gradient(135deg, #ef4444, #dc2626)',
                                 color: '#fff',
                                 fontWeight: 700, fontSize: '0.75rem',
-                                cursor: cancelling === t.id ? 'not-allowed' : 'pointer',
-                                opacity: cancelling === t.id ? 0.6 : 1,
+                                cursor: cancelling === group.group_id ? 'not-allowed' : 'pointer',
+                                opacity: cancelling === group.group_id ? 0.6 : 1,
                                 transition: 'all 0.2s', fontFamily: 'Inter, sans-serif',
                                 whiteSpace: 'nowrap',
-                                boxShadow: (!isWalkin(t) && t.status === 'ondeliver')
+                                boxShadow: group.status === 'ondeliver'
                                     ? '0 2px 8px rgba(245,158,11,0.3)'
                                     : '0 2px 8px rgba(239,68,68,0.3)',
                             }}
-                            onMouseEnter={e => { if (cancelling !== t.id) e.currentTarget.style.transform = 'scale(1.05)'; }}
+                            onMouseEnter={e => { if (cancelling !== group.group_id) e.currentTarget.style.transform = 'scale(1.05)'; }}
                             onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
                         >
-                            {cancelling === t.id ? 'Cancelling...'
-                                : (!isWalkin(t) && t.status === 'ondeliver') ? 'Cancel Order (\u20B150 fee)'
-                                : 'Cancel Order'}
+                            {cancelling === group.group_id ? 'Cancelling...'
+                                : group.status === 'ondeliver' ? `Cancel Box (${'\u20B1'}50 fee)`
+                                : 'Cancel Box'}
                         </button>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         );
     };
@@ -240,7 +244,7 @@ export default function OrdersPage() {
         <div className="page">
             <div className="page-header">
                 <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Package size={28} /> My Orders</h1>
-                <p>Track your orders and verify walk-in pickups</p>
+                <p>Track your delivery orders</p>
             </div>
 
             {msg.text && (
@@ -254,16 +258,15 @@ export default function OrdersPage() {
                     {msg.text}
                     <button onClick={() => setMsg({ type: '', text: '' })} style={{
                         background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700, fontSize: '1rem',
-                    }}>✕</button>
+                    }}>{'\u2715'}</button>
                 </div>
             )}
 
             {/* Order Type Filter */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 {[
-                    { key: 'all', label: 'All', count: myBuyerTxns.length },
-                    { key: 'delivery', label: 'Delivery', count: deliveryOrders.length },
-                    { key: 'walkin', label: 'Walk-in', count: walkinOrders.length },
+                    { key: 'all', label: 'All', count: allGroups.length },
+                    { key: 'delivery', label: 'Delivery', count: allGroups.length },
                 ].map(f => (
                     <button key={f.key} onClick={() => setOrderFilter(f.key)} style={{
                         padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
@@ -275,31 +278,13 @@ export default function OrdersPage() {
                 ))}
             </div>
 
-            {/* Orders needing action */}
-            {walkinOrders.filter(o => o.status === 'ready').length > 0 && (
-                <div style={{
-                    padding: 16, borderRadius: 12, marginBottom: 16,
-                    background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)',
-                }}>
-                    <h4 style={{ fontWeight: 700, fontSize: '0.9rem', color: '#8b5cf6', marginBottom: 8 }}>
-                        Action Required — Verify Pickup
-                    </h4>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
-                        These walk-in orders are ready. Verify that you picked up the product.
-                    </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {walkinOrders.filter(o => o.status === 'ready').map(t => renderOrderCard(t))}
-                    </div>
-                </div>
-            )}
-
-            {/* Active vs History toggle */}
+            {/* Active vs History */}
             {(() => {
-                const activeStatuses = ['pending', 'approved', 'ondeliver', 'pending_walkin', 'inwork', 'ready', 'picked_up'];
-                const historyStatuses = ['delivered', 'completed', 'cancelled', 'undelivered'];
-                const activeOrders = filteredOrders.filter(t => activeStatuses.includes(t.status));
-                const historyOrders = filteredOrders.filter(t => historyStatuses.includes(t.status))
-                    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+                const activeStatuses = ['pending', 'approved', 'ondeliver'];
+                const historyStatuses = ['delivered', 'cancelled', 'undelivered'];
+                const activeGroups = allGroups.filter(g => activeStatuses.includes(g.status));
+                const historyGroups = allGroups.filter(g => historyStatuses.includes(g.status))
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
                 return (
                     <>
@@ -312,18 +297,18 @@ export default function OrdersPage() {
                                         fontSize: '0.75rem', fontWeight: 700,
                                         padding: '2px 10px', borderRadius: 12,
                                         background: 'rgba(59,130,246,0.12)', color: '#3b82f6',
-                                    }}>{activeOrders.length}</span>
+                                    }}>{activeGroups.length}</span>
                                 </h3>
                             </div>
-                            {activeOrders.length === 0 ? (
+                            {activeGroups.length === 0 ? (
                                 <div style={{ textAlign: 'center', padding: 40 }}>
                                     <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
                                     <p style={{ color: 'var(--text-muted)' }}>No active orders right now</p>
                                     <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Start shopping to see your orders here!</p>
                                 </div>
                             ) : (
-                                <div style={{ maxHeight: 500, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-                                    {activeOrders.map(t => renderOrderCard(t))}
+                                <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+                                    {activeGroups.map(g => renderGroupCard(g))}
                                 </div>
                             )}
                         </div>
@@ -332,15 +317,15 @@ export default function OrdersPage() {
                         <div className="card" style={{ marginBottom: 24 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                                 <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    📋 Purchase History
+                                    {'\uD83D\uDCCB'} Purchase History
                                     <span style={{
                                         fontSize: '0.75rem', fontWeight: 700,
                                         padding: '2px 10px', borderRadius: 12,
                                         background: 'rgba(16,185,129,0.12)', color: '#10b981',
-                                    }}>{historyOrders.length}</span>
+                                    }}>{historyGroups.length}</span>
                                 </h3>
                             </div>
-                            {historyOrders.length === 0 ? (
+                            {historyGroups.length === 0 ? (
                                 <div style={{ textAlign: 'center', padding: 40 }}>
                                     <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
                                     <p style={{ color: 'var(--text-muted)' }}>No purchase history yet</p>
@@ -348,7 +333,7 @@ export default function OrdersPage() {
                                 </div>
                             ) : (
                                 <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-                                    {historyOrders.map(t => renderOrderCard(t))}
+                                    {historyGroups.map(g => renderGroupCard(g))}
                                 </div>
                             )}
                         </div>
@@ -356,122 +341,232 @@ export default function OrdersPage() {
                 );
             })()}
 
-            {/* Order Detail Modal */}
-            {selectedOrder && (() => {
-                const sInfo = statusMap[selectedOrder.status] || { label: selectedOrder.status, color: '#94a3b8' };
+            {/* Group Detail Modal */}
+            {selectedGroup && (() => {
+                const sInfo = statusMap[selectedGroup.status] || { label: selectedGroup.status, color: '#94a3b8' };
                 return (
                     <div style={{
                         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
-                    }} onClick={() => setSelectedOrder(null)}>
-                        <div className="card" style={{ maxWidth: 480, width: '100%', padding: 32 }} onClick={e => e.stopPropagation()}>
-                            <h3 style={{ marginBottom: 4 }}>Order Details</h3>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: 20 }}>
-                                {new Date(selectedOrder.created_at).toLocaleString()}
-                            </p>
-
-                            {selectedOrder.product_images && selectedOrder.product_images[0] && (
-                                <div style={{ width: '100%', height: 160, borderRadius: 12, overflow: 'hidden', marginBottom: 16, background: 'var(--bg-secondary)' }}>
-                                    <img src={selectedOrder.product_images[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    }} onClick={() => setSelectedGroup(null)}>
+                        <div className="card" style={{ maxWidth: 500, width: '100%', padding: 32, maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                                <div>
+                                    <h3 style={{ marginBottom: 4 }}>
+                                        {selectedGroup.items.length > 1 ? '\uD83D\uDCE6 Delivery Box' : 'Order Details'}
+                                    </h3>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                        {new Date(selectedGroup.created_at).toLocaleString()}
+                                    </p>
                                 </div>
-                            )}
-
-                            <div style={{ display: 'grid', gap: 12, marginBottom: 20 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Product</span>
-                                    <span style={{ fontWeight: 600 }}>{selectedOrder.product_title}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Seller</span>
-                                    <span style={{ fontWeight: 600 }}>{selectedOrder.seller_name || '—'}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Quantity</span>
-                                    <span>{selectedOrder.quantity || 1}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Amount</span>
-                                    <span style={{ fontWeight: 700, color: 'var(--accent-secondary)' }}>₱{selectedOrder.amount.toFixed(2)}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Type</span>
-                                    <span style={{
-                                        padding: '2px 8px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600,
-                                        textTransform: 'capitalize',
-                                        background: isWalkin(selectedOrder) ? 'rgba(251,191,36,0.1)' : 'rgba(59,130,246,0.1)',
-                                        color: isWalkin(selectedOrder) ? '#fbbf24' : '#3b82f6',
-                                    }}>{isWalkin(selectedOrder) ? 'walk-in' : 'delivery'}</span>
-                                </div>
-                                {selectedOrder.delivery_fee > 0 && (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <span style={{ color: 'var(--text-muted)' }}>Delivery Fee</span>
-                                        <span>₱{selectedOrder.delivery_fee.toFixed(2)}</span>
-                                    </div>
-                                )}
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                                    <span style={{
-                                        padding: '3px 10px', borderRadius: 12, fontSize: '0.8rem', fontWeight: 700,
-                                        background: `${sInfo.color}20`, color: sInfo.color,
-                                    }}>{sInfo.label}</span>
-                                </div>
+                                <span style={{
+                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.8rem', fontWeight: 700,
+                                    background: `${sInfo.color}20`, color: sInfo.color,
+                                }}>{sInfo.label}</span>
                             </div>
 
-                            {/* Delivery Info (for delivery orders) */}
-                            {!isWalkin(selectedOrder) && (
-                                selectedOrder.delivery_user_name ? (
-                                    <div style={{
-                                        padding: 16, borderRadius: 10, background: 'rgba(59,130,246,0.08)',
-                                        border: '1px solid rgba(59,130,246,0.2)', marginBottom: 16,
-                                    }}>
-                                        <h4 style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}><Truck size={16} /> Delivery Man Info</h4>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
-                                            <span style={{ color: 'var(--text-muted)' }}>Name</span>
-                                            <span style={{ fontWeight: 600 }}>{selectedOrder.delivery_user_name}</span>
+                            {/* Items */}
+                            <div style={{ background: 'var(--bg-secondary)', borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                                {selectedGroup.items.map((item, idx) => {
+                                    const img = item.product_images?.[0] || null;
+                                    return (
+                                        <div key={item.id} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < selectedGroup.items.length - 1 ? 10 : 0 }}>
+                                            {img ? (
+                                                <div style={{ width: 48, height: 48, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+                                                    <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                </div>
+                                            ) : (
+                                                <div style={{ width: 48, height: 48, borderRadius: 8, background: 'var(--bg-card)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <Package size={18} style={{ color: 'var(--text-muted)' }} />
+                                                </div>
+                                            )}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <p style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</p>
+                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity || 1}</p>
+                                            </div>
+                                            <p style={{ fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>{'\u20B1'}{item.amount.toFixed(2)}</p>
                                         </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                                            <span style={{ color: 'var(--text-muted)' }}>Contact</span>
-                                            <span style={{ fontWeight: 600 }}>{selectedOrder.delivery_user_contact || 'N/A'}</span>
-                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Summary */}
+                            <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Store</span>
+                                    <span style={{ fontWeight: 600 }}>{selectedGroup.seller_name}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Items Total</span>
+                                    <span style={{ fontWeight: 700, color: 'var(--accent-secondary)' }}>{'\u20B1'}{selectedGroup.total_amount.toFixed(2)}</span>
+                                </div>
+                                {selectedGroup.delivery_fee > 0 && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Delivery Fee</span>
+                                        <span>{'\u20B1'}{selectedGroup.delivery_fee.toFixed(2)}</span>
                                     </div>
-                                ) : (
-                                    <div style={{
-                                        padding: 14, borderRadius: 10, background: 'rgba(148,163,184,0.08)',
-                                        textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 16,
-                                    }}>No delivery man assigned yet</div>
-                                )
-                            )}
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
+                                    <span style={{ fontWeight: 700 }}>Grand Total</span>
+                                    <span style={{ fontWeight: 800, color: 'var(--accent-primary)' }}>{'\u20B1'}{(selectedGroup.total_amount + selectedGroup.delivery_fee).toFixed(2)}</span>
+                                </div>
+                                {selectedGroup.delivery_address && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Delivery Address</span>
+                                        <span style={{ fontWeight: 600, textAlign: 'right', maxWidth: '60%' }}>{selectedGroup.delivery_address}</span>
+                                    </div>
+                                )}
+                            </div>
 
-                            {/* Walk-in: Verify Pickup button */}
-                            {isWalkin(selectedOrder) && selectedOrder.status === 'ready' && (
-                                <button
-                                    onClick={() => { handleConfirmWalkin(selectedOrder.id); setSelectedOrder(null); }}
-                                    disabled={confirming}
-                                    style={{
-                                        width: '100%', padding: '12px 0', borderRadius: 10, border: 'none',
-                                        background: '#10b981', color: '#fff', fontWeight: 700, fontSize: '0.9rem',
-                                        cursor: confirming ? 'not-allowed' : 'pointer', marginBottom: 8,
-                                        fontFamily: 'Inter, sans-serif',
-                                    }}
-                                >
-                                    {confirming ? 'Confirming...' : 'Verify Pickup'}
-                                </button>
-                            )}
-
-                            {/* Walk-in: Picked up info */}
-                            {isWalkin(selectedOrder) && selectedOrder.status === 'picked_up' && (
+                            {/* Delivery Info */}
+                            {selectedGroup.delivery_user_name ? (
                                 <div style={{
-                                    padding: 14, borderRadius: 10, background: 'rgba(14,165,233,0.08)',
-                                    border: '1px solid rgba(14,165,233,0.2)', marginBottom: 16,
-                                    textAlign: 'center', fontSize: '0.85rem', color: '#0ea5e9', fontWeight: 600,
-                                }}>Pickup verified — waiting for store to complete</div>
+                                    padding: 16, borderRadius: 10, background: 'rgba(59,130,246,0.08)',
+                                    border: '1px solid rgba(59,130,246,0.2)', marginBottom: 16,
+                                }}>
+                                    <h4 style={{ fontWeight: 700, marginBottom: 8, fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 6 }}><Truck size={16} /> Delivery Man Info</h4>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Name</span>
+                                        <span style={{ fontWeight: 600 }}>{selectedGroup.delivery_user_name}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>Contact</span>
+                                        <span style={{ fontWeight: 600 }}>{selectedGroup.delivery_user_contact || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{
+                                    padding: 14, borderRadius: 10, background: 'rgba(148,163,184,0.08)',
+                                    textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 16,
+                                }}>No delivery man assigned yet</div>
                             )}
 
-                            <button className="btn btn-outline" style={{ width: '100%' }} onClick={() => setSelectedOrder(null)}>Close</button>
+                            <button className="btn btn-outline" style={{ width: '100%' }} onClick={() => setSelectedGroup(null)}>Close</button>
                         </div>
                     </div>
                 );
             })()}
+
+            {/* Cancel Confirmation Modal */}
+            {cancelConfirmGroup && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+                    zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    animation: 'fadeIn 0.2s ease',
+                }} onClick={() => setCancelConfirmGroup(null)}>
+                    <div style={{
+                        background: 'var(--bg-primary, #1a1a2e)', borderRadius: 20, padding: 32,
+                        width: 420, maxWidth: '90vw', border: '1px solid var(--border-color, #333)',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                        animation: 'scaleIn 0.2s ease',
+                    }} onClick={e => e.stopPropagation()}>
+                        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                            <div style={{
+                                width: 56, height: 56, borderRadius: '50%', margin: '0 auto 16px',
+                                background: cancelConfirmGroup.status === 'ondeliver' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '1.5rem',
+                            }}>
+                                {cancelConfirmGroup.status === 'ondeliver' ? '\u26A0\uFE0F' : '\u274C'}
+                            </div>
+                            <h2 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: 8 }}>
+                                Cancel {cancelConfirmGroup.items.length > 1 ? 'Delivery Box' : 'Order'}?
+                            </h2>
+                            <p style={{ color: 'var(--text-secondary, #aaa)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                                {cancelConfirmGroup.items.length > 1
+                                    ? <>Are you sure you want to cancel this delivery box with <strong style={{ color: 'var(--text-primary, #fff)' }}>{cancelConfirmGroup.items.length} items</strong>?</>
+                                    : <>Are you sure you want to cancel your order for <strong style={{ color: 'var(--text-primary, #fff)' }}>{cancelConfirmGroup.items[0]?.product_title}</strong>?</>
+                                }
+                            </p>
+                        </div>
+
+                        <div style={{
+                            background: 'var(--bg-secondary, #16162a)', borderRadius: 12, padding: 16, marginBottom: 20,
+                        }}>
+                            {/* Show items in group */}
+                            {cancelConfirmGroup.items.length > 1 && (
+                                <div style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--border-color, #333)' }}>
+                                    {cancelConfirmGroup.items.map((item, idx) => (
+                                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: idx < cancelConfirmGroup.items.length - 1 ? 4 : 0 }}>
+                                            <span style={{ color: 'var(--text-muted, #888)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{item.product_title}</span>
+                                            <span style={{ fontWeight: 600 }}>{'\u20B1'}{item.amount.toFixed(2)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 8 }}>
+                                <span style={{ color: 'var(--text-muted, #888)' }}>Order Amount</span>
+                                <span style={{ fontWeight: 600 }}>{'\u20B1'}{cancelConfirmGroup.total_amount.toFixed(2)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: 8 }}>
+                                <span style={{ color: 'var(--text-muted, #888)' }}>Delivery Fee</span>
+                                <span style={{ fontWeight: 600 }}>{'\u20B1'}{(cancelConfirmGroup.delivery_fee || 0).toFixed(2)}</span>
+                            </div>
+                            {cancelConfirmGroup.status === 'ondeliver' && (
+                                <div style={{
+                                    display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem',
+                                    padding: '8px 0 0', borderTop: '1px solid var(--border-color, #333)',
+                                    marginTop: 8,
+                                }}>
+                                    <span style={{ color: '#f59e0b', fontWeight: 600 }}>Cancellation Fee</span>
+                                    <span style={{ color: '#f59e0b', fontWeight: 700 }}>{'\u20B1'}50.00</span>
+                                </div>
+                            )}
+                            <div style={{
+                                display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem',
+                                padding: '8px 0 0', borderTop: '1px solid var(--border-color, #333)',
+                                marginTop: 8,
+                            }}>
+                                <span style={{ fontWeight: 700, color: '#10b981' }}>Refund Amount</span>
+                                <span style={{ fontWeight: 800, color: '#10b981' }}>
+                                    {'\u20B1'}{(cancelConfirmGroup.total_amount + (cancelConfirmGroup.delivery_fee || 0) - (cancelConfirmGroup.status === 'ondeliver' ? 50 : 0)).toFixed(2)}
+                                </span>
+                            </div>
+                        </div>
+
+                        {cancelConfirmGroup.status === 'ondeliver' && (
+                            <div style={{
+                                background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)',
+                                borderRadius: 10, padding: '10px 14px', marginBottom: 20,
+                                fontSize: '0.8rem', color: '#f59e0b', lineHeight: 1.5,
+                            }}>
+                                {'\u26A0\uFE0F'} This order is already being delivered. A <strong>{'\u20B1'}50 cancellation fee</strong> will be deducted from your refund.
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button
+                                onClick={() => setCancelConfirmGroup(null)}
+                                style={{
+                                    flex: 1, padding: '12px 0', borderRadius: 12, border: '1px solid var(--border-color, #333)',
+                                    background: 'transparent', color: 'var(--text-primary, #fff)',
+                                    fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                    transition: 'all 0.15s',
+                                }}
+                            >Go Back</button>
+                            <button
+                                onClick={() => handleCancelGroup(cancelConfirmGroup)}
+                                style={{
+                                    flex: 1, padding: '12px 0', borderRadius: 12, border: 'none',
+                                    background: cancelConfirmGroup.status === 'ondeliver'
+                                        ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                                        : 'linear-gradient(135deg, #ef4444, #dc2626)',
+                                    color: '#fff',
+                                    fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                    boxShadow: cancelConfirmGroup.status === 'ondeliver'
+                                        ? '0 4px 15px rgba(245,158,11,0.3)'
+                                        : '0 4px 15px rgba(239,68,68,0.3)',
+                                    transition: 'all 0.15s',
+                                }}
+                            >Confirm Cancellation</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            <style>{`
+                @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+                @keyframes scaleIn { from { opacity: 0; transform: scale(0.95) } to { opacity: 1; transform: scale(1) } }
+            `}</style>
         </div>
     );
 }
