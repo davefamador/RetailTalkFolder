@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { register } from '../../lib/api';
+import Toast from '../components/Toast';
 
 export default function RegisterPage() {
     const [fullName, setFullName] = useState('');
@@ -28,7 +29,11 @@ export default function RegisterPage() {
         <div className="page auth-page">
             <div className="card auth-card">
                 <h2>Create Account</h2>
-                {error && <div className="alert alert-error">{error}</div>}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={error ? { type: 'error', text: error } : null} 
+                    onClose={() => setError('')} 
+                />
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label>Full Name</label>

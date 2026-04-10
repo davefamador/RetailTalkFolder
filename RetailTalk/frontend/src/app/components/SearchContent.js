@@ -2,6 +2,7 @@
 
 import { searchProducts, getStoredUser, getStoredAdmin, buyProduct } from '../../lib/api';
 import { useState, useEffect } from 'react';
+import Toast from './Toast';
 
 export default function SearchContent() {
     const [query, setQuery] = useState('');
@@ -216,7 +217,11 @@ export default function SearchContent() {
                 </div>
             )}
 
-            {error && <div className="alert alert-error">{error}</div>}
+            {/* ===== TOAST NOTIFICATION ===== */}
+            <Toast 
+                message={error ? { type: 'error', text: error } : purchaseError ? { type: 'error', text: purchaseError } : null} 
+                onClose={() => { setError(''); setPurchaseError(''); }} 
+            />
 
             {loading && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 60, gap: 12 }}>
@@ -321,11 +326,7 @@ export default function SearchContent() {
                                             <button onClick={() => setQuantity(quantity + 1)} style={{ width: 36, height: 36, background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}>+</button>
                                         </div>
                                     </div>
-                                    {purchaseError && (
-                                        <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', padding: '10px 14px', borderRadius: 8, marginBottom: 14, fontSize: '0.85rem' }}>
-                                            {purchaseError}
-                                        </div>
-                                    )}
+
                                     {user && user.role === 'buyer' && (
                                         <>
                                             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>+ PHP 90.00 delivery fee per department store</p>

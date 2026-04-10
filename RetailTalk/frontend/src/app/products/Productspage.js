@@ -230,66 +230,85 @@ export default function ProductsPage() {
                 </div>
             )}
 
-            <div className="product-grid">
-                {products.filter(p => !p.stock || p.stock > 0).map((p) => {
-                    const firstImage = p.images && p.images.length > 0 ? p.images[0] : null;
-
-                    return (
-                        <div
-                            key={p.id}
-                            onClick={() => openProduct(p)}
-                            style={{ cursor: 'pointer' }}
-                        >
-                            <div className="card product-card" style={{ height: '100%' }}>
-                                {/* Product Image */}
-                                <div style={{
-                                    width: '100%', height: 200, borderRadius: 8, overflow: 'hidden',
-                                    marginBottom: 14, background: 'var(--bg-secondary)',
-                                }}>
-                                    {firstImage ? (
-                                        <img
-                                            src={firstImage}
-                                            alt={p.title}
-                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                            onError={(e) => { e.target.style.display = 'none'; }}
-                                        />
-                                    ) : (
-                                        <div style={{
-                                            width: '100%', height: '100%',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            color: 'var(--text-muted)', fontSize: '0.85rem',
-                                        }}>No Image</div>
-                                    )}
-                                </div>
-
-                                {/* Product Info */}
-                                <div className="product-title">{p.title}</div>
-                                <p style={{
-                                    color: 'var(--text-secondary)', fontSize: '0.85rem',
-                                    marginBottom: 12, lineHeight: 1.5,
-                                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-                                }}>
-                                    {p.description || 'No description available'}
+            {/* ===== PRODUCTS GROUPED BY STORE ===== */}
+            {(() => {
+                const inStockProducts = products.filter(p => !p.stock || p.stock > 0);
+                // Group by seller_name
+                const storeMap = {};
+                inStockProducts.forEach(p => {
+                    const store = p.seller_name || 'Seller';
+                    if (!storeMap[store]) storeMap[store] = [];
+                    storeMap[store].push(p);
+                });
+                const stores = Object.entries(storeMap);
+                return stores.map(([storeName, storeProducts]) => (
+                    <div key={storeName} style={{ marginBottom: 40 }}>
+                        {/* Store header */}
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+                            paddingBottom: 12, borderBottom: '1px solid var(--border-color)',
+                        }}>
+                            <div style={{
+                                width: 36, height: 36, borderRadius: 10,
+                                background: 'linear-gradient(135deg, rgba(108,99,255,0.2) 0%, rgba(0,212,170,0.15) 100%)',
+                                border: '1px solid rgba(108,99,255,0.25)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '1rem', flexShrink: 0,
+                            }}>🏪</div>
+                            <div>
+                                <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>{storeName}</h2>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                    {storeProducts.length} product{storeProducts.length !== 1 ? 's' : ''}
                                 </p>
-
-                                <div className="product-price">PHP {parseFloat(p.price).toFixed(2)}</div>
-
-                                <div className="product-meta">
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                        {p.seller_name || 'Seller'}
-                                    </span>
-                                    <span style={{
-                                        marginLeft: 'auto', fontSize: '0.75rem', fontWeight: 600,
-                                        color: (p.stock || 0) > 0 ? 'var(--accent-success)' : 'var(--accent-danger)',
-                                    }}>
-                                        {(p.stock || 0) > 0 ? `${p.stock} in stock` : 'Out of stock'}
-                                    </span>
-                                </div>
                             </div>
                         </div>
-                    );
-                })}
-            </div>
+                        <div className="product-grid">
+                            {storeProducts.map(p => {
+                                const firstImage = p.images && p.images.length > 0 ? p.images[0] : null;
+                                return (
+                                    <div key={p.id} onClick={() => openProduct(p)} style={{ cursor: 'pointer' }}>
+                                        <div className="card product-card" style={{ height: '100%' }}>
+                                            <div style={{
+                                                width: '100%', height: 200, borderRadius: 8, overflow: 'hidden',
+                                                marginBottom: 14, background: 'var(--bg-secondary)',
+                                            }}>
+                                                {firstImage ? (
+                                                    <img src={firstImage} alt={p.title}
+                                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                                    />
+                                                ) : (
+                                                    <div style={{
+                                                        width: '100%', height: '100%',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        color: 'var(--text-muted)', fontSize: '0.85rem',
+                                                    }}>No Image</div>
+                                                )}
+                                            </div>
+                                            <div className="product-title">{p.title}</div>
+                                            <p style={{
+                                                color: 'var(--text-secondary)', fontSize: '0.85rem',
+                                                marginBottom: 12, lineHeight: 1.5,
+                                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                                            }}>
+                                                {p.description || 'No description available'}
+                                            </p>
+                                            <div className="product-price">PHP {parseFloat(p.price).toFixed(2)}</div>
+                                            <div className="product-meta">
+                                                <span style={{ fontSize: '0.75rem', fontWeight: 600, marginLeft: 'auto',
+                                                    color: (p.stock || 0) > 0 ? 'var(--accent-success)' : 'var(--accent-danger)',
+                                                }}>
+                                                    {(p.stock || 0) > 0 ? `${p.stock} in stock` : 'Out of stock'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ));
+            })()}
 
             {/* ===== PRODUCT DETAIL MODAL ===== */}
             <ProductDetailModal

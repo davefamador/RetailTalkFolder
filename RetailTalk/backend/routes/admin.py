@@ -75,6 +75,7 @@ class TransactionDetail(BaseModel):
     purchase_type: str = "delivery"
     product_images: list = []
     created_at: str
+    delivery_user_name: Optional[str] = None
 
 
 class DailyIncome(BaseModel):
@@ -142,8 +143,10 @@ class AdminProductResponse(BaseModel):
 
 class AdminUpdateProductRequest(BaseModel):
     title: Optional[str] = None
+    description: Optional[str] = None
     price: Optional[float] = None
     stock: Optional[int] = None
+    images: Optional[list[str]] = None
     is_active: Optional[bool] = None
 
 
@@ -379,9 +382,13 @@ async def list_transactions(
 
     # Get all user IDs we need names for
     user_ids = set()
+    delivery_user_ids = set()
     for t in txns.data:
         user_ids.add(t["buyer_id"])
         user_ids.add(t["seller_id"])
+        if t.get("delivery_user_id"):
+            delivery_user_ids.add(t["delivery_user_id"])
+            user_ids.add(t["delivery_user_id"])
 
     users_result = sb.table("users").select("id, full_name, department_id").in_("id", list(user_ids)).execute()
     user_map = {u["id"]: u for u in users_result.data} if users_result.data else {}
@@ -425,6 +432,9 @@ async def list_transactions(
         if t.get("products") and isinstance(t["products"], dict):
             product_images = t["products"].get("images", []) or []
 
+        delivery_uid = t.get("delivery_user_id")
+        delivery_user_name = user_map.get(delivery_uid, {}).get("full_name") if delivery_uid else None
+
         results.append(TransactionDetail(
             id=t["id"],
             buyer_name=buyer_name,
@@ -439,6 +449,7 @@ async def list_transactions(
             purchase_type=t.get("purchase_type", "delivery"),
             product_images=product_images,
             created_at=t["created_at"],
+            delivery_user_name=delivery_user_name,
         ))
 
     return results
@@ -697,7 +708,7 @@ async def admin_update_product(
     if not existing.data:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    update_data = {k: v for k, v in req.model_dump().items() if v is not None}
+    update_data = {k: v for k, v in req.model_dump().items() if k in req.model_fields_set}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 

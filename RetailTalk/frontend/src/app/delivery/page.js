@@ -8,6 +8,7 @@ import {
     getRestockDeliveryQueue, acceptRestockDelivery, completeRestockDelivery, getActiveRestockDeliveries,
     getRestockDeliveryHistory, logout
 } from '../../lib/api';
+import Toast from '../components/Toast';
 
 const STATUS_COLORS = {
     approved: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
@@ -76,6 +77,7 @@ export default function DeliveryPage() {
     const [restockHistory, setRestockHistory] = useState([]);
     const [historyFilter, setHistoryFilter] = useState('delivery');
     const [historyTab, setHistoryTab] = useState('delivery');
+    const [confirmModal, setConfirmModal] = useState(null); // { groupId, status }
 
     useEffect(() => {
         const u = getStoredUser();
@@ -83,6 +85,8 @@ export default function DeliveryPage() {
         if (u && u.role === 'delivery') loadAll();
         else setLoading(false);
     }, []);
+
+
 
     const loadAll = async () => {
         setLoading(true);
@@ -331,18 +335,11 @@ export default function DeliveryPage() {
 
             {/* ===== MAIN CONTENT ===== */}
             <main style={{ marginLeft: 260, flex: 1, padding: '32px 40px', maxWidth: 1200 }}>
-                {err && (
-                    <div className="alert alert-error" style={{ marginBottom: 16 }}>
-                        {err}
-                        <button onClick={() => setErr('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}>✕</button>
-                    </div>
-                )}
-                {msg && (
-                    <div className="alert alert-success" style={{ marginBottom: 16 }}>
-                        {msg}
-                        <button onClick={() => setMsg('')} style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700 }}>✕</button>
-                    </div>
-                )}
+            {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={err ? { type: 'error', text: err } : msg ? { type: 'success', text: msg } : null} 
+                    onClose={() => { setErr(''); setMsg(''); }} 
+                />
 
                 {loading && (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 0', gap: 16 }}>
@@ -462,6 +459,49 @@ export default function DeliveryPage() {
                         {/* === Product Delivery === */}
                         {historyFilter === 'delivery' && (
                             <div>
+                                {/* ===== APPROVED ORDERS BOX ===== */}
+                                <div style={{
+                                    background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.06) 100%)',
+                                    border: '1px solid rgba(16,185,129,0.3)', borderRadius: 14, padding: 20, marginBottom: 24,
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: available.length > 0 ? 14 : 0 }}>
+                                        <span style={{ fontSize: '1.1rem' }}>✅</span>
+                                        <div>
+                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#10b981' }}>
+                                                Approved Orders ({available.length})
+                                            </h3>
+                                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                                {available.length > 0 ? 'Ready to pick up — scroll down to claim a box' : 'No approved orders available right now'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {available.length > 0 && (
+                                        <div style={{ display: 'grid', gap: 8 }}>
+                                            {available.map(g => (
+                                                <div key={g.group_id} style={{
+                                                    background: 'var(--bg-card)', borderRadius: 10, padding: 12,
+                                                    border: '1px solid rgba(16,185,129,0.2)',
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+                                                }}>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>📦 {g.buyer_name}</div>
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                            Store: {g.seller_name} · PHP {g.total_amount?.toFixed(2)} + PHP {g.delivery_fee?.toFixed(2)} fee
+                                                        </div>
+                                                        {g.delivery_address && (
+                                                            <div style={{ fontSize: '0.73rem', color: 'var(--accent-primary)', marginTop: 2 }}>📍 {g.delivery_address}</div>
+                                                        )}
+                                                    </div>
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
+                                                        background: 'rgba(16,185,129,0.15)', color: '#10b981', flexShrink: 0,
+                                                    }}>Ready</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* Active Deliveries */}
                                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
                                     Active Deliveries ({active.length}/5)
@@ -503,9 +543,9 @@ export default function DeliveryPage() {
                                                     <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 8 }}>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'delivered')}
+                                                    <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'delivered' })}
                                                         style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>Delivered</button>
-                                                    <button className="btn btn-sm" onClick={() => handleStatus(g.group_id, 'undelivered')}
+                                                    <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'undelivered' })}
                                                         style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', fontWeight: 600 }}>Undelivered</button>
                                                 </div>
                                             </div>
@@ -817,6 +857,43 @@ export default function DeliveryPage() {
                 )}
 
             </main>
+
+            {/* Confirm Delivered/Undelivered Modal */}
+            {confirmModal && (
+                <div
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+                    onClick={() => setConfirmModal(null)}
+                >
+                    <div className="card" style={{ maxWidth: 380, width: '90%', padding: 32 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ fontSize: '2rem', textAlign: 'center', marginBottom: 12 }}>
+                            {confirmModal.status === 'delivered' ? '✅' : '⚠️'}
+                        </div>
+                        <h3 style={{ textAlign: 'center', fontWeight: 800, marginBottom: 8 }}>
+                            {confirmModal.status === 'delivered' ? 'Mark as Delivered?' : 'Mark as Undelivered?'}
+                        </h3>
+                        <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.88rem', marginBottom: 24 }}>
+                            {confirmModal.status === 'delivered'
+                                ? 'Confirm that this delivery box was successfully delivered to the buyer.'
+                                : 'Confirm that this delivery box could not be delivered.'}
+                        </p>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => setConfirmModal(null)}>Cancel</button>
+                            <button
+                                className="btn"
+                                style={{
+                                    flex: 1, fontWeight: 700,
+                                    background: confirmModal.status === 'delivered' ? 'rgba(0,212,170,0.2)' : 'rgba(239,68,68,0.2)',
+                                    color: confirmModal.status === 'delivered' ? '#00d4aa' : '#ef4444',
+                                    border: 'none',
+                                }}
+                                onClick={() => { handleStatus(confirmModal.groupId, confirmModal.status); setConfirmModal(null); }}
+                            >
+                                {confirmModal.status === 'delivered' ? 'Yes, Delivered' : 'Yes, Undelivered'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Contact Modal */}
             {contactModal && (

@@ -19,6 +19,18 @@ import {
     adminCreateProductForDept, uploadProductImage,
     adminGetSalaries, adminSetSalary, adminPayAll, adminPayStore, adminPayIndividual,
 } from '../../../lib/api';
+import Toast from '../../components/Toast';
+
+// -- Helper to format date labels -------------------------
+const formatChartLabel = (labelStr) => {
+    if (!labelStr) return '';
+    if (typeof labelStr === 'string' && /^\d{4}-\d{2}$/.test(labelStr)) {
+        const [y, m] = labelStr.split('-');
+        return new Date(parseInt(y), parseInt(m) - 1, 1).toLocaleString('default', { month: 'long' });
+    }
+    return labelStr;
+};
+
 // -- Line Chart Component ---------------------------------
 function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220, prefix = 'PHP ' }) {
     const canvasRef = useRef(null);
@@ -81,7 +93,8 @@ function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height 
         ctx.textAlign = 'center';
         data.forEach((d, i) => {
             const x = padding.left + i * stepX;
-            const label = d[labelKey].length > 8 ? d[labelKey].slice(-5) : d[labelKey];
+            let label = formatChartLabel(d[labelKey]);
+            if (label === d[labelKey] && label.length > 8) label = label.slice(-5);
             ctx.save();
             ctx.translate(x, h - 5);
             ctx.rotate(-0.4);
@@ -154,7 +167,8 @@ function DualLineChart({ data, labelKey, valueKey1, valueKey2, color1 = '#10b981
         ctx.textAlign = 'center';
         data.forEach((d, i) => {
             const x = padding.left + i * stepX;
-            const lbl = d[labelKey].length > 8 ? d[labelKey].slice(-5) : d[labelKey];
+            let lbl = formatChartLabel(d[labelKey]);
+            if (lbl === d[labelKey] && lbl.length > 8) lbl = lbl.slice(-5);
             ctx.save();
             ctx.translate(x, h - 5);
             ctx.rotate(-0.4);
@@ -247,8 +261,11 @@ function MultiLineChart({ data, labelKey, lines, title, height = 220, prefix = '
         ctx.textAlign = 'center';
         data.forEach((d, i) => {
             const x = padding.left + i * stepX;
-            const lbl = d[labelKey] || '';
-            const label = lbl.length > 14 ? lbl.slice(-14) : lbl;
+            let lbl = formatChartLabel(d[labelKey]);
+            let label = lbl;
+            if (lbl === d[labelKey]) {
+                label = lbl.length > 14 ? lbl.slice(-14) : lbl;
+            }
             ctx.save();
             ctx.translate(x, h - 15);
             ctx.rotate(-0.4);
@@ -292,7 +309,7 @@ function MultiLineChart({ data, labelKey, lines, title, height = 220, prefix = '
                 x: x,
                 y: y,
                 w: w,
-                date: data[closestIdx][labelKey],
+                date: formatChartLabel(data[closestIdx][labelKey]),
                 items: tooltipData.sort((a,b) => b.val - a.val)
             });
         } else {
@@ -517,7 +534,8 @@ function VerticalBarChart({ data, labelKey, valueKey, title, color = '#6366f1', 
         ctx.textAlign = 'center';
         data.forEach((d, i) => {
             const x = offsetX + i * (barWidth + barGap) + barWidth / 2;
-            const label = d[labelKey].length > 7 ? d[labelKey].slice(-7) : d[labelKey];
+            let label = formatChartLabel(d[labelKey]);
+            if (label === d[labelKey] && label.length > 7) label = label.slice(-7);
             ctx.save();
             ctx.translate(x, h - 5);
             ctx.rotate(-0.4);
@@ -591,18 +609,7 @@ export default function AdminDashboard() {
     const [admin, setAdmin] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
     const [activeTab, setActiveTab] = useState('dashboard');
-    const [adminTheme, setAdminTheme] = useState('dark');
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-    // Theme persistence
-    useEffect(() => {
-        const saved = localStorage.getItem('adminTheme');
-        if (saved) setAdminTheme(saved);
-    }, []);
-    const toggleTheme = () => {
-        const next = adminTheme === 'dark' ? 'light' : 'dark';
-        setAdminTheme(next);
-        localStorage.setItem('adminTheme', next);
-    };
     const [stats, setStats] = useState(null);
     const [users, setUsers] = useState([]);
     const [userSearch, setUserSearch] = useState('');
@@ -618,8 +625,8 @@ export default function AdminDashboard() {
     // Products state
     const [products, setProducts] = useState([]);
     const [productSearch, setProductSearch] = useState('');
-    const [editProductId, setEditProductId] = useState(null);
-    const [editProductData, setEditProductData] = useState({});
+    const [productModal, setProductModal] = useState(null);
+    const [productModalUploading, setProductModalUploading] = useState(false);
     // Shared confirm dialog
     const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
     // Inventory tab state
@@ -693,6 +700,7 @@ export default function AdminDashboard() {
     const [salaryConfirm, setSalaryConfirm] = useState(null);
     const [salaryPayLoading, setSalaryPayLoading] = useState(false);
     const [salaryBoxMessage, setSalaryBoxMessage] = useState({ type: '', text: '' });
+
     useEffect(() => {
         const stored = getStoredAdmin();
         if (!stored || stored.role !== 'admin') {
@@ -1046,14 +1054,67 @@ export default function AdminDashboard() {
             setMessage({ type: 'error', text: 'Failed to submit restock: ' + e.message });
         }
     };
-    const handleUpdateProduct = async (productId) => {
+    const handleUpdateProduct = async () => {
+        if (!productModal.title || !productModal.title.trim()) {
+            setMessage({ type: 'error', text: 'Product title is required' });
+            return;
+        }
+        if (productModal.price === undefined || productModal.price === null || productModal.price === '') {
+            setMessage({ type: 'error', text: 'Product price is required' });
+            return;
+        }
+        if (productModal.stock === undefined || productModal.stock === null || productModal.stock === '') {
+            setMessage({ type: 'error', text: 'Product stock is required' });
+            return;
+        }
+        if (!productModal.images || productModal.images.length === 0) {
+            setMessage({ type: 'error', text: 'At least 1 product image is required' });
+            return;
+        }
         try {
-            await adminUpdateProduct(productId, editProductData);
-            setMessage({ type: 'success', text: 'Product updated' });
-            setEditProductId(null);
-            setEditProductData({});
+            await adminUpdateProduct(productModal.id, {
+                title: productModal.title,
+                description: productModal.description,
+                price: productModal.price,
+                stock: productModal.stock,
+                images: productModal.images,
+                is_active: productModal.is_active
+            });
+            setMessage({ type: 'success', text: 'Product updated successfully' });
+            setProductModal(null);
             loadProducts(productSearch);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    };
+
+    const handleProductModalImageUpload = async (e) => {
+        const files = Array.from(e.target.files);
+        if ((productModal.images?.length || 0) + files.length > 5) {
+            setMessage({ type: 'error', text: 'Maximum 5 images allowed' });
+            return;
+        }
+        setProductModalUploading(true);
+        try {
+            const newImageUrls = [];
+            for (const file of files) {
+                const result = await uploadProductImage(file);
+                newImageUrls.push(result.url);
+            }
+            setProductModal(prev => ({
+                ...prev,
+                images: [...(prev.images || []), ...newImageUrls]
+            }));
+        } catch (err) {
+            setMessage({ type: 'error', text: 'Image upload failed: ' + err.message });
+        } finally {
+            setProductModalUploading(false);
+        }
+    };
+
+    const removeProductModalImage = (index) => {
+        setProductModal(prev => ({
+            ...prev,
+            images: prev.images.filter((_, i) => i !== index)
+        }));
     };
     const handleDeleteProduct = (productId, productTitle) => {
         setConfirmDialog({
@@ -1143,8 +1204,7 @@ export default function AdminDashboard() {
         },
     ];
     const sidebarWidth = sidebarCollapsed ? 68 : 240;
-    const isDark = adminTheme === 'dark';
-    const adminVars = isDark ? {
+    const adminVars = {
         '--admin-bg': '#131318',
         '--admin-sidebar-bg': '#1a1a22',
         '--admin-header-bg': '#1a1a22',
@@ -1159,21 +1219,6 @@ export default function AdminDashboard() {
         '--admin-section-label': '#555566',
         '--admin-hover': 'rgba(255,255,255,0.04)',
         '--admin-accent': '#6366f1',
-    } : {
-        '--admin-bg': '#eaecf0',
-        '--admin-sidebar-bg': '#f8f9fb',
-        '--admin-header-bg': '#f8f9fb',
-        '--admin-card-bg': '#ffffff',
-        '--admin-border': '#d1d5db',
-        '--admin-text': '#111827',
-        '--admin-text-secondary': '#374151',
-        '--admin-text-muted': '#6b7280',
-        '--admin-sidebar-text': '#4b5563',
-        '--admin-active-bg': 'rgba(99,102,241,0.10)',
-        '--admin-active-text': '#4338ca',
-        '--admin-section-label': '#6b7280',
-        '--admin-hover': 'rgba(0,0,0,0.04)',
-        '--admin-accent': '#4338ca',
     };
     return (
         <div id="admin-dashboard" style={{ display: 'flex', minHeight: '100vh', background: 'var(--admin-bg)', color: 'var(--admin-text)', ...adminVars }}>
@@ -1208,6 +1253,8 @@ export default function AdminDashboard() {
                 #admin-dashboard .form-group input:focus, #admin-dashboard .form-group select:focus { outline: none; border-color: var(--admin-accent); }
                 @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
                 @keyframes fadeScaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+                @keyframes toastSlideIn { from { transform: translateX(-120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+                @keyframes toastFadeOut { from { opacity: 1; } to { opacity: 0; } }
             `}</style>
             {/* ===== SIDEBAR ===== */}
             <aside style={{
@@ -1251,21 +1298,8 @@ export default function AdminDashboard() {
                         </div>
                     ))}
                 </nav>
-                {/* Theme toggle + user */}
+                {/* User info */}
                 <div style={{ borderTop: '1px solid var(--admin-border)', padding: sidebarCollapsed ? '12px 0' : '12px 14px' }}>
-                    {/* Theme toggle */}
-                    <button onClick={toggleTheme} title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'} style={{
-                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                        padding: sidebarCollapsed ? '8px 0' : '8px 16px',
-                        background: 'var(--admin-hover)', border: '1px solid var(--admin-border)',
-                        borderRadius: 8, cursor: 'pointer', marginBottom: 10,
-                        color: 'var(--admin-sidebar-text)', fontFamily: 'Inter, sans-serif',
-                        fontSize: '0.8rem', justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                        transition: 'all 0.15s',
-                    }}>
-                        {isDark ? <Sun size={16} /> : <Moon size={16} />}
-                        {!sidebarCollapsed && (isDark ? 'Light Mode' : 'Dark Mode')}
-                    </button>
                     {/* User info */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: sidebarCollapsed ? 'center' : 'flex-start' }}>
                         <div style={{
@@ -1313,7 +1347,7 @@ export default function AdminDashboard() {
                             onClick={() => setActiveTab('withdraw')}
                             style={{
                                 display: 'flex', alignItems: 'center', gap: 8,
-                                background: isDark ? 'rgba(99,102,241,0.1)' : 'rgba(99,102,241,0.08)',
+                                background: 'rgba(99,102,241,0.1)',
                                 border: '1px solid rgba(99,102,241,0.2)',
                                 borderRadius: 8, padding: '6px 14px',
                                 cursor: 'pointer', transition: 'all 0.2s',
@@ -1327,7 +1361,7 @@ export default function AdminDashboard() {
                         <div style={{
                             display: 'flex', alignItems: 'center', gap: 6,
                             padding: '6px 12px', borderRadius: 8,
-                            background: isDark ? 'rgba(16,185,129,0.1)' : 'rgba(16,185,129,0.08)',
+                            background: 'rgba(16,185,129,0.1)',
                             color: '#10b981', fontSize: '0.82rem', fontWeight: 600,
                         }}>
                             {admin?.full_name?.split(' ')[0] || 'Admin'}
@@ -1335,15 +1369,14 @@ export default function AdminDashboard() {
                     </div>
                 </header>
                 <div style={{ padding: '28px 32px', maxWidth: 1200, flex: 1 }}>
-                    {message.text && (
-                        <div className={`alert alert-${message.type}`} style={{ marginBottom: 16 }}>
-                            {message.text}
-                            <button onClick={() => setMessage({ type: '', text: '' })} style={{
-                                float: 'right', background: 'none', border: 'none',
-                                cursor: 'pointer', color: 'inherit', fontWeight: 700,
-                            }}><X size={16} /></button>
-                        </div>
-                    )}
+                    {/* ===== TOAST NOTIFICATION ===== */}
+                    <Toast 
+                        message={message.text ? message : salaryBoxMessage} 
+                        onClose={() => {
+                            if (message.text) setMessage({ type: '', text: '' });
+                            else setSalaryBoxMessage({ type: '', text: '' });
+                        }} 
+                    />
                     {/* ===== DASHBOARD TAB ===== */}
                     {activeTab === 'dashboard' && (
                         <div>
@@ -2134,15 +2167,6 @@ export default function AdminDashboard() {
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            {/* Delivery Earnings */}
-                                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Monthly Earnings</h3>
-                                                            <div style={{ padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)', marginBottom: 20 }}>
-                                                                <LineChart
-                                                                    data={selectedDeptDetail.delivery_earnings || []}
-                                                                    labelKey="date" valueKey="amount"
-                                                                    title="Delivery Earnings" color="#3b82f6" height={150}
-                                                                />
-                                                            </div>
                                                             {/* Staff List — Clickable */}
                                                             <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}>Staff ({selectedDeptDetail.staff?.length || 0})</h3>
                                                             {selectedDeptDetail.staff && selectedDeptDetail.staff.length > 0 ? (
@@ -2919,6 +2943,7 @@ export default function AdminDashboard() {
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
                                                 </tr>
                                             </thead>
@@ -2949,6 +2974,9 @@ export default function AdminDashboard() {
                                                                     background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
                                                                 }}>{sLabel}</span>
                                                             </td>
+                                                            <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>
+                                                                {t.delivery_user_name || '—'}
+                                                            </td>
                                                             <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                                 {new Date(t.created_at).toLocaleString()}
                                                             </td>
@@ -2974,6 +3002,7 @@ export default function AdminDashboard() {
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
                                                 </tr>
                                             </thead>
@@ -3003,6 +3032,9 @@ export default function AdminDashboard() {
                                                                     padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
                                                                     background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
                                                                 }}>{sLabel}</span>
+                                                            </td>
+                                                            <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>
+                                                                {t.delivery_user_name || '—'}
                                                             </td>
                                                             <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                                 {new Date(t.created_at).toLocaleString()}
@@ -3062,50 +3094,41 @@ export default function AdminDashboard() {
                                             <table className="data-table">
                                                 <thead>
                                                     <tr>
-                                                        <th>Product</th><th>Price</th><th>Stock</th><th>Created</th><th>Actions</th>
+                                                        <th>Image</th><th>Title</th><th>Price</th><th>Stock</th><th>Created</th><th>Actions</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {storeProducts.map(p => (
-                                                        <tr key={p.id}>
-                                                            <td style={{ fontWeight: 500 }}>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="text" defaultValue={p.title}
-                                                                        onChange={e => setEditProductData({ ...editProductData, title: e.target.value })}
-                                                                        style={{ width: 180, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : p.title}
+                                                        <tr key={p.id} onClick={(e) => {
+                                                            if (e.target.closest('button')) return;
+                                                            setProductModal({ ...p });
+                                                        }} style={{ cursor: 'pointer' }} className="hover-row">
+                                                            <td>
+                                                                {p.images && p.images.length > 0 ? (
+                                                                    <img src={p.images[0]} alt="product" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+                                                                ) : (
+                                                                    <div style={{ width: 40, height: 40, background: 'var(--admin-hover)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                                        <Box size={16} color="var(--admin-text-muted)" />
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td style={{ fontWeight: 700, color: 'var(--admin-text)' }}>
+                                                                {p.title}
                                                             </td>
                                                             <td>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="number" defaultValue={p.price} step="0.01"
-                                                                        onChange={e => setEditProductData({ ...editProductData, price: parseFloat(e.target.value) })}
-                                                                        style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : <span style={{ fontWeight: 600 }}>PHP {p.price.toFixed(2)}</span>}
+                                                                <span style={{ fontWeight: 600 }}>PHP {p.price.toFixed(2)}</span>
                                                             </td>
                                                             <td>
-                                                                {editProductId === p.id ? (
-                                                                    <input type="number" defaultValue={p.stock}
-                                                                        onChange={e => setEditProductData({ ...editProductData, stock: parseInt(e.target.value) })}
-                                                                        style={{ width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--admin-border)', background: 'var(--admin-card-bg)', color: 'var(--admin-text)' }} />
-                                                                ) : <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>}
+                                                                <span style={{ color: p.stock <= 0 ? '#ef4444' : p.stock <= 5 ? '#f59e0b' : '#10b981', fontWeight: 600 }}>{p.stock}</span>
                                                             </td>
                                                             <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
                                                                 {new Date(p.created_at).toLocaleDateString()}
                                                             </td>
                                                             <td>
-                                                                {editProductId === p.id ? (
-                                                                    <div style={{ display: 'flex', gap: 4 }}>
-                                                                        <button className="btn btn-success btn-sm" onClick={() => handleUpdateProduct(p.id)} style={{ padding: '4px 8px' }}>Yes</button>
-                                                                        <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(null); setEditProductData({}); }} style={{ padding: '4px 8px' }}>No</button>
-                                                                    </div>
-                                                                ) : (
-                                                                    <div style={{ display: 'flex', gap: 4 }}>
-                                                                        <button className="btn btn-outline btn-sm" onClick={() => { setEditProductId(p.id); setEditProductData({}); }}
-                                                                            style={{ fontSize: '0.75rem' }}>Edit</button>
-                                                                        <button className="btn btn-sm" onClick={() => handleDeleteProduct(p.id, p.title)}
-                                                                            style={{ fontSize: '0.75rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>Delete</button>
-                                                                    </div>
-                                                                )}
+                                                                <div style={{ display: 'flex', gap: 4 }}>
+                                                                    <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); handleDeleteProduct(p.id, p.title); }}
+                                                                        style={{ fontSize: '0.75rem', background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>Delete</button>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     ))}
@@ -4731,6 +4754,75 @@ export default function AdminDashboard() {
                     `}</style>
                 </>
             )}
+            {/* ===== PRODUCT MODAL ===== */}
+            {productModal && (
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }} onClick={() => setProductModal(null)}>
+                    <div style={{
+                        background: 'var(--admin-card-bg)', width: '90%', maxWidth: 500,
+                        borderRadius: 12, padding: 24, paddingBottom: 24, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+                        position: 'relative', overflowY: 'auto', maxHeight: '90vh'
+                    }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                            <h2 style={{ fontSize: '1.25rem', fontWeight: 800 }}>Edit Product</h2>
+                            <button onClick={() => setProductModal(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--admin-text-secondary)' }}><X size={20}/></button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Title</label>
+                                <input type="text" value={productModal.title || ''}
+                                    onChange={e => setProductModal({ ...productModal, title: e.target.value })}
+                                    style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--admin-border)', background: 'var(--admin-bg)', color: 'var(--admin-text)' }} />
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Price (PHP)</label>
+                                    <input type="number" step="0.01" value={productModal.price || 0}
+                                        onChange={e => setProductModal({ ...productModal, price: parseFloat(e.target.value) })}
+                                        style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--admin-border)', background: 'var(--admin-bg)', color: 'var(--admin-text)' }} />
+                                </div>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Stock</label>
+                                    <input type="number" value={productModal.stock || 0}
+                                        onChange={e => setProductModal({ ...productModal, stock: parseInt(e.target.value) })}
+                                        style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid var(--admin-border)', background: 'var(--admin-bg)', color: 'var(--admin-text)' }} />
+                                </div>
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', marginBottom: 6, fontSize: '0.85rem', fontWeight: 600 }}>Images ({productModal.images?.length || 0}/5)</label>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                                    {(productModal.images || []).map((url, i) => (
+                                        <div key={i} style={{ position: 'relative', width: 70, height: 70, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--admin-border)' }}>
+                                            <img src={url} alt="Product" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            <button onClick={() => removeProductModalImage(i)}
+                                                style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(239,68,68,0.9)', color: '#fff', border: 'none', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    {(productModal.images?.length || 0) < 5 && (
+                                        <label style={{ display: 'flex', width: 70, height: 70, border: '1px dashed var(--admin-border)', borderRadius: 8, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', background: 'var(--admin-hover)' }}>
+                                            {productModalUploading ? <span style={{ fontSize: '0.8rem' }}>...</span> : <div style={{ fontSize: '1.5rem', color: 'var(--admin-text-muted)' }}>+</div>}
+                                            <input type="file" multiple accept="image/*" style={{ display: 'none' }} disabled={productModalUploading} onChange={handleProductModalImageUpload} />
+                                        </label>
+                                    )}
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                                <input type="checkbox" id="isActiveProduct" checked={productModal.is_active !== false}
+                                    onChange={e => setProductModal({ ...productModal, is_active: e.target.checked })} />
+                                <label htmlFor="isActiveProduct" style={{ fontSize: '0.85rem', fontWeight: 500 }}>Product is active</label>
+                            </div>
+                            <button className="btn btn-primary" onClick={handleUpdateProduct} style={{ width: '100%', padding: '12px', marginTop: 10 }}>
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ===== CONFIRM DIALOG ===== */}
             {confirmDialog && (
                 <>

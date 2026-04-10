@@ -580,6 +580,13 @@ export async function managerGetProducts(search = '') {
     return apiFetch(`/manager/products${q}`);
 }
 
+export async function managerUpdateProduct(productId, data) {
+    return apiFetch(`/manager/products/${productId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
 export async function managerGetTransactions(search = '') {
     const q = search ? `?search=${encodeURIComponent(search)}` : '';
     return apiFetch(`/manager/transactions${q}`);

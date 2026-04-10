@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getBalance, topUp, withdraw, getSVFHistory, getStoredUser } from '../../lib/api';
+import Toast from '../components/Toast';
 
 export default function WalletPage() {
     const [balance, setBalance] = useState(null);
@@ -137,9 +138,11 @@ export default function WalletPage() {
             {/* Top Up */}
             <div className="card" style={{ marginBottom: 24 }}>
                 <h3 style={{ marginBottom: 16 }}>➕ Add Funds</h3>
-                {message.text && (
-                    <div className={`alert alert-${message.type}`}>{message.text}</div>
-                )}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={message} 
+                    onClose={() => setMessage({ type: '', text: '' })} 
+                />
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                     {quickAmounts.map((amt) => (
                         <button

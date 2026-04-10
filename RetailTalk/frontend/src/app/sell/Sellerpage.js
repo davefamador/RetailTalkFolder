@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { createProduct, getMyProducts, updateProduct, deleteProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
+import { createProduct, getMyProducts, updateProduct, getStoredUser, logout, uploadProductImage, createRestockRequest, getMyRestockRequests, getStaffDeliveryOrders, updateDeliveryOrderStatus, getTransactionHistory, getBalance, withdraw, getSellerWishlistReport, getSalaryHistory } from '../../lib/api';
 import SearchContent from '../components/SearchContent';
+import Toast from '../components/Toast';
 import {
     LayoutDashboard, Tag, ShoppingCart, Truck, Package,
     Search, ClipboardList, Heart, LogOut, TrendingUp, DollarSign,
@@ -209,18 +210,6 @@ export default function SellPage() {
         setShowForm(false);
     };
 
-    const startEdit = (product) => {
-        setEditingProduct(product);
-        setTitle(product.title);
-        setDescription(product.description || '');
-        setPrice(product.price.toString());
-        setStock((product.stock || 0).toString());
-        const existing = (product.images || []).map(url => ({ file: null, preview: url, url }));
-        setImageFiles(existing);
-        setShowForm(true);
-        setError('');
-        setSuccess('');
-    };
 
     // --- Drag & Drop ---
     const handleDrag = (e) => {
@@ -314,15 +303,6 @@ export default function SellPage() {
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this product?')) return;
-        try {
-            await deleteProduct(id);
-            loadProducts();
-        } catch (err) {
-            setError(err.message);
-        }
-    };
 
     const handleLogout = () => { logout(); window.location.href = '/login'; };
 
@@ -362,9 +342,7 @@ export default function SellPage() {
                     <SidebarItem icon={Package} label="Restock" active={activeSection === 'restock'} onClick={() => setActiveSection('restock')} badge={restockRequests.length} />
 
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
-
-                    <SidebarItem icon={Search} label="Search" active={activeSection === 'search'} onClick={() => setActiveSection('search')} />
-                    <SidebarItem icon={ClipboardList} label="Order History" active={activeSection === 'orderhistory'} onClick={() => setActiveSection('orderhistory')} />
+                    <SidebarItem icon={ClipboardList} label="Order History" active={activeSection === 'orderhistory'} onClick={() => { setActiveSection('orderhistory'); loadDashboardData(); }} />
                     <SidebarItem icon={Heart} label="Wishlist Analytics" active={activeSection === 'wishlist'} onClick={() => { setActiveSection('wishlist'); loadWishlistReport(); }} />
                     <SidebarItem icon={DollarSign} label="Salary" active={activeSection === 'salary'} onClick={() => { setActiveSection('salary'); loadSalaryInfo(); loadDashboardData(); }} />
                 </nav>
@@ -396,24 +374,19 @@ export default function SellPage() {
 
             {/* ===== MAIN CONTENT ===== */}
             <main style={{ marginLeft: 260, flex: 1, padding: '32px 40px', maxWidth: 1200 }}>
-                {error && (
-                    <div className="alert alert-error" style={{ marginBottom: 16 }}>
-                        {error}
-                        <button onClick={() => setError('')} style={{
-                            float: 'right', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'inherit', fontWeight: 700,
-                        }}>✕</button>
-                    </div>
-                )}
-                {success && (
-                    <div className="alert alert-success" style={{ marginBottom: 16 }}>
-                        {success}
-                        <button onClick={() => setSuccess('')} style={{
-                            float: 'right', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'inherit', fontWeight: 700,
-                        }}>✕</button>
-                    </div>
-                )}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={
+                        error ? { type: 'error', text: error } :
+                        success ? { type: 'success', text: success } :
+                        salaryMsg.text ? salaryMsg : null
+                    } 
+                    onClose={() => {
+                        setError('');
+                        setSuccess('');
+                        setSalaryMsg({ type: '', text: '' });
+                    }} 
+                />
 
                 {/* Loading state for initial data */}
                 {initialLoading && (activeSection === 'dashboard' || activeSection === 'products' || activeSection === 'delivery' || activeSection === 'restock') && (
@@ -633,8 +606,7 @@ export default function SellPage() {
                     </div>
                 )}
 
-                {/* ===== SEARCH TAB (embedded) ===== */}
-                {activeSection === 'search' && <SearchContent />}
+
 
                 {/* ===== ORDER HISTORY TAB ===== */}
                 {activeSection === 'orderhistory' && (() => {
@@ -696,21 +668,21 @@ export default function SellPage() {
                                         </thead>
                                         <tbody>
                                             {filteredOrders.map(t => (
-                                                <tr key={t.id}>
-                                                    <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.assigned_staff_name || 'Unassigned'}</td>
-                                                    <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
-                                                    <td>{t.quantity}</td>
-                                                    <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
+                                                <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                    <td style={{ fontWeight: 500 }}>{t.buyer_name || '—'}</td>
+                                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.seller_name || '—'}</td>
+                                                    <td style={{ color: 'var(--text-secondary)' }}>{t.product_title || '—'}</td>
+                                                    <td>{t.quantity || 1}</td>
+                                                    <td style={{ fontWeight: 600 }}>₱{parseFloat(t.amount || 0).toFixed(2)}</td>
                                                     <td>
                                                         <span style={{
                                                             padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
                                                             background: `${statusClr[t.status] || '#94a3b8'}15`,
                                                             color: statusClr[t.status] || '#94a3b8',
-                                                        }}>{t.status.replace(/_/g, ' ')}</span>
+                                                        }}>{(t.status || '').replace(/_/g, ' ')}</span>
                                                     </td>
                                                     <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                        {new Date(t.created_at).toLocaleDateString()}
+                                                        {t.created_at ? new Date(t.created_at).toLocaleDateString() : '—'}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -953,6 +925,54 @@ export default function SellPage() {
                             (g.items || []).some(item => (item.product_title || '').toLowerCase().includes(q))
                         );
                     }
+                    const approvedOrders = deliveryOrders.filter(g => g.status === 'approved');
+                    const pendingOrders = deliveryOrders.filter(g => g.status === 'pending');
+                    const renderOrderRow = (group, accentColor, borderColor) => {
+                        const firstImg = group.items?.[0]?.product_images?.[0] || null;
+                        const extraImgs = (group.items || []).slice(1).map(i => i.product_images?.[0]).filter(Boolean);
+                        return (
+                            <div key={group.group_id} style={{
+                                background: 'var(--bg-card)', borderRadius: 10, padding: 12,
+                                border: `1px solid ${borderColor}`,
+                                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                            }}>
+                                {/* Product images strip */}
+                                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                    {firstImg ? (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                                            <img src={firstImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                        </div>
+                                    ) : (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--bg-secondary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}>📦</div>
+                                    )}
+                                    {extraImgs.slice(0, 2).map((img, i) => (
+                                        <div key={i} style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                                            <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                        </div>
+                                    ))}
+                                    {extraImgs.length > 2 && (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--bg-secondary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                                            +{extraImgs.length - 2}
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Info */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>📦 Box — {group.buyer_name}</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        {group.items?.length || 0} item{group.items?.length !== 1 ? 's' : ''} · PHP {group.total_amount?.toFixed(2)}
+                                    </div>
+                                    {group.delivery_address && (
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--accent-primary)', marginTop: 2 }}>📍 {group.delivery_address}</div>
+                                    )}
+                                </div>
+                                <span style={{
+                                    padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
+                                    background: `${accentColor}22`, color: accentColor, flexShrink: 0,
+                                }}>{group.status === 'approved' ? 'Ready for Pickup' : 'Pending'}</span>
+                            </div>
+                        );
+                    };
                     return (
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -972,6 +992,50 @@ export default function SellPage() {
                                 />
                                 <button className="btn btn-outline btn-sm" onClick={loadDeliveryOrders}>Refresh</button>
                             </div>
+                        </div>
+                        {/* ===== APPROVED ORDERS BOX ===== */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.06) 100%)',
+                            border: '1px solid rgba(16,185,129,0.3)', borderRadius: 14, padding: 20, marginBottom: 16,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: approvedOrders.length > 0 ? 14 : 0 }}>
+                                <span style={{ fontSize: '1.1rem' }}>✅</span>
+                                <div>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#10b981' }}>
+                                        Approved Orders — Ready for Pickup
+                                    </h3>
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                        {approvedOrders.length > 0 ? `${approvedOrders.length} box${approvedOrders.length > 1 ? 'es' : ''} waiting for a delivery rider` : 'No approved orders waiting for pickup'}
+                                    </p>
+                                </div>
+                            </div>
+                            {approvedOrders.length > 0 && (
+                                <div style={{ display: 'grid', gap: 8, maxHeight: approvedOrders.length > 5 ? 340 : 'none', overflowY: approvedOrders.length > 5 ? 'auto' : 'visible', paddingRight: approvedOrders.length > 5 ? 4 : 0 }}>
+                                    {approvedOrders.map(g => renderOrderRow(g, '#10b981', 'rgba(16,185,129,0.2)'))}
+                                </div>
+                            )}
+                        </div>
+                        {/* ===== PENDING ORDERS BOX ===== */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(251,191,36,0.08) 0%, rgba(245,158,11,0.06) 100%)',
+                            border: '1px solid rgba(251,191,36,0.35)', borderRadius: 14, padding: 20, marginBottom: 24,
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: pendingOrders.length > 0 ? 14 : 0 }}>
+                                <span style={{ fontSize: '1.1rem' }}>🕐</span>
+                                <div>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#fbbf24' }}>
+                                        Pending Orders — Awaiting Approval
+                                    </h3>
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                        {pendingOrders.length > 0 ? `${pendingOrders.length} box${pendingOrders.length > 1 ? 'es' : ''} need your approval` : 'No pending orders'}
+                                    </p>
+                                </div>
+                            </div>
+                            {pendingOrders.length > 0 && (
+                                <div style={{ display: 'grid', gap: 8, maxHeight: pendingOrders.length > 5 ? 340 : 'none', overflowY: pendingOrders.length > 5 ? 'auto' : 'visible', paddingRight: pendingOrders.length > 5 ? 4 : 0 }}>
+                                    {pendingOrders.map(g => renderOrderRow(g, '#fbbf24', 'rgba(251,191,36,0.2)'))}
+                                </div>
+                            )}
                         </div>
                         <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                             {[{ key: 'all', label: 'All' }, ...Object.entries(deliveryColors).map(([k, v]) => ({ key: k, label: v.label }))].map(f => (

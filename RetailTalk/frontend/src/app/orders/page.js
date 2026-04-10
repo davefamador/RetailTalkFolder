@@ -3,6 +3,7 @@
 import { getTransactionHistory, getStoredUser, cancelOrder } from '../../lib/api';
 import { useState, useEffect } from 'react';
 import { Package, ShoppingCart, Truck } from 'lucide-react';
+import Toast from '../components/Toast';
 
 export default function OrdersPage() {
     const [transactions, setTransactions] = useState([]);
@@ -247,20 +248,11 @@ export default function OrdersPage() {
                 <p>Track your delivery orders</p>
             </div>
 
-            {msg.text && (
-                <div style={{
-                    padding: '12px 16px', borderRadius: 10, marginBottom: 16, fontSize: '0.85rem', fontWeight: 600,
-                    background: msg.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                    border: `1px solid ${msg.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                    color: msg.type === 'success' ? '#10b981' : '#ef4444',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                    {msg.text}
-                    <button onClick={() => setMsg({ type: '', text: '' })} style={{
-                        background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 700, fontSize: '1rem',
-                    }}>{'\u2715'}</button>
-                </div>
-            )}
+            {/* ===== TOAST NOTIFICATION ===== */}
+            <Toast 
+                message={msg.text ? msg : null} 
+                onClose={() => setMsg({ type: '', text: '' })} 
+            />
 
             {/* Order Type Filter */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>

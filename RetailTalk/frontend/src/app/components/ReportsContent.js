@@ -64,17 +64,52 @@ export default function ReportsContent() {
     const totalOrders = mySellerTxns.length;
 
     const getRevenueSeries = (period) => {
+        const now = new Date();
         const data = {};
-        mySellerTxns.forEach(t => {
-            const d = new Date(t.created_at);
-            let key;
-            if (period === 'daily') key = d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
-            else if (period === 'weekly') { const oneJan = new Date(d.getFullYear(), 0, 1); const week = Math.ceil(((d - oneJan) / 86400000 + oneJan.getDay() + 1) / 7); key = `W${week}`; }
-            else key = d.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' });
-            data[key] = (data[key] || 0) + t.seller_amount;
-        });
-        const maxEntries = period === 'daily' ? 14 : period === 'weekly' ? 8 : 6;
-        return Object.entries(data).slice(-maxEntries);
+
+        if (period === 'daily') {
+            for (let i = 0; i < 24; i++) {
+                const hourStr = (i === 0 ? 12 : i > 12 ? i - 12 : i) + (i < 12 ? 'AM' : 'PM');
+                data[hourStr] = 0;
+            }
+            mySellerTxns.forEach(t => {
+                const d = new Date(t.created_at);
+                if (d.toDateString() === now.toDateString()) {
+                    const h = d.getHours();
+                    const hourStr = (h === 0 ? 12 : h > 12 ? h - 12 : h) + (h < 12 ? 'AM' : 'PM');
+                    data[hourStr] += t.seller_amount;
+                }
+            });
+            return Object.entries(data);
+        } else if (period === 'weekly') {
+            const days = [];
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+                const key = `${d.getMonth() + 1}-${d.getDate()}`;
+                days.push({ key, dateStr: d.toDateString() });
+                data[key] = 0;
+            }
+            mySellerTxns.forEach(t => {
+                const d = new Date(t.created_at);
+                const ds = d.toDateString();
+                const dayMatch = days.find(x => x.dateStr === ds);
+                if (dayMatch) {
+                    data[dayMatch.key] += t.seller_amount;
+                }
+            });
+            return Object.entries(data);
+        } else {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            months.forEach(m => data[m] = 0);
+            mySellerTxns.forEach(t => {
+                const d = new Date(t.created_at);
+                if (d.getFullYear() === now.getFullYear()) {
+                    const m = months[d.getMonth()];
+                    data[m] += t.seller_amount;
+                }
+            });
+            return Object.entries(data);
+        }
     };
 
     const revenueSeries = getRevenueSeries(trendPeriod);

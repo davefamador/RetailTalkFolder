@@ -12,16 +12,13 @@ export default function RootLayout({ children }) {
     const [admin, setAdmin] = useState(null);
     const [balance, setBalance] = useState(null);
     const [hydrated, setHydrated] = useState(false);
-    const [theme, setTheme] = useState('dark');
     const pathname = usePathname();
     const hideNav = pathname === '/sell' || pathname?.startsWith('/manager') || pathname === '/delivery' || pathname?.startsWith('/admin/dashboard');
 
     useEffect(() => {
         const storedUser = getStoredUser();
         const storedAdmin = getStoredAdmin();
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        setTheme(savedTheme);
-        document.documentElement.setAttribute('data-theme', savedTheme);
+        document.documentElement.setAttribute('data-theme', 'dark');
 
         if (storedUser) {
             setUser(storedUser);
@@ -46,13 +43,6 @@ export default function RootLayout({ children }) {
         adminLogout();
         setAdmin(null);
         window.location.href = '/admin';
-    };
-
-    const toggleTheme = () => {
-        const newTheme = theme === 'dark' ? 'light' : 'dark';
-        setTheme(newTheme);
-        localStorage.setItem('theme', newTheme);
-        document.documentElement.setAttribute('data-theme', newTheme);
     };
 
     return (
@@ -107,11 +97,6 @@ export default function RootLayout({ children }) {
                     </div>
 
                     <div className="navbar-user">
-                        {hydrated && (
-                            <button onClick={toggleTheme} className="theme-toggle" title="Toggle Light/Dark Mode" style={{ marginRight: '8px' }}>
-                                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                            </button>
-                        )}
                         {hydrated ? (
                             admin ? (
                                 <>

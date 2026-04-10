@@ -3,6 +3,7 @@
 import { searchProducts, getStoredUser, getStoredAdmin } from '../../lib/api';
 import { useState, useEffect } from 'react';
 import ProductDetailModal from '../components/ProductDetailModal';
+import Toast from '../components/Toast';
 
 export default function SearchPage() {
     const [query, setQuery] = useState('');
@@ -262,7 +263,11 @@ export default function SearchPage() {
                 </div>
             )}
 
-            {error && <div className="alert alert-error">{error}</div>}
+            {/* ===== TOAST NOTIFICATION ===== */}
+            <Toast 
+                message={error ? { type: 'error', text: error } : null} 
+                onClose={() => setError('')} 
+            />
 
             {loading && (
                 <div className="loading-container">

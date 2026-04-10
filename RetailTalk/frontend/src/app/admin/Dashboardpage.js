@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { adminLogin, adminRegister, getStoredAdmin } from '../../lib/api';
+import Toast from '../components/Toast';
 
 export default function AdminPage() {
     const [mode, setMode] = useState('login');
@@ -57,7 +58,11 @@ export default function AdminPage() {
                     </p>
                 </div>
 
-                {error && <div className="alert alert-error">{error}</div>}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={error ? { type: 'error', text: error } : null} 
+                    onClose={() => setError('')} 
+                />
 
                 <form onSubmit={handleSubmit}>
                     {mode === 'register' && (

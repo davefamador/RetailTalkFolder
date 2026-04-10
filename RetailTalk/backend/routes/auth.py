@@ -10,8 +10,9 @@ from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
+import os
 from database import get_supabase
-from config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRATION_HOURS
+from config import JWT_ALGORITHM, JWT_EXPIRATION_HOURS
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 security = HTTPBearer()
@@ -58,13 +59,13 @@ def create_token(user_id: str, email: str, role: str = "buyer") -> str:
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
         "iat": datetime.now(timezone.utc),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, os.environ.get("JWT_SECRET", "change-this-in-production"), algorithm=JWT_ALGORITHM)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     """Dependency that verifies JWT token and returns the payload."""
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(credentials.credentials, os.environ.get("JWT_SECRET", "change-this-in-production"), algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -292,8 +293,9 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
     balance = float(bal.data[0]["balance"]) if bal.data else 0.0
 
     # Get contact
-    contact = sb.table("user_contacts").select("contact_number").eq("user_id", current_user["sub"]).execute()
+    contact = sb.table("user_contacts").select("contact_number, delivery_address").eq("user_id", current_user["sub"]).execute()
     contact_number = contact.data[0]["contact_number"] if contact.data else ""
+    delivery_address = contact.data[0].get("delivery_address", "") if contact.data else ""
 
     return {
         "id": u["id"],
@@ -302,6 +304,7 @@ async def get_profile(current_user: dict = Depends(get_current_user)):
         "role": u["role"],
         "balance": balance,
         "contact_number": contact_number,
+        "delivery_address": delivery_address,
         "department_id": u.get("department_id") or "",
         "manager_id": u.get("manager_id") or "",
         "created_at": u["created_at"],
@@ -312,6 +315,7 @@ class ProfileUpdateRequest(BaseModel):
     full_name: str = None
     email: str = None
     contact_number: str = None
+    delivery_address: str = None
 
 
 @router.put("/profile")
@@ -329,11 +333,22 @@ async def update_profile(req: ProfileUpdateRequest, current_user: dict = Depends
     if updates:
         sb.table("users").update(updates).eq("id", user_id).execute()
 
-    if req.contact_number is not None:
+    needs_contact_update = req.contact_number is not None or req.delivery_address is not None
+    if needs_contact_update:
         existing = sb.table("user_contacts").select("user_id").eq("user_id", user_id).execute()
+        contact_updates = {}
+        if req.contact_number is not None:
+            contact_updates["contact_number"] = req.contact_number
+        if req.delivery_address is not None:
+            contact_updates["delivery_address"] = req.delivery_address
+            
         if existing.data:
-            sb.table("user_contacts").update({"contact_number": req.contact_number}).eq("user_id", user_id).execute()
+            sb.table("user_contacts").update(contact_updates).eq("user_id", user_id).execute()
         else:
-            sb.table("user_contacts").insert({"user_id": user_id, "contact_number": req.contact_number}).execute()
+            contact_updates["user_id"] = user_id
+            # Default empty strings or nulls for required fields if needed
+            if "contact_number" not in contact_updates:
+                contact_updates["contact_number"] = ""
+            sb.table("user_contacts").insert(contact_updates).execute()
 
     return {"message": "Profile updated successfully"}

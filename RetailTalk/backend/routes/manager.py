@@ -615,6 +615,33 @@ async def list_department_products(
     ]
 
 
+@router.put("/products/{product_id}")
+async def update_department_product(product_id: str, req: dict, manager: dict = Depends(require_manager)):
+    """Update a product in the manager's department (images, title, price, etc.)."""
+    sb = get_supabase()
+    dept_id = manager.get("department_id")
+
+    # Get all seller IDs in this department + manager themselves
+    staff_result = sb.table("users").select("id").eq("department_id", dept_id).eq("role", "seller").execute()
+    allowed_ids = [s["id"] for s in (staff_result.data or [])]
+    allowed_ids.append(manager["sub"])
+
+    existing = sb.table("products").select("seller_id").eq("id", product_id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if existing.data[0]["seller_id"] not in allowed_ids:
+        raise HTTPException(status_code=403, detail="Product not in your department")
+
+    update_data = {k: v for k, v in req.items() if k is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    result = sb.table("products").update(update_data).eq("id", product_id).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Update failed")
+    return {"message": "Product updated successfully"}
+
+
 @router.get("/transactions")
 async def list_department_transactions(
     search: str = Query("", description="Search by buyer or product"),

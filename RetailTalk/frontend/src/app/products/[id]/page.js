@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact, checkWishlist, addToWishlist, removeFromWishlist, removeFromCart } from '../../../lib/api';
+import { getProduct, buyProduct, getStoredUser, getMyContact, setMyContact, checkWishlist, addToWishlist, removeFromWishlist, removeFromCart, uploadProductImage, adminUpdateProduct, managerUpdateProduct } from '../../../lib/api';
+import Toast from '../../components/Toast';
 
 export default function ProductDetailPage() {
     const params = useParams();
@@ -19,6 +20,8 @@ export default function ProductDetailPage() {
     const [deliveryAddr, setDeliveryAddr] = useState('');
     const [wishlisted, setWishlisted] = useState(false);
     const [wishlistLoading, setWishlistLoading] = useState(false);
+    const [imageEditMode, setImageEditMode] = useState(false);
+    const [imageUploading, setImageUploading] = useState(false);
 
     useEffect(() => {
         const stored = getStoredUser();
@@ -97,6 +100,53 @@ export default function ProductDetailPage() {
         }
     };
 
+    const canEditImages = user && (user.role === 'admin' || user.role === 'manager');
+
+    const handleAddImage = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if ((product.images || []).length >= 5) { setError('Maximum 5 images allowed.'); return; }
+        setImageUploading(true);
+        try {
+            const { url } = await uploadProductImage(file);
+            const newImages = [...(product.images || []), url];
+            if (user.role === 'admin') {
+                await adminUpdateProduct(product.id, { images: newImages });
+            } else {
+                await managerUpdateProduct(product.id, { images: newImages });
+            }
+            const updated = await getProduct(params.id);
+            setProduct(updated);
+            setSelectedImage(newImages.length - 1);
+            setSuccess('Image added.');
+        } catch (err) {
+            setError(err.message || 'Failed to upload image.');
+        } finally {
+            setImageUploading(false);
+            e.target.value = '';
+        }
+    };
+
+    const handleRemoveImage = async (idx) => {
+        const newImages = (product.images || []).filter((_, i) => i !== idx);
+        setImageUploading(true);
+        try {
+            if (user.role === 'admin') {
+                await adminUpdateProduct(product.id, { images: newImages });
+            } else {
+                await managerUpdateProduct(product.id, { images: newImages });
+            }
+            const updated = await getProduct(params.id);
+            setProduct(updated);
+            setSelectedImage(Math.max(0, idx - 1));
+            setSuccess('Image removed.');
+        } catch (err) {
+            setError(err.message || 'Failed to remove image.');
+        } finally {
+            setImageUploading(false);
+        }
+    };
+
     const handleSaveAddressAndBuy = async () => {
         if (!contactNum.trim()) { setError('Contact number is required.'); return; }
         if (!deliveryAddr.trim()) { setError('Delivery address is required.'); return; }
@@ -156,41 +206,87 @@ export default function ProductDetailPage() {
                 ← Back to Browse
             </a>
 
-            {error && <div className="alert alert-error">{error}</div>}
-            {success && <div className="alert alert-success">{success}</div>}
+            {/* ===== TOAST NOTIFICATION ===== */}
+            <Toast 
+                message={error ? { type: 'error', text: error } : success ? { type: 'success', text: success } : null} 
+                onClose={() => { setError(''); setSuccess(''); }} 
+            />
 
             <div style={{ display: 'grid', gridTemplateColumns: images.length > 0 ? '1fr 1fr' : '1fr', gap: 40 }}>
                 {/* Left: Images */}
-                {images.length > 0 && (
+                {(images.length > 0 || canEditImages) && (
                     <div>
                         {/* Main Image */}
-                        <div style={{
-                            width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
-                            background: 'var(--bg-card)', border: '1px solid var(--border-color)', marginBottom: 12,
-                        }}>
-                            <img
-                                src={images[selectedImage]}
-                                alt={product.title}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            />
-                        </div>
-                        {/* Thumbnails */}
-                        {images.length > 1 && (
-                            <div style={{ display: 'flex', gap: 8 }}>
-                                {images.map((img, i) => (
-                                    <div
-                                        key={i}
-                                        onClick={() => setSelectedImage(i)}
+                        {images.length > 0 && (
+                            <div style={{
+                                width: '100%', aspectRatio: '1', borderRadius: 12, overflow: 'hidden',
+                                background: 'var(--bg-card)', border: '1px solid var(--border-color)', marginBottom: 12,
+                                position: 'relative',
+                            }}>
+                                <img
+                                    src={images[selectedImage]}
+                                    alt={product.title}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                                {canEditImages && imageEditMode && (
+                                    <button
+                                        onClick={() => handleRemoveImage(selectedImage)}
+                                        disabled={imageUploading}
                                         style={{
-                                            width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
-                                            cursor: 'pointer', border: `2px solid ${i === selectedImage ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-                                            transition: 'border-color 0.2s',
+                                            position: 'absolute', top: 10, right: 10,
+                                            background: 'rgba(239,68,68,0.9)', color: '#fff',
+                                            border: 'none', borderRadius: 8, padding: '6px 12px',
+                                            fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
                                         }}
                                     >
-                                        <img src={img} alt={`Thumb ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                    </div>
-                                ))}
+                                        {imageUploading ? '...' : '✕ Remove'}
+                                    </button>
+                                )}
                             </div>
+                        )}
+                        {/* Thumbnails */}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                            {images.map((img, i) => (
+                                <div
+                                    key={i}
+                                    onClick={() => setSelectedImage(i)}
+                                    style={{
+                                        width: 64, height: 64, borderRadius: 8, overflow: 'hidden',
+                                        cursor: 'pointer', border: `2px solid ${i === selectedImage ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+                                        transition: 'border-color 0.2s', flexShrink: 0,
+                                    }}
+                                >
+                                    <img src={img} alt={`Thumb ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                </div>
+                            ))}
+                            {canEditImages && imageEditMode && images.length < 5 && (
+                                <label style={{
+                                    width: 64, height: 64, borderRadius: 8, flexShrink: 0,
+                                    border: '2px dashed var(--border-color)', cursor: 'pointer',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: '1.4rem', color: 'var(--text-muted)',
+                                    opacity: imageUploading ? 0.5 : 1,
+                                }}>
+                                    {imageUploading ? <span className="spinner" style={{ width: 20, height: 20 }} /> : '+'}
+                                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAddImage} disabled={imageUploading} />
+                                </label>
+                            )}
+                        </div>
+                        {/* Edit toggle for admin/manager */}
+                        {canEditImages && (
+                            <button
+                                onClick={() => setImageEditMode(m => !m)}
+                                style={{
+                                    marginTop: 12, padding: '7px 16px', borderRadius: 8,
+                                    border: '1px solid var(--border-color)', cursor: 'pointer',
+                                    background: imageEditMode ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                    color: imageEditMode ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    fontSize: '0.82rem', fontWeight: 600,
+                                    fontFamily: 'Inter, sans-serif',
+                                }}
+                            >
+                                {imageEditMode ? '✓ Done Editing' : '✏️ Edit Images'}
+                            </button>
                         )}
                     </div>
                 )}

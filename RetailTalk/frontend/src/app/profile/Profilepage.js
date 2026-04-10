@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getProfile, updateProfile, getStoredUser } from '../../lib/api';
+import Toast from '../components/Toast';
 
 export default function ProfilePage() {
     const [profile, setProfile] = useState(null);
@@ -12,6 +13,7 @@ export default function ProfilePage() {
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [contactNumber, setContactNumber] = useState('');
+    const [deliveryAddress, setDeliveryAddress] = useState('');
 
     useEffect(() => {
         const user = getStoredUser();
@@ -29,6 +31,7 @@ export default function ProfilePage() {
             setFullName(data.full_name || '');
             setEmail(data.email || '');
             setContactNumber(data.contact_number || '');
+            setDeliveryAddress(data.delivery_address || '');
         } catch (e) {
             setMessage({ type: 'error', text: 'Failed to load profile: ' + e.message });
         } finally {
@@ -41,7 +44,7 @@ export default function ProfilePage() {
         setSaving(true);
         setMessage({ type: '', text: '' });
         try {
-            await updateProfile({ full_name: fullName, email, contact_number: contactNumber });
+            await updateProfile({ full_name: fullName, email, contact_number: contactNumber, delivery_address: deliveryAddress });
             setMessage({ type: 'success', text: 'Profile updated successfully!' });
             loadProfile();
         } catch (e) {
@@ -116,16 +119,11 @@ export default function ProfilePage() {
                     </div>
                 </div>
 
-                {/* Message */}
-                {message.text && (
-                    <div className={`alert alert-${message.type}`} style={{ marginBottom: 16 }}>
-                        {message.text}
-                        <button onClick={() => setMessage({ type: '', text: '' })} style={{
-                            float: 'right', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'inherit', fontWeight: 700,
-                        }}>✕</button>
-                    </div>
-                )}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={message} 
+                    onClose={() => setMessage({ type: '', text: '' })} 
+                />
 
                 {/* Form */}
                 <form onSubmit={handleSave} style={{
@@ -173,6 +171,22 @@ export default function ProfilePage() {
                             placeholder="09xxxxxxxxx"
                             style={{
                                 width: '100%', padding: '12px 16px', borderRadius: 10,
+                                border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)', fontSize: '0.9rem', fontFamily: 'Inter, sans-serif',
+                            }}
+                        />
+                    </div>
+
+                    <div style={{ marginBottom: 24 }}>
+                        <label style={{ display: 'block', fontWeight: 600, fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            Delivery Address
+                        </label>
+                        <textarea
+                            value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)}
+                            placeholder="e.g. 123 Main St, Springfield, IL 62701"
+                            rows={3}
+                            style={{
+                                width: '100%', padding: '12px 16px', borderRadius: 10, resize: 'vertical',
                                 border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
                                 color: 'var(--text-primary)', fontSize: '0.9rem', fontFamily: 'Inter, sans-serif',
                             }}

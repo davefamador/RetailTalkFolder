@@ -19,6 +19,7 @@ import {
     UserPlus, ClipboardList,
 } from 'lucide-react';
 import ReportsContent from '../../components/ReportsContent';
+import Toast from '../../components/Toast';
 
 // ── Line Chart Component ─────────────────────────────────
 function LineChart({ data, labelKey, valueKey, title, color = '#6366f1', height = 220 }) {
@@ -336,6 +337,8 @@ export default function ManagerDashboard() {
     const [withdrawing, setWithdrawing] = useState(false);
     const [salaryMsg, setSalaryMsg] = useState({ type: '', text: '' });
 
+
+
     useEffect(() => {
         const stored = getStoredUser();
         if (!stored || stored.role !== 'manager') {
@@ -650,15 +653,14 @@ export default function ManagerDashboard() {
 
             {/* ===== MAIN CONTENT ===== */}
             <main style={{ marginLeft: 260, flex: 1, padding: '32px 40px', maxWidth: 1200 }}>
-                {message.text && (
-                    <div className={`alert alert-${message.type}`} style={{ marginBottom: 16 }}>
-                        {message.text}
-                        <button onClick={() => setMessage({ type: '', text: '' })} style={{
-                            float: 'right', background: 'none', border: 'none',
-                            cursor: 'pointer', color: 'inherit', fontWeight: 700,
-                        }}>✕</button>
-                    </div>
-                )}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={message.text ? message : salaryMsg} 
+                    onClose={() => {
+                        if (message.text) setMessage({ type: '', text: '' });
+                        else setSalaryMsg({ type: '', text: '' });
+                    }} 
+                />
 
                 {/* ===== REPORTS TAB (embedded) ===== */}
                 {activeTab === 'reports' && <ReportsContent />}
@@ -671,9 +673,6 @@ export default function ManagerDashboard() {
                             <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ width: 32, height: 32, margin: '0 auto' }}></div></div>
                         ) : salaryInfo ? (
                             <>
-                                {salaryMsg.text && (
-                                    <div className={`alert alert-${salaryMsg.type}`} style={{ marginBottom: 16 }}>{salaryMsg.text}</div>
-                                )}
                                 {/* Summary Cards */}
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 28 }}>
                                     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 16, padding: 20 }}>
@@ -1076,6 +1075,54 @@ export default function ManagerDashboard() {
                             (g.items || []).some(item => (item.product_title || '').toLowerCase().includes(q))
                         );
                     }
+                    const approvedOrders = mgrDeliveryOrders.filter(g => g.status === 'approved');
+                    const pendingOrders = mgrDeliveryOrders.filter(g => g.status === 'pending');
+                    const renderOrderRow = (group, accentColor, borderColor) => {
+                        const firstImg = group.items?.[0]?.product_images?.[0] || null;
+                        const extraImgs = (group.items || []).slice(1).map(i => i.product_images?.[0]).filter(Boolean);
+                        return (
+                            <div key={group.group_id} style={{
+                                background: 'var(--bg-card)', borderRadius: 10, padding: 12,
+                                border: `1px solid ${borderColor}`,
+                                display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                            }}>
+                                {/* Product images strip */}
+                                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                    {firstImg ? (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                                            <img src={firstImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                        </div>
+                                    ) : (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--bg-secondary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}>📦</div>
+                                    )}
+                                    {extraImgs.slice(0, 2).map((img, i) => (
+                                        <div key={i} style={{ width: 44, height: 44, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                                            <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => e.target.style.display = 'none'} />
+                                        </div>
+                                    ))}
+                                    {extraImgs.length > 2 && (
+                                        <div style={{ width: 44, height: 44, borderRadius: 8, background: 'var(--bg-secondary)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+                                            +{extraImgs.length - 2}
+                                        </div>
+                                    )}
+                                </div>
+                                {/* Info */}
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>📦 Box — {group.buyer_name}</div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                        Store: {group.seller_name} · {group.items?.length || 0} item{group.items?.length !== 1 ? 's' : ''} · PHP {group.total_amount?.toFixed(2)}
+                                    </div>
+                                    {group.delivery_address && (
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--accent-primary)', marginTop: 2 }}>📍 {group.delivery_address}</div>
+                                    )}
+                                </div>
+                                <span style={{
+                                    padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
+                                    background: `${accentColor}22`, color: accentColor, flexShrink: 0,
+                                }}>{group.status === 'approved' ? 'Ready for Pickup' : 'Pending'}</span>
+                            </div>
+                        );
+                    };
                     return (
                         <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -1095,6 +1142,50 @@ export default function ManagerDashboard() {
                                     />
                                     <button className="btn btn-outline btn-sm" onClick={loadMgrDeliveryOrders}>Refresh</button>
                                 </div>
+                            </div>
+                            {/* ===== APPROVED ORDERS BOX ===== */}
+                            <div style={{
+                                background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.06) 100%)',
+                                border: '1px solid rgba(16,185,129,0.3)', borderRadius: 14, padding: 20, marginBottom: 16,
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: approvedOrders.length > 0 ? 14 : 0 }}>
+                                    <span style={{ fontSize: '1.1rem' }}>✅</span>
+                                    <div>
+                                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#10b981' }}>
+                                            Approved Orders — Ready for Pickup
+                                        </h3>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                            {approvedOrders.length > 0 ? `${approvedOrders.length} box${approvedOrders.length > 1 ? 'es' : ''} waiting for a delivery rider` : 'No approved orders waiting for pickup'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {approvedOrders.length > 0 && (
+                                    <div style={{ display: 'grid', gap: 8, maxHeight: approvedOrders.length > 5 ? 340 : 'none', overflowY: approvedOrders.length > 5 ? 'auto' : 'visible', paddingRight: approvedOrders.length > 5 ? 4 : 0 }}>
+                                        {approvedOrders.map(g => renderOrderRow(g, '#10b981', 'rgba(16,185,129,0.2)'))}
+                                    </div>
+                                )}
+                            </div>
+                            {/* ===== PENDING ORDERS BOX ===== */}
+                            <div style={{
+                                background: 'linear-gradient(135deg, rgba(251,191,36,0.08) 0%, rgba(245,158,11,0.06) 100%)',
+                                border: '1px solid rgba(251,191,36,0.35)', borderRadius: 14, padding: 20, marginBottom: 24,
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: pendingOrders.length > 0 ? 14 : 0 }}>
+                                    <span style={{ fontSize: '1.1rem' }}>🕐</span>
+                                    <div>
+                                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#fbbf24' }}>
+                                            Pending Orders — Awaiting Approval
+                                        </h3>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                                            {pendingOrders.length > 0 ? `${pendingOrders.length} box${pendingOrders.length > 1 ? 'es' : ''} need your approval` : 'No pending orders'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {pendingOrders.length > 0 && (
+                                    <div style={{ display: 'grid', gap: 8, maxHeight: pendingOrders.length > 5 ? 340 : 'none', overflowY: pendingOrders.length > 5 ? 'auto' : 'visible', paddingRight: pendingOrders.length > 5 ? 4 : 0 }}>
+                                        {pendingOrders.map(g => renderOrderRow(g, '#fbbf24', 'rgba(251,191,36,0.2)'))}
+                                    </div>
+                                )}
                             </div>
                             {/* Status Filter */}
                             <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>

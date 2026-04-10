@@ -4,8 +4,11 @@ Uses psycopg (v3) for direct PostgreSQL/pgvector queries (search),
 and supabase-py for standard CRUD operations.
 """
 
+import os
+import socket
 import psycopg
 from psycopg.rows import dict_row
+from urllib.parse import urlparse, urlunparse
 import numpy as np
 from supabase import create_client, Client
 from config import SUPABASE_URL, SUPABASE_KEY, DATABASE_URL
@@ -19,15 +22,39 @@ def get_supabase() -> Client:
     """Get or create the Supabase client for standard CRUD operations."""
     global _supabase_client
     if _supabase_client is None:
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        url = (os.environ.get("SUPABASE_URL") or SUPABASE_URL).strip()
+        key = (os.environ.get("SUPABASE_KEY") or SUPABASE_KEY).strip()
+        _supabase_client = create_client(url, key)
     return _supabase_client
 
 
 # --- Direct PostgreSQL connection (for pgvector queries) ---
 
+def _resolve_ipv4(db_url: str) -> str:
+    """Resolve the database hostname to an IPv4 address to avoid IPv6 connectivity issues."""
+    parsed = urlparse(db_url)
+    hostname = parsed.hostname
+    if not hostname:
+        return db_url
+    try:
+        # Force IPv4 (AF_INET) resolution
+        ipv4_addr = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
+        # Replace hostname with resolved IPv4 address in the URL
+        if parsed.port:
+            new_netloc = f"{parsed.username}:{parsed.password}@{ipv4_addr}:{parsed.port}" if parsed.password else f"{ipv4_addr}:{parsed.port}"
+        else:
+            new_netloc = f"{parsed.username}:{parsed.password}@{ipv4_addr}" if parsed.password else ipv4_addr
+        return urlunparse(parsed._replace(netloc=new_netloc))
+    except (socket.gaierror, IndexError):
+        # If IPv4 resolution fails, return original URL
+        return db_url
+
+
 def get_db_connection():
-    """Create a new psycopg3 connection for pgvector queries."""
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+    """Create a new psycopg3 connection for pgvector queries, forcing IPv4."""
+    db_url = (os.environ.get("DATABASE_URL") or DATABASE_URL).strip()
+    db_url = _resolve_ipv4(db_url)
+    conn = psycopg.connect(db_url, row_factory=dict_row, connect_timeout=10)
     return conn
 
 

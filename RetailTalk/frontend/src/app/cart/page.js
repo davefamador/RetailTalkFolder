@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getCart, updateCartItem, removeFromCart, clearCart, checkoutCart, getStoredUser, getMyContact, setMyContact } from '../../lib/api';
 import { ShoppingCart, Smartphone } from 'lucide-react';
+import Toast from '../components/Toast';
 
 export default function CartPage() {
     const [cart, setCart] = useState(null);
@@ -139,8 +140,11 @@ export default function CartPage() {
                     {cart?.items?.length || 0} item{(cart?.items?.length || 0) !== 1 ? 's' : ''} from {cart?.departments_count || 0} department store{(cart?.departments_count || 0) !== 1 ? 's' : ''}
                 </p>
 
-                {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
-                {message && <div className="alert" style={{ ...statusColor, marginBottom: 16 }}>{message}</div>}
+                {/* ===== TOAST NOTIFICATION ===== */}
+                <Toast 
+                    message={error ? { type: 'error', text: error } : message ? { type: 'success', text: message } : null} 
+                    onClose={() => { setError(''); setMessage(''); }} 
+                />
 
                 {loading ? (
                     <div style={{ textAlign: 'center', padding: 60 }}><span className="spinner" /></div>

@@ -9,10 +9,10 @@ from typing import Optional
 import uuid
 import base64
 
+import os
 from database import get_supabase, store_product_embedding
 from models.bert_service import bert_service
 from routes.auth import get_current_user
-from config import SUPABASE_URL
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -106,7 +106,7 @@ async def upload_image(
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
 
     # Get public URL
-    public_url = f"{SUPABASE_URL}/storage/v1/object/public/product-images/{filename}"
+    public_url = f"{os.environ.get('SUPABASE_URL', '')}/storage/v1/object/public/product-images/{filename}"
 
     return {"url": public_url, "filename": filename}
 
@@ -293,7 +293,7 @@ async def get_product(product_id: str):
 
 @router.put("/{product_id}", response_model=ProductResponse)
 async def update_product(product_id: str, req: UpdateProductRequest, current_user: dict = Depends(get_current_user)):
-    """Update a product. Only the owner can update."""
+    """Update a product. Only the owner (seller) can update."""
     sb = get_supabase()
 
     # Verify ownership
@@ -303,8 +303,8 @@ async def update_product(product_id: str, req: UpdateProductRequest, current_use
     if existing.data[0]["seller_id"] != current_user["sub"]:
         raise HTTPException(status_code=403, detail="Not your product")
 
-    # Build update dict (only non-None fields)
-    update_data = {k: v for k, v in req.model_dump().items() if v is not None}
+    # Build update dict — use model_fields_set so falsy values (False, 0) are not dropped
+    update_data = {k: v for k, v in req.model_dump().items() if k in req.model_fields_set}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
