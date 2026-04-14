@@ -291,14 +291,12 @@ export default function ReportsContent() {
                         ) : (
                             <div style={{ overflowX: 'auto' }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                                    <thead><tr style={{ borderBottom: '2px solid var(--border-color)' }}><th style={thStyle}>Product</th><th style={thStyle}>Amount</th><th style={thStyle}>Your Share</th><th style={thStyle}>Commission</th><th style={thStyle}>Date</th></tr></thead>
+                                    <thead><tr style={{ borderBottom: '2px solid var(--border-color)' }}><th style={thStyle}>Product</th><th style={thStyle}>Amount</th><th style={thStyle}>Date</th></tr></thead>
                                     <tbody>
                                         {mySellerTxns.slice(0, 10).map(t => (
                                             <tr key={t.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                                 <td style={tdStyle}>{t.product_title || 'Unknown'}</td>
                                                 <td style={tdStyle}>₱{t.amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#10b981', fontWeight: 600 }}>₱{t.seller_amount.toFixed(2)}</td>
-                                                <td style={{ ...tdStyle, color: '#ef4444' }}>₱{t.admin_commission.toFixed(2)}</td>
                                                 <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>{new Date(t.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' })}</td>
                                             </tr>
                                         ))}
@@ -344,22 +342,6 @@ export default function ReportsContent() {
                                 })}
                             </div>
                         )}
-                    </div>
-                    <div className="card" style={{ marginBottom: 24 }}>
-                        <h3 style={{ marginBottom: 16 }}>Tracking Number Status</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                            <div style={{ padding: 16, borderRadius: 8, textAlign: 'center', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
-                                <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981' }}>{productsWithTracking.length}</p>
-                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>With Tracking</p>
-                            </div>
-                            <div style={{ padding: 16, borderRadius: 8, textAlign: 'center', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                                <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ef4444' }}>{products.length - productsWithTracking.length}</p>
-                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Without Tracking</p>
-                            </div>
-                        </div>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            Fulfillment Rate: <strong style={{ color: 'var(--text-primary)' }}>{products.length > 0 ? ((productsWithTracking.length / products.length) * 100).toFixed(0) : 0}%</strong>
-                        </p>
                     </div>
                     {lowStockProducts.length > 0 && (
                         <div className="card" style={{ borderLeft: '4px solid #f59e0b' }}>

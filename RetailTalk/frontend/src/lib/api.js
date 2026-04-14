@@ -558,7 +558,8 @@ export async function managerRemoveStaff(userId) {
 }
 
 export async function managerGetRestockRequests(status = 'pending_manager') {
-    return apiFetch(`/manager/restock-requests?status=${encodeURIComponent(status)}`);
+    const q = status ? `?status=${encodeURIComponent(status)}` : '';
+    return apiFetch(`/manager/restock-requests${q}`);
 }
 
 export async function managerApproveRestock(requestId, data = {}) {
@@ -661,6 +662,27 @@ export async function managerReassignOrder(transactionId, staffId) {
     return apiFetch(`/transactions/manager/reassign/${transactionId}`, {
         method: 'PUT',
         body: JSON.stringify({ staff_id: staffId }),
+    });
+}
+
+export async function managerRestockDirect(productId, quantity, notes = '') {
+    return apiFetch('/manager/restock-direct', {
+        method: 'POST',
+        body: JSON.stringify({ product_id: productId, quantity, notes }),
+    });
+}
+
+export async function managerChangeStaffPassword(userId, newPassword) {
+    return apiFetch(`/manager/staff/${userId}/change-password`, {
+        method: 'PUT',
+        body: JSON.stringify({ new_password: newPassword }),
+    });
+}
+
+export async function adminChangeUserPassword(userId, newPassword) {
+    return apiFetch(`/admin/users/${userId}/change-password`, {
+        method: 'PUT',
+        body: JSON.stringify({ new_password: newPassword }),
     });
 }
 

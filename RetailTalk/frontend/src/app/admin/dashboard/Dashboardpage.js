@@ -13,11 +13,12 @@ import {
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminUpdateDepartment, adminDeleteDepartment, adminRegisterManager,
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
-    adminGetDeliveriesStats,
+    adminGetDeliveriesStats, adminGetRestockRequests,
     getBalance, withdraw, getSVFHistory, searchProducts,
     getAdminWishlistReport,
     adminCreateProductForDept, uploadProductImage,
     adminGetSalaries, adminSetSalary, adminPayAll, adminPayStore, adminPayIndividual,
+    adminChangeUserPassword,
 } from '../../../lib/api';
 import Toast from '../../components/Toast';
 
@@ -617,6 +618,7 @@ export default function AdminDashboard() {
     const [userDateFrom, setUserDateFrom] = useState('');
     const [userDateTo, setUserDateTo] = useState('');
     const [transactions, setTransactions] = useState([]);
+    const [restockOrders, setRestockOrders] = useState([]);
     const [txnSearch, setTxnSearch] = useState('');
     const [reports, setReports] = useState(null);
     const [selectedReportStore, setSelectedReportStore] = useState('');
@@ -641,6 +643,8 @@ export default function AdminDashboard() {
     const [selectedUserId, setSelectedUserId] = useState(null);
     const [userDetail, setUserDetail] = useState(null);
     const [userDetailLoading, setUserDetailLoading] = useState(false);
+    const [userNewPassword, setUserNewPassword] = useState('');
+    const [userPwLoading, setUserPwLoading] = useState(false);
     // Pending products state
     const [pendingProducts, setPendingProducts] = useState([]);
     const [selectedPendingProduct, setSelectedPendingProduct] = useState(null);
@@ -838,6 +842,9 @@ export default function AdminDashboard() {
     const loadTransactions = async (search = '') => {
         try { setTransactions(await adminGetTransactions(search)); } catch (e) { console.error(e); }
     };
+    const loadRestockOrders = async () => {
+        try { setRestockOrders(await adminGetRestockRequests()); } catch (e) { console.error(e); }
+    };
     const loadReports = async () => {
         try { setReports(await adminGetReports()); } catch (e) { console.error(e); }
     };
@@ -850,7 +857,7 @@ export default function AdminDashboard() {
     useEffect(() => {
         if (!authChecked) return;
         if (activeTab === 'users') { loadUsers('', userRoleFilter); loadDepartments(); }
-        if (activeTab === 'transactions') loadTransactions();
+        if (activeTab === 'transactions') { loadTransactions(); loadRestockOrders(); }
         if (activeTab === 'reports') loadReports();
         if (activeTab === 'products') loadProducts();
         if (activeTab === 'inventory') loadProducts();
@@ -1161,6 +1168,24 @@ export default function AdminDashboard() {
     const closeUserPanel = () => {
         setSelectedUserId(null);
         setUserDetail(null);
+        setUserNewPassword('');
+    };
+
+    const handleChangeUserPassword = async (userId) => {
+        if (!userNewPassword || userNewPassword.length < 6) {
+            setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+            return;
+        }
+        setUserPwLoading(true);
+        try {
+            await adminChangeUserPassword(userId, userNewPassword);
+            setMessage({ type: 'success', text: 'Password updated successfully.' });
+            setUserNewPassword('');
+        } catch (e) {
+            setMessage({ type: 'error', text: e.message });
+        } finally {
+            setUserPwLoading(false);
+        }
     };
     if (!authChecked) {
         return (
@@ -3047,6 +3072,48 @@ export default function AdminDashboard() {
                                     </div>
                                     {otherTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No past transactions found</p></div>}
                                 </div>
+
+                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>Restock Request Orders</h3>
+                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                    <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store/Dept</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Staff</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty Requested</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {restockOrders && restockOrders.map(t => {
+                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                    const sLabel = statusLabels[t.status] || (t.status ? t.status.replace(/_/g, ' ') : '');
+                                                    return (
+                                                        <tr key={t.id}>
+                                                            <td style={{ fontWeight: 500 }}>{t.department_name || 'N/A'}</td>
+                                                            <td style={{ fontWeight: 500 }}>{t.staff_name || 'N/A'}</td>
+                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title || 'N/A'}</td>
+                                                            <td>{t.requested_quantity}</td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
+                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap', textTransform: 'capitalize'
+                                                                }}>{sLabel}</span>
+                                                            </td>
+                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
+                                                                {new Date(t.created_at).toLocaleString()}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {(!restockOrders || restockOrders.length === 0) && <div className="empty-state" style={{ padding: 40 }}><p>No restock requests found</p></div>}
+                                </div>
                             </div>
                         );
                     })()}
@@ -3636,6 +3703,60 @@ export default function AdminDashboard() {
                                                     ))}
                                                 </tbody>
                                             </table>
+                                        )}
+                                    </div>
+
+                                    {/* Order Pickup History */}
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: 24 }}>
+                                        <div style={{ padding: 24, borderBottom: '1px solid var(--admin-border)' }}>
+                                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Order Pickup History</h3>
+                                            <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.85rem' }}>Timestamps for when deliverymen picked up orders</p>
+                                        </div>
+                                        {(!deliveriesStats.pickup_history || deliveriesStats.pickup_history.length === 0) ? (
+                                            <div style={{ padding: 40, textAlign: 'center', color: 'var(--admin-text-muted)' }}>
+                                                <p>No pickup history available</p>
+                                            </div>
+                                        ) : (
+                                            <div style={{ overflowX: 'auto', maxHeight: 400, overflowY: 'auto' }}>
+                                                <table className="data-table">
+                                                    <thead style={{ position: 'sticky', top: 0, background: 'var(--admin-card)', zIndex: 1 }}>
+                                                        <tr>
+                                                            <th>Transaction ID</th>
+                                                            <th>Deliveryman</th>
+                                                            <th>Amount</th>
+                                                            <th>Status</th>
+                                                            <th>Picked Up At</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {deliveriesStats.pickup_history.map((history, i) => {
+                                                            const pickupDate = new Date(history.picked_up_at);
+                                                            const formattedDate = pickupDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+                                                            const formattedTime = pickupDate.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                                                            return (
+                                                                <tr key={i}>
+                                                                    <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{history.transaction_id.substring(0, 8)}...</td>
+                                                                    <td style={{ fontWeight: 600 }}>{history.deliveryman_name}</td>
+                                                                    <td>₱{history.amount.toFixed(2)}</td>
+                                                                    <td>
+                                                                        <span style={{ 
+                                                                            background: history.status === 'delivered' ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', 
+                                                                            color: history.status === 'delivered' ? 'var(--accent-success)' : 'var(--accent-warning)', 
+                                                                            padding: '4px 8px', borderRadius: 4, fontSize: '0.85rem', textTransform: 'capitalize' 
+                                                                        }}>
+                                                                            {history.status}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td>
+                                                                        <div style={{ fontWeight: 600 }}>{formattedDate}</div>
+                                                                        <div style={{ fontSize: '0.8rem', color: 'var(--admin-text-muted)' }}>{formattedTime}</div>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         )}
                                     </div>
                                 </>
@@ -4476,6 +4597,26 @@ export default function AdminDashboard() {
                                     <div>
                                         <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 4 }}>Total Transactions</p>
                                         <p style={{ fontSize: '0.85rem', fontWeight: 700 }}>{userDetail.report.total_transactions}</p>
+                                    </div>
+                                </div>
+                                {/* Change Password */}
+                                <div style={{ marginBottom: 24, padding: 16, borderRadius: 12, background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)' }}>
+                                    <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 10, fontWeight: 600 }}>Change Password</p>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <input
+                                            type="password"
+                                            placeholder="New password (min 6 chars)"
+                                            value={userNewPassword}
+                                            onChange={e => setUserNewPassword(e.target.value)}
+                                            style={{ flex: 1, padding: '9px 12px', borderRadius: 8, background: 'var(--admin-bg)', border: '1px solid var(--admin-border)', color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem' }}
+                                        />
+                                        <button
+                                            onClick={() => handleChangeUserPassword(userDetail.user.id)}
+                                            disabled={userPwLoading}
+                                            style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: '#6366f1', color: '#fff', fontWeight: 700, fontSize: '0.8rem', cursor: userPwLoading ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif', opacity: userPwLoading ? 0.6 : 1, whiteSpace: 'nowrap' }}
+                                        >
+                                            {userPwLoading ? '...' : 'Update'}
+                                        </button>
                                     </div>
                                 </div>
                                 {/* ===== SELLER INFOGRAPHICS (only for sellers) ===== */}

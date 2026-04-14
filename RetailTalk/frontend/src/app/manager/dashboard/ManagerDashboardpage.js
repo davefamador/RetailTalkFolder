@@ -11,6 +11,7 @@ import {
     getManagerDeliveryOrders, managerUpdateDeliveryOrderStatus,
     managerRequestProductRemoval, getSellerWishlistReport,
     managerReassignOrder, getSalaryHistory, getBalance, withdraw,
+    managerRestockDirect, managerChangeStaffPassword,
 } from '../../../lib/api';
 import {
     LayoutDashboard, Users, Package, ShoppingCart, Truck, Tag,
@@ -284,6 +285,17 @@ export default function ManagerDashboard() {
     const [mgrTxnTypeFilter, setMgrTxnTypeFilter] = useState('all');
     const [mgrTxnStatusFilter, setMgrTxnStatusFilter] = useState('all');
 
+    // Transactions sub-tab
+    const [txnSubTab, setTxnSubTab] = useState('orders');
+    const [restockHistory, setRestockHistory] = useState([]);
+    const [restockHistoryLoading, setRestockHistoryLoading] = useState(false);
+
+    // Direct restock popup
+    const [restockPopupProduct, setRestockPopupProduct] = useState(null);
+    const [restockDirectQty, setRestockDirectQty] = useState('');
+    const [restockDirectNotes, setRestockDirectNotes] = useState('');
+    const [restockDirectLoading, setRestockDirectLoading] = useState(false);
+
     // Create product modal
     const [showCreateProduct, setShowCreateProduct] = useState(false);
     const [productForm, setProductForm] = useState({ title: '', description: '', price: '', stock: '' });
@@ -299,6 +311,10 @@ export default function ManagerDashboard() {
     const [selectedStaffId, setSelectedStaffId] = useState(null);
     const [staffDetail, setStaffDetail] = useState(null);
     const [staffDetailLoading, setStaffDetailLoading] = useState(false);
+
+    // Change staff password
+    const [staffNewPassword, setStaffNewPassword] = useState('');
+    const [staffPwLoading, setStaffPwLoading] = useState(false);
 
     // Delivery orders
     const [mgrDeliveryOrders, setMgrDeliveryOrders] = useState([]);
@@ -367,6 +383,11 @@ export default function ManagerDashboard() {
     const loadMgrTransactions = async (search = '') => {
         try { setMgrTransactions(await managerGetTransactions(search)); } catch (e) { console.error(e); }
     };
+    const loadRestockHistory = async () => {
+        setRestockHistoryLoading(true);
+        try { setRestockHistory(await managerGetRestockRequests('')); } catch (e) { console.error(e); }
+        finally { setRestockHistoryLoading(false); }
+    };
     const loadMgrDeliveryOrders = async () => {
         try { setMgrDeliveryOrders(await getManagerDeliveryOrders()); } catch (e) { console.error(e); }
     };
@@ -418,6 +439,25 @@ export default function ManagerDashboard() {
         finally { setReassignLoading(false); }
     };
 
+    const handleRestockDirect = async () => {
+        if (!restockPopupProduct || !restockDirectQty || parseInt(restockDirectQty) < 1) {
+            setMessage({ type: 'error', text: 'Please enter a valid quantity.' });
+            return;
+        }
+        setRestockDirectLoading(true);
+        try {
+            await managerRestockDirect(restockPopupProduct.id, parseInt(restockDirectQty), restockDirectNotes);
+            setMessage({ type: 'success', text: `Restock order for "${restockPopupProduct.title}" sent to delivery queue!` });
+            setRestockPopupProduct(null);
+            setRestockDirectQty('');
+            setRestockDirectNotes('');
+        } catch (e) {
+            setMessage({ type: 'error', text: e.message });
+        } finally {
+            setRestockDirectLoading(false);
+        }
+    };
+
     const handleRequestRemoval = async (productId) => {
         if (!window.confirm('Are you sure you want to request removal of this product?')) return;
         setRemovalLoading(true);
@@ -437,7 +477,7 @@ export default function ManagerDashboard() {
         if (activeTab === 'staff') loadStaff();
         if (activeTab === 'restock') loadRestockRequests(restockFilter);
         if (activeTab === 'products') loadMgrProducts();
-        if (activeTab === 'transactions') loadMgrTransactions();
+        if (activeTab === 'transactions') { loadMgrTransactions(); loadRestockHistory(); }
         if (activeTab === 'delivery_orders') loadMgrDeliveryOrders();
         if (activeTab === 'wishlist') loadWishlistReport();
         if (activeTab === 'salary') loadSalaryInfo();
@@ -476,6 +516,24 @@ export default function ManagerDashboard() {
     const closeStaffPanel = () => {
         setSelectedStaffId(null);
         setStaffDetail(null);
+        setStaffNewPassword('');
+    };
+
+    const handleChangeStaffPassword = async (userId) => {
+        if (!staffNewPassword || staffNewPassword.length < 6) {
+            setMessage({ type: 'error', text: 'Password must be at least 6 characters.' });
+            return;
+        }
+        setStaffPwLoading(true);
+        try {
+            await managerChangeStaffPassword(userId, staffNewPassword);
+            setMessage({ type: 'success', text: 'Password updated successfully.' });
+            setStaffNewPassword('');
+        } catch (e) {
+            setMessage({ type: 'error', text: e.message });
+        } finally {
+            setStaffPwLoading(false);
+        }
     };
 
     const handleRemoveStaff = async (userId, staffName) => {
@@ -1561,7 +1619,10 @@ export default function ManagerDashboard() {
                                         </thead>
                                         <tbody>
                                             {mgrProducts.map((p) => (
-                                                <tr key={p.id}>
+                                                <tr key={p.id} onClick={() => { setRestockPopupProduct(p); setRestockDirectQty(''); setRestockDirectNotes(''); }}
+                                                    style={{ cursor: 'pointer', transition: 'background 0.15s' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.06)'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = ''}>
                                                     <td>
                                                         {p.images && p.images[0] ? (
                                                             <img
@@ -1615,6 +1676,59 @@ export default function ManagerDashboard() {
                                             ))}
                                         </tbody>
                                     </table>
+                                </div>
+                            )}
+
+                            {/* Direct Restock Modal */}
+                            {restockPopupProduct && (
+                                <div style={{
+                                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+                                    zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }} onClick={() => setRestockPopupProduct(null)}>
+                                    <div style={{
+                                        background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
+                                        width: 420, maxWidth: '90vw', border: '1px solid var(--border-color)',
+                                        boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                                    }} onClick={e => e.stopPropagation()}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+                                            {restockPopupProduct.images?.[0] && (
+                                                <img src={restockPopupProduct.images[0]} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 10 }} />
+                                            )}
+                                            <div>
+                                                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, marginBottom: 2 }}>Restock Order</h2>
+                                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{restockPopupProduct.title}</p>
+                                                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Current stock: <strong style={{ color: (restockPopupProduct.stock || 0) === 0 ? '#ef4444' : (restockPopupProduct.stock || 0) <= 5 ? '#f59e0b' : '#10b981' }}>{restockPopupProduct.stock || 0}</strong></p>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Quantity to Restock *</label>
+                                                <input type="number" min="1" placeholder="Enter quantity"
+                                                    value={restockDirectQty}
+                                                    onChange={e => setRestockDirectQty(e.target.value)}
+                                                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem', boxSizing: 'border-box' }}
+                                                />
+                                            </div>
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Notes (optional)</label>
+                                                <textarea placeholder="Add notes for the delivery team..." rows={2}
+                                                    value={restockDirectNotes}
+                                                    onChange={e => setRestockDirectNotes(e.target.value)}
+                                                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem', resize: 'vertical', boxSizing: 'border-box' }}
+                                                />
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                                                <button onClick={handleRestockDirect} disabled={restockDirectLoading}
+                                                    style={{ flex: 1, padding: '12px 0', borderRadius: 10, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontWeight: 700, fontSize: '0.9rem', cursor: restockDirectLoading ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                                                    {restockDirectLoading ? 'Sending...' : 'Send to Delivery'}
+                                                </button>
+                                                <button onClick={() => setRestockPopupProduct(null)}
+                                                    style={{ padding: '12px 20px', borderRadius: 10, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif' }}>
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 
@@ -1809,61 +1923,135 @@ export default function ManagerDashboard() {
                         pending: '#f59e0b', approved: '#10b981',
                     };
                     const allStatuses = [...new Set(mgrTransactions.map(t => t.status))].sort();
+                    const restockStatusClr = {
+                        pending_manager: '#f59e0b', approved_manager: '#3b82f6',
+                        rejected_manager: '#ef4444', delivered: '#10b981',
+                    };
                     return (
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                                <div>
-                                    <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Order History</h1>
-                                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Store-wide purchase history — shared across all staff</p>
-                                </div>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <select
-                                        value={mgrTxnStatusFilter} onChange={e => setMgrTxnStatusFilter(e.target.value)}
-                                        style={{
-                                            padding: '10px 14px', borderRadius: 10,
-                                            background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                                            color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
-                                        }}
-                                    >
-                                        <option value="all">All Statuses</option>
-                                        {allStatuses.map(s => (
-                                            <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                            <div style={{ marginBottom: 24 }}>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: 4 }}>History</h1>
+                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Store-wide purchase and restock history</p>
                             </div>
-                            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                <table className="data-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Buyer</th><th>Staff</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Date</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredTxns.map(t => (
-                                            <tr key={t.id}>
-                                                <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.assigned_staff_name || 'Unassigned'}</td>
-                                                <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
-                                                <td>{t.quantity}</td>
-                                                <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
 
-                                                <td>
-                                                    <span style={{
-                                                        padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                        background: `${statusClr[t.status] || '#94a3b8'}15`,
-                                                        color: statusClr[t.status] || '#94a3b8',
-                                                    }}>{t.status.replace('_', ' ')}</span>
-                                                </td>
-                                                <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                    {new Date(t.created_at).toLocaleDateString()}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
+                            {/* Sub-tab buttons */}
+                            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                                {[
+                                    { key: 'orders', label: 'Order History' },
+                                    { key: 'restock', label: 'Restock History' },
+                                ].map(sub => (
+                                    <button key={sub.key} onClick={() => setTxnSubTab(sub.key)} style={{
+                                        padding: '9px 20px', borderRadius: 10, cursor: 'pointer', fontWeight: 700,
+                                        fontSize: '0.85rem', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                        border: txnSubTab === sub.key ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                                        background: txnSubTab === sub.key ? 'rgba(99,102,241,0.15)' : 'transparent',
+                                        color: txnSubTab === sub.key ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                                    }}>{sub.label}</button>
+                                ))}
                             </div>
+
+                            {/* ORDER HISTORY sub-tab */}
+                            {txnSubTab === 'orders' && (
+                                <>
+                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                                        <select
+                                            value={mgrTxnStatusFilter} onChange={e => setMgrTxnStatusFilter(e.target.value)}
+                                            style={{
+                                                padding: '10px 14px', borderRadius: 10,
+                                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                            }}
+                                        >
+                                            <option value="all">All Statuses</option>
+                                            {allStatuses.map(s => (
+                                                <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Buyer</th><th>Staff</th><th>Product</th><th>Qty</th><th>Amount</th><th>Status</th><th>Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {filteredTxns.map(t => (
+                                                    <tr key={t.id}>
+                                                        <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.assigned_staff_name || 'Unassigned'}</td>
+                                                        <td style={{ color: 'var(--text-secondary)' }}>{t.product_title}</td>
+                                                        <td>{t.quantity}</td>
+                                                        <td style={{ fontWeight: 600 }}>₱{t.amount.toFixed(2)}</td>
+                                                        <td>
+                                                            <span style={{
+                                                                padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                                background: `${statusClr[t.status] || '#94a3b8'}15`,
+                                                                color: statusClr[t.status] || '#94a3b8',
+                                                            }}>{t.status.replace('_', ' ')}</span>
+                                                        </td>
+                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                            {new Date(t.created_at).toLocaleDateString()}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {filteredTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No transactions found</p></div>}
+                                    </div>
+                                </>
+                            )}
+
+                            {/* RESTOCK HISTORY sub-tab */}
+                            {txnSubTab === 'restock' && (
+                                restockHistoryLoading ? (
+                                    <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                                        <div className="spinner" style={{ width: 36, height: 36 }} />
+                                    </div>
+                                ) : (
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Product</th><th>Requested By</th><th>Qty Requested</th><th>Qty Approved</th><th>Status</th><th>Notes</th><th>Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {restockHistory.map(r => (
+                                                    <tr key={r.id}>
+                                                        <td>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                {r.product_images?.[0] && (
+                                                                    <img src={r.product_images[0]} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} onError={e => e.target.style.display = 'none'} />
+                                                                )}
+                                                                <span style={{ fontWeight: 500 }}>{r.product_title || 'Unknown'}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{r.staff_name || 'Manager'}</td>
+                                                        <td style={{ fontWeight: 600 }}>{r.requested_quantity}</td>
+                                                        <td style={{ color: '#10b981', fontWeight: 600 }}>{r.approved_quantity ?? '—'}</td>
+                                                        <td>
+                                                            <span style={{
+                                                                padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                                background: `${restockStatusClr[r.status] || '#94a3b8'}15`,
+                                                                color: restockStatusClr[r.status] || '#94a3b8',
+                                                                textTransform: 'capitalize',
+                                                            }}>{r.status.replace(/_/g, ' ')}</span>
+                                                        </td>
+                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: 160 }}>
+                                                            {r.notes || r.manager_notes || '—'}
+                                                        </td>
+                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                            {new Date(r.created_at).toLocaleDateString()}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        {restockHistory.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No restock history found</p></div>}
+                                    </div>
+                                )
+                            )}
                         </div>
                     );
                 })()}
@@ -1958,6 +2146,27 @@ export default function ManagerDashboard() {
                                         </span>
                                     </div>
 
+                                </div>
+
+                                {/* Change Password */}
+                                <div style={{ marginBottom: 24, padding: 16, borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', marginBottom: 10, fontWeight: 600 }}>Change Password</p>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <input
+                                            type="password"
+                                            placeholder="New password (min 6 chars)"
+                                            value={staffNewPassword}
+                                            onChange={e => setStaffNewPassword(e.target.value)}
+                                            style={{ flex: 1, padding: '9px 12px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem' }}
+                                        />
+                                        <button
+                                            onClick={() => handleChangeStaffPassword(staffDetail.user.id)}
+                                            disabled={staffPwLoading}
+                                            style={{ padding: '9px 16px', borderRadius: 8, border: 'none', background: 'var(--accent-primary)', color: '#fff', fontWeight: 700, fontSize: '0.8rem', cursor: staffPwLoading ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif', opacity: staffPwLoading ? 0.6 : 1, whiteSpace: 'nowrap' }}
+                                        >
+                                            {staffPwLoading ? '...' : 'Update'}
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* Report Stats */}
