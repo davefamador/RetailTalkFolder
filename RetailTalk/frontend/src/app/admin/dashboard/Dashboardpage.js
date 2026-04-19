@@ -14,7 +14,7 @@ import {
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminUpdateDepartment, adminDeleteDepartment, adminRegisterManager,
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
     adminGetDeliveriesStats, adminGetRestockRequests,
-    getBalance, withdraw, getSVFHistory, searchProducts,
+    getBalance, withdraw, deposit, getSVFHistory, searchProducts,
     getAdminWishlistReport,
     adminCreateProductForDept, uploadProductImage,
     adminGetSalaries, adminSetSalary, adminPayAll, adminPayStore, adminPayIndividual,
@@ -687,6 +687,8 @@ export default function AdminDashboard() {
     const [svfHistory, setSvfHistory] = useState([]);
     const [withdrawAmount, setWithdrawAmount] = useState('');
     const [withdrawLoading, setWithdrawLoading] = useState(false);
+    const [depositAmount, setDepositAmount] = useState('');
+    const [depositLoading, setDepositLoading] = useState(false);
     // Admin search state
     const [adminSearchQuery, setAdminSearchQuery] = useState('');
     const [adminSearchResults, setAdminSearchResults] = useState(null);
@@ -756,6 +758,19 @@ export default function AdminDashboard() {
             loadSvfHistory();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
         finally { setWithdrawLoading(false); }
+    };
+    const handleDeposit = async () => {
+        const amt = parseFloat(depositAmount);
+        if (!amt || amt <= 0) { setMessage({ type: 'error', text: 'Enter a valid amount' }); return; }
+        setDepositLoading(true);
+        try {
+            const res = await deposit(amt);
+            setAdminBalance(res.balance || 0);
+            setDepositAmount('');
+            setMessage({ type: 'success', text: `Successfully deposited ₱${amt.toFixed(2)}` });
+            loadSvfHistory();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setDepositLoading(false); }
     };
     const handleAdminSearch = async (e) => {
         e.preventDefault();
@@ -1626,14 +1641,14 @@ export default function AdminDashboard() {
                                                     <span style={{
                                                         padding: '4px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
                                                         textTransform: 'capitalize',
-                                                        background: u.role === 'seller' ? 'rgba(108,99,255,0.1)' : u.role === 'admin' ? 'rgba(239,68,68,0.1)' : u.role === 'delivery' ? 'rgba(59,130,246,0.1)' : u.role === 'manager' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
-                                                        color: u.role === 'seller' ? '#6366f1' : u.role === 'admin' ? '#ef4444' : u.role === 'delivery' ? '#3b82f6' : u.role === 'manager' ? '#f59e0b' : '#10b981',
+                                                        background: u.role === 'staff' ? 'rgba(108,99,255,0.1)' : u.role === 'admin' ? 'rgba(239,68,68,0.1)' : u.role === 'delivery' ? 'rgba(59,130,246,0.1)' : u.role === 'manager' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)',
+                                                        color: u.role === 'staff' ? '#6366f1' : u.role === 'admin' ? '#ef4444' : u.role === 'delivery' ? '#3b82f6' : u.role === 'manager' ? '#f59e0b' : '#10b981',
                                                     }}>
                                                         {u.role}
                                                     </span>
                                                 </td>
                                                 <td>
-                                                    {(u.role === 'seller' || u.role === 'manager') ? (
+                                                    {(u.role === 'staff' || u.role === 'manager') ? (
                                                         <select
                                                             value={u.department_id || ''}
                                                             onClick={e => e.stopPropagation()}
@@ -2284,7 +2299,7 @@ export default function AdminDashboard() {
                                                                         const sd = selectedStaffDetail;
                                                                         const si = sd.staff_info || {};
                                                                         // Filter to only transactions where this staff was the seller
-                                                                        const sellerTxns = (sd.transactions || []).filter(t => t.role_in_txn === 'seller');
+                                                                        const sellerTxns = (sd.transactions || []).filter(t => t.role_in_txn === 'staff');
                                                                         // Build line graph data from seller transactions
                                                                         const txnsByMonth = {};
                                                                         const deliveriesByMonth = {};
@@ -3079,8 +3094,7 @@ export default function AdminDashboard() {
                                         <table className="data-table">
                                             <thead>
                                                 <tr>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store/Dept</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Staff</th>
+                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty Requested</th>
                                                     <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
@@ -3094,7 +3108,6 @@ export default function AdminDashboard() {
                                                     return (
                                                         <tr key={t.id}>
                                                             <td style={{ fontWeight: 500 }}>{t.department_name || 'N/A'}</td>
-                                                            <td style={{ fontWeight: 500 }}>{t.staff_name || 'N/A'}</td>
                                                             <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title || 'N/A'}</td>
                                                             <td>{t.requested_quantity}</td>
                                                             <td>
@@ -4283,7 +4296,7 @@ export default function AdminDashboard() {
                                 }}>
                                     <X size={14} /> Back
                                 </button>
-                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Admin Wallet</h1>
+                                <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Admin Balance</h1>
                             </div>
                             {/* Balance Card */}
                             <div style={{
@@ -4294,6 +4307,35 @@ export default function AdminDashboard() {
                                 <div style={{ position: 'absolute', top: -20, right: -20, width: 120, height: 120, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
                                 <p style={{ fontSize: '0.85rem', opacity: 0.8, marginBottom: 6 }}>Available Balance</p>
                                 <p style={{ fontSize: '2.2rem', fontWeight: 800, marginBottom: 16 }}>₱{adminBalance.toFixed(2)}</p>
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+                                    <input
+                                        type="number"
+                                        placeholder="Amount to deposit"
+                                        value={depositAmount}
+                                        onChange={e => setDepositAmount(e.target.value)}
+                                        style={{
+                                            flex: 1, padding: '10px 14px', borderRadius: 10,
+                                            border: '1px solid rgba(255,255,255,0.3)',
+                                            background: 'rgba(255,255,255,0.15)', color: '#fff',
+                                            fontSize: '0.9rem', fontFamily: 'Inter, sans-serif',
+                                            outline: 'none',
+                                        }}
+                                    />
+                                    <button
+                                        onClick={handleDeposit}
+                                        disabled={depositLoading}
+                                        style={{
+                                            padding: '10px 24px', borderRadius: 10,
+                                            background: '#10b981', color: '#fff',
+                                            border: 'none', fontWeight: 700, fontSize: '0.9rem',
+                                            cursor: depositLoading ? 'not-allowed' : 'pointer',
+                                            opacity: depositLoading ? 0.7 : 1,
+                                            fontFamily: 'Inter, sans-serif',
+                                        }}
+                                    >
+                                        {depositLoading ? 'Processing...' : 'Deposit'}
+                                    </button>
+                                </div>
                                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                                     <input
                                         type="number"
@@ -4530,8 +4572,8 @@ export default function AdminDashboard() {
                                         <span style={{
                                             padding: '3px 10px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
                                             textTransform: 'capitalize',
-                                            background: userDetail.user.role === 'seller' ? 'rgba(108,99,255,0.1)' : userDetail.user.role === 'delivery' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-                                            color: userDetail.user.role === 'seller' ? '#6366f1' : userDetail.user.role === 'delivery' ? '#3b82f6' : '#10b981',
+                                            background: userDetail.user.role === 'staff' ? 'rgba(108,99,255,0.1)' : userDetail.user.role === 'delivery' ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
+                                            color: userDetail.user.role === 'staff' ? '#6366f1' : userDetail.user.role === 'delivery' ? '#3b82f6' : '#10b981',
                                         }}>{userDetail.user.role}</span>
                                     </div>
                                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -4620,7 +4662,7 @@ export default function AdminDashboard() {
                                     </div>
                                 </div>
                                 {/* ===== SELLER INFOGRAPHICS (only for sellers) ===== */}
-                                {userDetail.user.role === 'seller' && (
+                                {userDetail.user.role === 'staff' && (
                                     <>
                                         {/* Seller Report Stat Cards */}
                                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
@@ -4785,7 +4827,7 @@ export default function AdminDashboard() {
                                     </>
                                 )}
                                 {/* ===== RECENT PRODUCTS HANDLED (sellers only) ===== */}
-                                {userDetail.user.role === 'seller' && userDetail.recent_products_handled && userDetail.recent_products_handled.length > 0 && (
+                                {userDetail.user.role === 'staff' && userDetail.recent_products_handled && userDetail.recent_products_handled.length > 0 && (
                                     <>
                                         <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 12 }}><Package size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />Recent Products Handled</h3>
                                         <div style={{
@@ -4846,7 +4888,7 @@ export default function AdminDashboard() {
                                                 delivered: '#10b981', undelivered: '#ef4444', disapproved: '#ef4444',
                                                 completed: '#10b981', cancelled: '#ef4444',
                                             };
-                                            const roleClr = { buyer: '#10b981', seller: '#6366f1', delivery: '#3b82f6' };
+                                            const roleClr = { buyer: '#10b981', staff: '#6366f1', delivery: '#3b82f6' };
                                             return (
                                                 <div key={t.id} style={{
                                                     padding: 12, borderRadius: 10,

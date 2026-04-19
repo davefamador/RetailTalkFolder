@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import torch
 from collections import Counter
-from query_product import QueryProductClassifier, generate_dataset, train
+from query_product import QueryProductClassifier, generate_dataset, train, evaluate_esci_model
 from sklearn.model_selection import train_test_split
 
 def compute_class_weights(labels_array, num_classes):
@@ -89,23 +89,46 @@ def main():
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     train(
-        model, 
-        train_dataset, 
-        dev_dataset, 
-        args.model_save_path, 
-        device=train_device, 
-        batch_size=args.batch_size, 
-        weight_decay=args.weight_decay, 
-        num_train_epochs=args.num_train_epochs, 
-        lr=args.lr, 
-        eps=args.eps, 
-        num_warmup_steps=args.num_warmup_steps, 
+        model,
+        train_dataset,
+        dev_dataset,
+        args.model_save_path,
+        device=train_device,
+        batch_size=args.batch_size,
+        weight_decay=args.weight_decay,
+        num_train_epochs=args.num_train_epochs,
+        lr=args.lr,
+        eps=args.eps,
+        num_warmup_steps=args.num_warmup_steps,
         max_grad_norm=args.max_grad_norm,
         validation_steps=args.validation_steps,
         random_seed=args.random_state,
         class_weights=class_weights,
     )
 
+    """ 3. Final evaluation — load best model, compute confusion matrix """
+    import os
+    best_model_path = os.path.join(args.model_save_path, "pytorch_model.bin")
+    if os.path.exists(best_model_path):
+        print(f"\nLoading best model from {best_model_path} for final evaluation...")
+        best_model = QueryProductClassifier(
+            num_labels=num_labels,
+            dense_hidden_dim=args.dense_hidden_dim,
+            num_dense_layers=args.num_dense_layers,
+        )
+        best_model.load_state_dict(torch.load(best_model_path, map_location=train_device))
+        best_model.to(train_device)
+        evaluate_esci_model(
+            best_model,
+            dev_dataset,
+            args.model_save_path,
+            device=train_device,
+            batch_size=args.batch_size,
+            task=args.task,
+        )
+    else:
+        print(f"\nWarning: no saved model found at {best_model_path}, skipping final evaluation.")
 
-if __name__ == "__main__": 
-    main()  
+
+if __name__ == "__main__":
+    main()

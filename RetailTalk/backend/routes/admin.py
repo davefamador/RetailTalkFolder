@@ -171,7 +171,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
     # Role counts
     buyers_count = sb.table("users").select("id", count="exact").eq("role", "buyer").execute()
     managers_count = sb.table("users").select("id", count="exact").eq("role", "manager").execute()
-    staff_count = sb.table("users").select("id", count="exact").eq("role", "seller").execute()
+    staff_count = sb.table("users").select("id", count="exact").eq("role", "staff").execute()
     delivery_count = sb.table("users").select("id", count="exact").eq("role", "delivery").execute()
     departments_count = sb.table("departments").select("id", count="exact").execute()
 
@@ -194,7 +194,7 @@ async def admin_dashboard(admin: dict = Depends(require_admin)):
 @router.get("/users", response_model=list[AdminUserResponse])
 async def list_users(
     search: str = Query("", description="Search by name or email"),
-    role: str = Query("", description="Filter by role (buyer, seller, manager, delivery)"),
+    role: str = Query("", description="Filter by role (buyer, staff, manager, delivery)"),
     department_id: str = Query("", description="Filter by department ID"),
     admin: dict = Depends(require_admin),
 ):
@@ -252,7 +252,7 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
 
 @router.put("/users/{user_id}/department")
 async def update_user_department(user_id: str, req: UpdateDepartmentRequest, admin: dict = Depends(require_admin)):
-    """Assign or remove a user from a department/store. Only for seller and manager roles."""
+    """Assign or remove a user from a department/store. Only for staff and manager roles."""
     sb = get_supabase()
 
     target = sb.table("users").select("id, role, department_id").eq("id", user_id).execute()
@@ -260,8 +260,8 @@ async def update_user_department(user_id: str, req: UpdateDepartmentRequest, adm
         raise HTTPException(status_code=404, detail="User not found")
 
     user = target.data[0]
-    if user["role"] not in ("seller", "manager"):
-        raise HTTPException(status_code=400, detail="Only staff (seller) and manager users can be assigned to a store")
+    if user["role"] not in ("staff", "manager"):
+        raise HTTPException(status_code=400, detail="Only staff and manager users can be assigned to a store")
 
     if req.department_id:
         dept = sb.table("departments").select("id, manager_id").eq("id", req.department_id).execute()
@@ -801,7 +801,7 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
 
     # For sellers, also fetch transactions assigned to them
     assigned_txns_data = []
-    if u["role"] == "seller":
+    if u["role"] == "staff":
         try:
             assigned = sb.table("product_transactions").select("*, products(title, images)").eq(
                 "assigned_staff_id", user_id
@@ -825,7 +825,7 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
                 "amount": float(t["amount"]),
                 "quantity": int(t.get("quantity", 1)),
                 "status": t["status"],
-                "role_in_txn": "buyer" if t["buyer_id"] == user_id else ("seller" if t["seller_id"] == user_id else "delivery"),
+                "role_in_txn": "buyer" if t["buyer_id"] == user_id else ("staff" if t["seller_id"] == user_id else "delivery"),
                 "created_at": t["created_at"],
             })
     transactions.sort(key=lambda x: x["created_at"], reverse=True)
@@ -872,7 +872,7 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
         monthly_data[month_key]["count"] += 1
 
         # Seller-specific metrics
-        if u["role"] == "seller" and is_completed:
+        if u["role"] == "staff" and is_completed:
             completed_count += 1
             total_items += qty
             if day_key == today_str:
@@ -907,14 +907,14 @@ async def get_user_detail(user_id: str, admin: dict = Depends(require_admin)):
 
     recent_products_handled = sorted(
         products_handled.values(), key=lambda x: x["last_handled"], reverse=True
-    )[:20] if u["role"] == "seller" else []
+    )[:20] if u["role"] == "staff" else []
 
     # 4. SVF history
     svf = sb.table("stored_value").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
 
     # 5. Seller products (if user is a seller)
     seller_products = []
-    if u["role"] == "seller":
+    if u["role"] == "staff":
         prods = sb.table("products").select("id, title, price, stock, images, is_active, created_at").eq("seller_id", user_id).order("created_at", desc=True).limit(50).execute()
         seller_products = [
             {
@@ -1167,10 +1167,10 @@ async def list_departments(admin: dict = Depends(require_admin)):
                 manager_name = mgr.data[0]["full_name"]
 
         # Staff count
-        staff = sb.table("users").select("id", count="exact").eq("department_id", d["id"]).eq("role", "seller").execute()
+        staff = sb.table("users").select("id", count="exact").eq("department_id", d["id"]).eq("role", "staff").execute()
 
         # Products count (via staff + manager)
-        staff_ids_result = sb.table("users").select("id").eq("department_id", d["id"]).eq("role", "seller").execute()
+        staff_ids_result = sb.table("users").select("id").eq("department_id", d["id"]).eq("role", "staff").execute()
         staff_ids = [s["id"] for s in (staff_ids_result.data or [])]
         # Include manager's own products/transactions
         if d.get("manager_id") and d["manager_id"] not in staff_ids:
@@ -1235,7 +1235,7 @@ async def get_department_detail(dept_id: str, admin: dict = Depends(require_admi
     # Staff in department
     staff_result = sb.table("users").select("id, full_name, email, is_banned, created_at").eq(
         "department_id", dept_id
-    ).eq("role", "seller").order("created_at", desc=True).execute()
+    ).eq("role", "staff").order("created_at", desc=True).execute()
     staff_ids = [s["id"] for s in (staff_result.data or [])]
     # Include manager's own products/transactions
     if d.get("manager_id") and d["manager_id"] not in staff_ids:
@@ -1915,13 +1915,21 @@ async def admin_get_restock_requests(
 
     # Get staff names
     staff_ids = set()
+    dept_ids = set()
     for r in (requests.data or []):
         staff_ids.add(r["staff_id"])
+        if r.get("department_id"):
+            dept_ids.add(r["department_id"])
 
     staff_names = {}
     if staff_ids:
         users_result = sb.table("users").select("id, full_name, role").in_("id", list(staff_ids)).execute()
         staff_names = {u["id"]: {"name": u["full_name"], "role": u.get("role", "")} for u in (users_result.data or [])}
+
+    dept_names = {}
+    if dept_ids:
+        depts_result = sb.table("departments").select("id, name").in_("id", list(dept_ids)).execute()
+        dept_names = {d["id"]: d["name"] for d in (depts_result.data or [])}
 
     results = []
     for r in (requests.data or []):
@@ -1938,6 +1946,7 @@ async def admin_get_restock_requests(
             "notes": r.get("notes", ""),
             "requested_by": staff_info["name"],
             "requested_by_role": staff_info["role"],
+            "department_name": dept_names.get(r.get("department_id", ""), "—"),
             "status": r["status"],
             "created_at": r["created_at"],
         })
@@ -1976,7 +1985,7 @@ async def admin_get_salaries(admin: dict = Depends(require_admin)):
 
     # Get all managers and staff (sellers)
     managers = sb.table("users").select("id, full_name, email, role, department_id, salary").eq("role", "manager").execute()
-    staff = sb.table("users").select("id, full_name, email, role, department_id, salary").eq("role", "seller").execute()
+    staff = sb.table("users").select("id, full_name, email, role, department_id, salary").eq("role", "staff").execute()
 
     manager_map = {}
     for m in (managers.data or []):
@@ -2029,7 +2038,7 @@ async def admin_get_salaries(admin: dict = Depends(require_admin)):
                     "id": s["id"],
                     "full_name": s["full_name"],
                     "email": s["email"],
-                    "role": "seller",
+                    "role": "staff",
                     "salary": salary_val,
                     "paid_this_month": paid_val,
                     "remaining": max(salary_val - paid_val, 0),
@@ -2095,7 +2104,7 @@ async def admin_set_salary(user_id: str, req: SetSalaryRequest, admin: dict = De
     user = sb.table("users").select("id, role").eq("id", user_id).execute()
     if not user.data:
         raise HTTPException(status_code=404, detail="User not found")
-    if user.data[0]["role"] not in ("seller", "manager"):
+    if user.data[0]["role"] not in ("staff", "manager"):
         raise HTTPException(status_code=400, detail="Can only set salary for staff or managers")
 
     sb.table("users").update({"salary": req.salary}).eq("id", user_id).execute()
@@ -2120,7 +2129,7 @@ async def admin_pay_all_salaries(admin: dict = Depends(require_admin)):
 
     # Get all managers and staff with salary > 0
     recipients = sb.table("users").select("id, full_name, role, department_id, salary").in_(
-        "role", ["seller", "manager"]
+        "role", ["staff", "manager"]
     ).execute()
 
     if not recipients.data:
@@ -2230,7 +2239,7 @@ async def admin_pay_store_salaries(department_id: str, admin: dict = Depends(req
     # Get staff in this department
     staff = sb.table("users").select("id, full_name, role, department_id, salary").eq(
         "department_id", department_id
-    ).in_("role", ["seller", "manager"]).execute()
+    ).in_("role", ["staff", "manager"]).execute()
 
     # Also include manager via departments.manager_id
     manager_id = dept.data[0].get("manager_id")
@@ -2340,7 +2349,7 @@ async def admin_pay_individual(req: PayIndividualRequest, admin: dict = Depends(
     recipient = sb.table("users").select("id, full_name, role, department_id, salary").eq("id", req.recipient_id).execute()
     if not recipient.data:
         raise HTTPException(status_code=404, detail="Recipient not found")
-    if recipient.data[0]["role"] not in ("seller", "manager"):
+    if recipient.data[0]["role"] not in ("staff", "manager"):
         raise HTTPException(status_code=400, detail="Can only pay staff or managers")
 
     # Get admin balance

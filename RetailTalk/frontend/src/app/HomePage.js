@@ -58,7 +58,7 @@ export default function HomePage() {
             return;
         }
         if (storedUser) {
-            if (storedUser.role === 'seller') { window.location.href = '/sell'; return; }
+            if (storedUser.role === 'staff') { window.location.href = '/sell'; return; }
             if (storedUser.role === 'manager') { window.location.href = '/manager/dashboard'; return; }
             if (storedUser.role === 'delivery') { window.location.href = '/delivery'; return; }
         }

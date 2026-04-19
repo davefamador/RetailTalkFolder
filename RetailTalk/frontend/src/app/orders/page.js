@@ -10,7 +10,6 @@ export default function OrdersPage() {
     const [loading, setLoading] = useState(true);
     const [authChecked, setAuthChecked] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState(null);
-    const [orderFilter, setOrderFilter] = useState('all');
     const [cancelling, setCancelling] = useState(null);
     const [cancelConfirmGroup, setCancelConfirmGroup] = useState(null);
     const [msg, setMsg] = useState({ type: '', text: '' });
@@ -254,82 +253,35 @@ export default function OrdersPage() {
                 onClose={() => setMsg({ type: '', text: '' })} 
             />
 
-            {/* Order Type Filter */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                {[
-                    { key: 'all', label: 'All', count: allGroups.length },
-                    { key: 'delivery', label: 'Delivery', count: allGroups.length },
-                ].map(f => (
-                    <button key={f.key} onClick={() => setOrderFilter(f.key)} style={{
-                        padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                        fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.2s',
-                        background: orderFilter === f.key ? 'rgba(108,99,255,0.2)' : 'var(--card-bg)',
-                        color: orderFilter === f.key ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        border: orderFilter === f.key ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                    }}>{f.label} ({f.count})</button>
-                ))}
-            </div>
-
-            {/* Active vs History */}
+            {/* Active Orders */}
             {(() => {
                 const activeStatuses = ['pending', 'approved', 'ondeliver'];
-                const historyStatuses = ['delivered', 'cancelled', 'undelivered'];
                 const activeGroups = allGroups.filter(g => activeStatuses.includes(g.status));
-                const historyGroups = allGroups.filter(g => historyStatuses.includes(g.status))
-                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
                 return (
-                    <>
-                        {/* Active Orders */}
-                        <div className="card" style={{ marginBottom: 24 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <ShoppingCart size={18} /> Active Orders
-                                    <span style={{
-                                        fontSize: '0.75rem', fontWeight: 700,
-                                        padding: '2px 10px', borderRadius: 12,
-                                        background: 'rgba(59,130,246,0.12)', color: '#3b82f6',
-                                    }}>{activeGroups.length}</span>
-                                </h3>
-                            </div>
-                            {activeGroups.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: 40 }}>
-                                    <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
-                                    <p style={{ color: 'var(--text-muted)' }}>No active orders right now</p>
-                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Start shopping to see your orders here!</p>
-                                </div>
-                            ) : (
-                                <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-                                    {activeGroups.map(g => renderGroupCard(g))}
-                                </div>
-                            )}
+                    <div className="card" style={{ marginBottom: 24 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <ShoppingCart size={18} /> Active Orders
+                                <span style={{
+                                    fontSize: '0.75rem', fontWeight: 700,
+                                    padding: '2px 10px', borderRadius: 12,
+                                    background: 'rgba(59,130,246,0.12)', color: '#3b82f6',
+                                }}>{activeGroups.length}</span>
+                            </h3>
                         </div>
-
-                        {/* Purchase History */}
-                        <div className="card" style={{ marginBottom: 24 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    {'\uD83D\uDCCB'} Purchase History
-                                    <span style={{
-                                        fontSize: '0.75rem', fontWeight: 700,
-                                        padding: '2px 10px', borderRadius: 12,
-                                        background: 'rgba(16,185,129,0.12)', color: '#10b981',
-                                    }}>{historyGroups.length}</span>
-                                </h3>
+                        {activeGroups.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: 40 }}>
+                                <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
+                                <p style={{ color: 'var(--text-muted)' }}>No active orders right now</p>
+                                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Start shopping to see your orders here!</p>
                             </div>
-                            {historyGroups.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: 40 }}>
-                                    <Package size={40} style={{ color: 'var(--text-muted)', opacity: 0.3, marginBottom: 12 }} />
-                                    <p style={{ color: 'var(--text-muted)' }}>No purchase history yet</p>
-                                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Completed and cancelled orders will appear here</p>
-                                </div>
-                            ) : (
-                                <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
-                                    {historyGroups.map(g => renderGroupCard(g))}
-                                </div>
-                            )}
-                        </div>
-                    </>
+                        ) : (
+                            <div style={{ maxHeight: 600, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 6 }}>
+                                {activeGroups.map(g => renderGroupCard(g))}
+                            </div>
+                        )}
+                    </div>
                 );
             })()}
 

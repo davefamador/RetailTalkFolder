@@ -64,7 +64,7 @@ export default function RootLayout({ children }) {
 
                         {hydrated && (
                             <>
-                                {user && user.role === 'seller' && (
+                                {user && user.role === 'staff' && (
                                     <>
                                         <a href="/sell">Products</a>
                                         <a href="/sell/reports">Reports</a>

@@ -19,6 +19,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import openpyxl
+import matplotlib.pyplot as plt
+import seaborn as sns
 from torch.utils.data import DataLoader, Dataset
 from transformers import BertModel, BertTokenizerFast, get_linear_schedule_with_warmup
 from sklearn.model_selection import train_test_split
@@ -455,12 +457,33 @@ def evaluate_slot_model(model, val_loader, device, id2tag, tag2id, save_dir):
     print(f"\n  sklearn classification_report (entity tags only):")
     print(classification_report(true_tags, pred_tags, labels=entity_tag_names, zero_division=0))
     
+    # ---- Confusion Matrix Plot (entity tags only, token-level) ----
+    # Build ordered list: entity tags only, sorted — same as used in sklearn report
+    cm_labels = entity_tag_names  # already sorted, entity tags only
+    cm = confusion_matrix(true_tags, pred_tags, labels=cm_labels)
+    fig, ax = plt.subplots(figsize=(max(8, len(cm_labels) * 0.8), max(6, len(cm_labels) * 0.7)))
+    sns.heatmap(
+        cm, annot=True, fmt='d', cmap='Blues',
+        xticklabels=cm_labels, yticklabels=cm_labels,
+        ax=ax, annot_kws={"size": 7}
+    )
+    ax.set_title('Slot Extractor — Token-Level Confusion Matrix (Entity Tags)', fontsize=11)
+    ax.set_xlabel('Predicted Tag', fontsize=9)
+    ax.set_ylabel('True Tag', fontsize=9)
+    plt.xticks(rotation=45, ha='right', fontsize=7)
+    plt.yticks(rotation=0, fontsize=7)
+    plt.tight_layout()
+    cm_path = os.path.join(save_dir, 'confusion_matrix.png')
+    plt.savefig(cm_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Confusion matrix plot saved to: {cm_path}")
+
     # Save
     results_path = os.path.join(save_dir, 'evaluation_results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"  Evaluation results saved to: {results_path}")
-    
+
     return results
 
 

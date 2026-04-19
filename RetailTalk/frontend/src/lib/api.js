@@ -237,6 +237,13 @@ export async function withdraw(amount) {
     });
 }
 
+export async function deposit(amount) {
+    return apiFetch('/transactions/topup', {
+        method: 'POST',
+        body: JSON.stringify({ amount }),
+    });
+}
+
 export async function getSVFHistory() {
     return apiFetch('/transactions/svf-history');
 }

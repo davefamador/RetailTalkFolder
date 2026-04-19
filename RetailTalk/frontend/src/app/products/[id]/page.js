@@ -433,7 +433,7 @@ export default function ProductDetailPage() {
                                     </button>
                                 ) : (
                                     <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                                        {user.role === 'seller' ? 'Sellers cannot purchase products. Switch to a buyer account.' : ''}
+                                        {user.role === 'staff' ? 'Staff cannot purchase products. Switch to a buyer account.' : ''}
                                     </p>
                                 )
                             ) : (

@@ -91,7 +91,7 @@ export default function SellPage() {
             window.location.href = '/login';
             return;
         }
-        if (stored.role !== 'seller') {
+        if (stored.role !== 'staff') {
             window.location.href = '/';
             return;
         }
@@ -970,6 +970,16 @@ export default function SellPage() {
                                     padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
                                     background: `${accentColor}22`, color: accentColor, flexShrink: 0,
                                 }}>{group.status === 'approved' ? 'Ready for Pickup' : 'Pending'}</span>
+                                {group.status === 'pending' && (
+                                    <button
+                                        className="btn btn-primary btn-sm"
+                                        disabled={deliveryLoading}
+                                        onClick={() => handleDeliveryStatusUpdate(group.group_id, 'approved')}
+                                        style={{ fontWeight: 600, fontSize: '0.75rem', padding: '5px 12px', flexShrink: 0 }}
+                                    >
+                                        ✓ Approve
+                                    </button>
+                                )}
                             </div>
                         );
                     };

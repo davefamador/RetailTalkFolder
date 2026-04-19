@@ -17,7 +17,7 @@ export default function LoginPage() {
         try {
             const data = await login(email, password);
             const user = data.user || {};
-            if (user.role === 'seller') {
+            if (user.role === 'staff') {
                 window.location.href = '/sell';
             } else if (user.role === 'manager') {
                 window.location.href = '/manager/dashboard';

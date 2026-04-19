@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import openpyxl
+import matplotlib.pyplot as plt
+import seaborn as sns
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import BertModel, BertTokenizer, get_linear_schedule_with_warmup
 from sklearn.model_selection import train_test_split
@@ -269,12 +271,33 @@ def evaluate_intent_model(model, val_loader, device, label_names, save_dir):
         zero_division=0
     ))
     
+    # ---- Confusion Matrix Plots ----
+    # For multi-label: one binary confusion matrix per label (2x2: 0/1 vs 0/1)
+    mcm = multilabel_confusion_matrix(all_labels, all_preds)  # (num_labels, 2, 2)
+    fig, axes = plt.subplots(1, len(label_names), figsize=(4 * len(label_names), 4))
+    if len(label_names) == 1:
+        axes = [axes]
+    for i, (name, cm_i) in enumerate(zip(label_names, mcm)):
+        sns.heatmap(
+            cm_i, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Pred 0', 'Pred 1'],
+            yticklabels=['True 0', 'True 1'],
+            ax=axes[i]
+        )
+        axes[i].set_title(name, fontsize=10)
+    fig.suptitle('Intent Classifier — Per-Label Confusion Matrices', fontsize=12, y=1.02)
+    plt.tight_layout()
+    cm_path = os.path.join(save_dir, 'confusion_matrix.png')
+    plt.savefig(cm_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  Confusion matrix plot saved to: {cm_path}")
+
     # ---- Save to JSON ----
     results_path = os.path.join(save_dir, 'evaluation_results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"  Evaluation results saved to: {results_path}")
-    
+
     return results
 
 

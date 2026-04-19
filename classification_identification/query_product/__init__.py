@@ -12,5 +12,5 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-from .classifier_model import QueryProductClassifier, train
+from .classifier_model import QueryProductClassifier, train, evaluate_esci_model
 from .tensor_dataset import generate_dataset

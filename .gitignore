@@ -93,3 +93,10 @@ ACCEPTANCE_TESTING.md
 ACCEPTANCE_TESTING.pdf
 UNIT_TESTING.md
 USER_GUIDE.md
+generate_confusion_matrices.py
+generate_esci_confusion_matrix.py
+generate_slot_confusion_matrix.py
+classification_identification/train.py
+confusion_matrices/confusion_matrix_esci.png
+confusion_matrices/confusion_matrix_slot.png
+confusion_matrices/confusion_matrix_intent.png
