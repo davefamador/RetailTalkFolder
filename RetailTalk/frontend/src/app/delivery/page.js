@@ -300,7 +300,7 @@ export default function DeliveryPage() {
 
                 <nav style={{ padding: '16px 12px', flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <SidebarItem icon="📊" label="Dashboard" active={activeSection === 'dashboard'} onClick={() => setActiveSection('dashboard')} />
-                    <SidebarItem icon="🚚" label="Delivery" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={active.length + available.length + restockActive.length + restockQueue.length} />
+                    <SidebarItem icon="🚚" label="Delivery" active={activeSection === 'delivery'} onClick={() => setActiveSection('delivery')} badge={available.length + restockQueue.length} />
 
                     <div style={{ height: 1, background: 'var(--border-color)', margin: '8px 0' }} />
 
@@ -439,7 +439,78 @@ export default function DeliveryPage() {
                             <button className="btn btn-outline btn-sm" onClick={loadAll}>Refresh</button>
                         </div>
 
-                        {/* Filter buttons */}
+                        {/* === Active Deliveries (combined product + restock, max 5) === */}
+                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
+                            Active Deliveries ({active.length + restockActive.length}/5)
+                        </h2>
+                        {active.length === 0 && restockActive.length === 0 ? (
+                            <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24, color: 'var(--text-muted)' }}>No active deliveries</div>
+                        ) : (
+                            <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+                                {active.map(g => (
+                                    <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(59,130,246,0.3)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                            <div>
+                                                <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box <span style={{ fontSize: '0.75rem', background: 'rgba(99,102,241,0.15)', color: 'var(--accent-primary)', borderRadius: 6, padding: '2px 8px', marginLeft: 6 }}>Product</span></div>
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Buyer: {g.buyer_name} | Store: {g.seller_name}</div>
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
+                                                <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
+                                            </div>
+                                            <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
+                                        </div>
+                                        <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                                            {(g.items || []).map((item, idx) => (
+                                                <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
+                                                    {renderProductImage(item.product_images)}
+                                                    <div style={{ flex: 1 }}>
+                                                        <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
+                                                    </div>
+                                                    <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                                            <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
+                                            <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'delivered' })}
+                                                style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>Delivered</button>
+                                            <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'undelivered' })}
+                                                style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', fontWeight: 600 }}>Undelivered</button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {restockActive.map(r => (
+                                    <div key={r.id} className="card" style={{ padding: 20, border: '1px solid rgba(168,85,247,0.3)' }}>
+                                        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+                                            {renderProductImage(r.product_images)}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                    <div>
+                                                        <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{r.product_title || 'Product'} <span style={{ fontSize: '0.75rem', background: 'rgba(168,85,247,0.15)', color: '#a855f7', borderRadius: 6, padding: '2px 8px', marginLeft: 4 }}>Restock</span></h4>
+                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.quantity || r.approved_quantity || r.requested_quantity}
+                                                        </p>
+                                                        {r.notes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>Note: {r.notes}</p>}
+                                                    </div>
+                                                    <span style={{ ...(RESTOCK_STATUS_COLORS[r.status] || {}), padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>
+                                                        {RESTOCK_STATUS_LABEL[r.status] || r.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button className="btn btn-sm" onClick={() => handleCompleteRestock(r.id)}
+                                            style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>
+                                            Mark Delivered
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* === Filter tabs for available requests === */}
                         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
                             {[
                                 { key: 'delivery', label: 'Product Delivery' },
@@ -456,103 +527,9 @@ export default function DeliveryPage() {
                             ))}
                         </div>
 
-                        {/* === Product Delivery === */}
+                        {/* === Product Delivery available === */}
                         {historyFilter === 'delivery' && (
                             <div>
-                                {/* ===== APPROVED ORDERS BOX ===== */}
-                                <div style={{
-                                    background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.06) 100%)',
-                                    border: '1px solid rgba(16,185,129,0.3)', borderRadius: 14, padding: 20, marginBottom: 24,
-                                }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: available.length > 0 ? 14 : 0 }}>
-                                        <span style={{ fontSize: '1.1rem' }}>✅</span>
-                                        <div>
-                                            <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#10b981' }}>
-                                                Approved Orders ({available.length})
-                                            </h3>
-                                            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
-                                                {available.length > 0 ? 'Ready to pick up — scroll down to claim a box' : 'No approved orders available right now'}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    {available.length > 0 && (
-                                        <div style={{ display: 'grid', gap: 8 }}>
-                                            {available.map(g => (
-                                                <div key={g.group_id} style={{
-                                                    background: 'var(--bg-card)', borderRadius: 10, padding: 12,
-                                                    border: '1px solid rgba(16,185,129,0.2)',
-                                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
-                                                }}>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>📦 {g.buyer_name}</div>
-                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                                            Store: {g.seller_name} · PHP {g.total_amount?.toFixed(2)} + PHP {g.delivery_fee?.toFixed(2)} fee
-                                                        </div>
-                                                        {g.delivery_address && (
-                                                            <div style={{ fontSize: '0.73rem', color: 'var(--accent-primary)', marginTop: 2 }}>📍 {g.delivery_address}</div>
-                                                        )}
-                                                    </div>
-                                                    <span style={{
-                                                        padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
-                                                        background: 'rgba(16,185,129,0.15)', color: '#10b981', flexShrink: 0,
-                                                    }}>Ready</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Active Deliveries */}
-                                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
-                                    Active Deliveries ({active.length}/5)
-                                </h2>
-                                {active.length === 0 ? (
-                                    <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24, color: 'var(--text-muted)' }}>No active deliveries</div>
-                                ) : (
-                                    <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
-                                        {active.map(g => (
-                                            <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(59,130,246,0.3)' }}>
-                                                {/* Group header */}
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                                                    <div>
-                                                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
-                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
-                                                        </div>
-                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
-                                                        <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
-                                                    </div>
-                                                    <span style={{ ...STATUS_COLORS.ondeliver, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>On Deliver</span>
-                                                </div>
-                                                {/* Items in box */}
-                                                <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-                                                    {(g.items || []).map((item, idx) => (
-                                                        <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
-                                                            {renderProductImage(item.product_images)}
-                                                            <div style={{ flex: 1 }}>
-                                                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
-                                                                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
-                                                            </div>
-                                                            <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                {/* Totals */}
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
-                                                    <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
-                                                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', gap: 8 }}>
-                                                    <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'delivered' })}
-                                                        style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>Delivered</button>
-                                                    <button className="btn btn-sm" onClick={() => setConfirmModal({ groupId: g.group_id, status: 'undelivered' })}
-                                                        style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', fontWeight: 600 }}>Undelivered</button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
                                 {/* Available Orders */}
                                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
                                     Available for Pickup ({available.length})
@@ -563,19 +540,15 @@ export default function DeliveryPage() {
                                     <div style={{ display: 'grid', gap: 16 }}>
                                         {available.map(g => (
                                             <div key={g.group_id} className="card" style={{ padding: 20, border: '1px solid rgba(16,185,129,0.3)' }}>
-                                                {/* Group header */}
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                                                     <div>
                                                         <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>📦 Delivery Box</div>
-                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: {g.buyer_name} | Store: {g.seller_name}
-                                                        </div>
+                                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Buyer: {g.buyer_name} | Store: {g.seller_name}</div>
                                                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 2 }}>📞 {g.buyer_contact}</div>
                                                         <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 2, fontWeight: 600 }}>📍 {g.delivery_address || 'No address set'}</div>
                                                     </div>
                                                     <span style={{ ...STATUS_COLORS.approved, padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0 }}>Ready</span>
                                                 </div>
-                                                {/* Items in box */}
                                                 <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
                                                     {(g.items || []).map((item, idx) => (
                                                         <div key={item.transaction_id || idx} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: idx < g.items.length - 1 ? 8 : 0 }}>
@@ -588,14 +561,13 @@ export default function DeliveryPage() {
                                                         </div>
                                                     ))}
                                                 </div>
-                                                {/* Totals */}
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
                                                     <span>Products: PHP {g.total_amount?.toFixed(2)}</span>
                                                     <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>Delivery Fee: PHP {g.delivery_fee?.toFixed(2)}</span>
                                                 </div>
                                                 <button className="btn btn-primary btn-sm" onClick={() => handlePick(g.group_id)}
-                                                    disabled={active.length >= 5} style={{ fontWeight: 600 }}>
-                                                    {active.length >= 5 ? 'Max deliveries reached' : '🚚 Pick Up Box'}
+                                                    disabled={active.length + restockActive.length >= 5} style={{ fontWeight: 600 }}>
+                                                    {active.length + restockActive.length >= 5 ? 'Max deliveries reached (5)' : '🚚 Pick Up Box'}
                                                 </button>
                                             </div>
                                         ))}
@@ -604,44 +576,9 @@ export default function DeliveryPage() {
                             </div>
                         )}
 
-                        {/* === Restock Delivery === */}
+                        {/* === Restock available === */}
                         {historyFilter === 'restock' && (
                             <div>
-                                {/* Active Restock Deliveries */}
-                                <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
-                                    Active Restock Deliveries ({restockActive.length})
-                                </h2>
-                                {restockActive.length === 0 ? (
-                                    <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 24, color: 'var(--text-muted)' }}>No active restock deliveries</div>
-                                ) : (
-                                    <div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
-                                        {restockActive.map(r => (
-                                            <div key={r.id} className="card" style={{ padding: 20 }}>
-                                                <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-                                                    {renderProductImage(r.product_images)}
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                                            <h4 style={{ fontWeight: 700, marginBottom: 4 }}>{r.product_title || 'Product'}</h4>
-                                                            <span style={{
-                                                                ...(RESTOCK_STATUS_COLORS[r.status] || {}),
-                                                                padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600, flexShrink: 0,
-                                                            }}>{RESTOCK_STATUS_LABEL[r.status] || r.status}</span>
-                                                        </div>
-                                                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Dept: {r.department_name || 'N/A'} | By: {r.staff_name || 'Staff'} | Qty: {r.quantity || r.approved_quantity || r.requested_quantity}
-                                                        </p>
-                                                        {r.notes && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>Note: {r.notes}</p>}
-                                                    </div>
-                                                </div>
-                                                <button className="btn btn-sm" onClick={() => handleCompleteRestock(r.id)}
-                                                    style={{ background: 'rgba(0,212,170,0.15)', color: '#00d4aa', border: 'none', fontWeight: 600 }}>
-                                                    Mark Delivered
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
                                 {/* Available Restock Queue */}
                                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>
                                     Available Restock Requests ({restockQueue.length})
@@ -669,8 +606,9 @@ export default function DeliveryPage() {
                                                         {r.manager_notes && <p style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 4 }}>Manager: {r.manager_notes}</p>}
                                                     </div>
                                                 </div>
-                                                <button className="btn btn-primary btn-sm" onClick={() => handleAcceptRestock(r.id)} style={{ fontWeight: 600 }}>
-                                                    Accept Restock
+                                                <button className="btn btn-primary btn-sm" onClick={() => handleAcceptRestock(r.id)}
+                                                    disabled={active.length + restockActive.length >= 5} style={{ fontWeight: 600 }}>
+                                                    {active.length + restockActive.length >= 5 ? 'Max deliveries reached (5)' : 'Accept Restock'}
                                                 </button>
                                             </div>
                                         ))}
