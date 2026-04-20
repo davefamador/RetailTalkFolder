@@ -559,6 +559,38 @@ async def reject_restock(
     return {"message": "Restock request rejected"}
 
 
+class RestockCancelRequest(BaseModel):
+    manager_notes: str = ""
+
+
+@router.put("/restock-requests/{request_id}/cancel")
+async def cancel_restock_manager(
+    request_id: str,
+    req: RestockCancelRequest,
+    manager: dict = Depends(require_manager),
+):
+    """Manager cancels a restock request in their department. Only allowed before delivery pickup."""
+    sb = get_supabase()
+    dept_id = manager.get("department_id")
+
+    restock = sb.table("restock_requests").select("*").eq("id", request_id).eq(
+        "department_id", dept_id
+    ).in_("status", ["pending_manager", "approved_manager"]).execute()
+
+    if not restock.data:
+        raise HTTPException(
+            status_code=404,
+            detail="Restock request not found, not in your department, or already picked up by delivery"
+        )
+
+    sb.table("restock_requests").update({
+        "status": "cancelled",
+        "manager_notes": req.manager_notes or restock.data[0].get("manager_notes", ""),
+    }).eq("id", request_id).execute()
+
+    return {"message": "Restock request cancelled"}
+
+
 class ChangePasswordRequest(BaseModel):
     new_password: str
 
@@ -737,9 +769,10 @@ async def list_department_transactions(
         "*, products(title)"
     ).in_("seller_id", staff_ids).order("created_at", desc=True).limit(100).execute()
 
-    # Get buyer names
+    # Collect all user IDs needed: buyers, sellers, and assigned staff
     buyer_ids = set(t.get("buyer_id") for t in (txns.data or []) if t.get("buyer_id"))
-    all_user_ids = buyer_ids | set(staff_ids)
+    assigned_staff_ids = set(t.get("assigned_staff_id") for t in (txns.data or []) if t.get("assigned_staff_id"))
+    all_user_ids = buyer_ids | set(staff_ids) | assigned_staff_ids
     user_names = {}
     if all_user_ids:
         users_result = sb.table("users").select("id, full_name").in_("id", list(all_user_ids)).execute()
@@ -750,10 +783,12 @@ async def list_department_transactions(
         product_title = (t.get("products") or {}).get("title", "Unknown")
         if search and search.lower() not in product_title.lower() and search.lower() not in user_names.get(t.get("buyer_id"), "").lower():
             continue
+        assigned_staff_id = t.get("assigned_staff_id")
         results.append({
             "id": t["id"],
             "buyer_name": user_names.get(t.get("buyer_id"), "Unknown"),
             "seller_name": user_names.get(t.get("seller_id"), "Unknown"),
+            "assigned_staff_name": user_names.get(assigned_staff_id) if assigned_staff_id else None,
             "product_title": product_title,
             "quantity": int(t.get("quantity", 1)),
             "amount": float(t.get("amount", 0)),

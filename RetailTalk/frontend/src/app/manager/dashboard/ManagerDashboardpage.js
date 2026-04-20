@@ -5,7 +5,7 @@ import {
     getStoredUser, logout,
     managerGetDashboard, managerGetStaff, managerRegisterStaff,
     managerGetStaffDetail, managerRemoveStaff, managerGetRestockRequests,
-    managerApproveRestock, managerRejectRestock,
+    managerApproveRestock, managerRejectRestock, managerCancelRestock,
     managerGetProducts, managerGetTransactions,
     createProduct, uploadProductImage,
     getManagerDeliveryOrders, managerUpdateDeliveryOrderStatus,
@@ -306,6 +306,7 @@ export default function ManagerDashboard() {
     // Staff registration modal
     const [showRegisterStaff, setShowRegisterStaff] = useState(false);
     const [staffForm, setStaffForm] = useState({ full_name: '', email: '', password: '', contact_number: '' });
+    const [staffFormErrors, setStaffFormErrors] = useState({});
 
     // Staff detail panel
     const [selectedStaffId, setSelectedStaffId] = useState(null);
@@ -338,11 +339,13 @@ export default function ManagerDashboard() {
     const [reassignOrderId, setReassignOrderId] = useState(null);
     const [reassignLoading, setReassignLoading] = useState(false);
 
-    // Restock approve/reject inline forms
+    // Restock approve/reject/cancel inline forms
     const [approveId, setApproveId] = useState(null);
     const [approveData, setApproveData] = useState({ approved_quantity: '', manager_notes: '' });
     const [rejectId, setRejectId] = useState(null);
     const [rejectNotes, setRejectNotes] = useState('');
+    const [cancelRestockId, setCancelRestockId] = useState(null);
+    const [cancelRestockNotes, setCancelRestockNotes] = useState('');
     const [restockActionLoading, setRestockActionLoading] = useState(false);
 
     // Salary state
@@ -488,11 +491,28 @@ export default function ManagerDashboard() {
     }, [restockFilter]);
 
     const handleRegisterStaff = async () => {
+        const errors = {};
+        if (!staffForm.full_name.trim()) errors.full_name = 'Full name is required.';
+        else if (staffForm.full_name.trim().length < 2) errors.full_name = 'Name must be at least 2 characters.';
+
+        if (!staffForm.email.trim()) errors.email = 'Email is required.';
+        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(staffForm.email.trim())) errors.email = 'Enter a valid email address.';
+
+        if (!staffForm.password) errors.password = 'Password is required.';
+        else if (staffForm.password.length < 6) errors.password = 'Password must be at least 6 characters.';
+
+        if (staffForm.contact_number && !/^\+?[\d\s\-()]{7,15}$/.test(staffForm.contact_number.trim()))
+            errors.contact_number = 'Enter a valid contact number.';
+
+        setStaffFormErrors(errors);
+        if (Object.keys(errors).length > 0) return;
+
         try {
             await managerRegisterStaff(staffForm);
             setMessage({ type: 'success', text: 'Staff member registered successfully!' });
             setShowRegisterStaff(false);
             setStaffForm({ full_name: '', email: '', password: '', contact_number: '' });
+            setStaffFormErrors({});
             loadStaff(staffSearch);
             loadDashboard();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
@@ -576,6 +596,20 @@ export default function ManagerDashboard() {
             setMessage({ type: 'success', text: 'Restock request rejected.' });
             setRejectId(null);
             setRejectNotes('');
+            loadRestockRequests(restockFilter);
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setRestockActionLoading(false); }
+    };
+
+    const handleCancelRestock = async (requestId) => {
+        setRestockActionLoading(true);
+        try {
+            const payload = {};
+            if (cancelRestockNotes) payload.manager_notes = cancelRestockNotes;
+            await managerCancelRestock(requestId, payload);
+            setMessage({ type: 'success', text: 'Restock request cancelled.' });
+            setCancelRestockId(null);
+            setCancelRestockNotes('');
             loadRestockRequests(restockFilter);
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
         finally { setRestockActionLoading(false); }
@@ -974,7 +1008,7 @@ export default function ManagerDashboard() {
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th><th>Email</th><th>Status</th><th style={{ textAlign: 'center' }}>Tasks Today</th><th style={{ textAlign: 'center' }}>Delivery Items</th><th style={{ textAlign: 'center' }}>Total Completed</th><th style={{ width: 100, textAlign: 'center' }}>Action</th>
+                                        <th>Name</th><th>Email</th><th>Status</th><th style={{ textAlign: 'center' }}>Processed Items Today</th><th style={{ textAlign: 'center' }}>Total Completed</th><th style={{ width: 100, textAlign: 'center' }}>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -998,33 +1032,32 @@ export default function ManagerDashboard() {
                                                 </span>
                                             </td>
                                             <td style={{ textAlign: 'center', fontWeight: 600, fontSize: '0.85rem' }}>
-                                                {s.tasks_completed_today || 0}
-                                            </td>
-                                            <td style={{ textAlign: 'center', fontSize: '0.8rem' }}>
                                                 <span style={{ color: '#3b82f6', fontWeight: 600 }}>{s.delivery_items_today || 0}</span>
                                             </td>
                                             <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', color: 'var(--accent-primary)' }}>
                                                 {s.total_completed_tasks || 0}
                                             </td>
                                             <td style={{ textAlign: 'center' }}>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleRemoveStaff(s.id, s.full_name); }}
-                                                    disabled={removeStaffLoading}
-                                                    title="Remove from department"
-                                                    style={{
-                                                        padding: '5px 12px', borderRadius: 8,
-                                                        border: '1px solid rgba(239,68,68,0.3)',
-                                                        background: 'rgba(239,68,68,0.08)', color: '#ef4444',
-                                                        cursor: removeStaffLoading ? 'not-allowed' : 'pointer',
-                                                        fontWeight: 600, fontSize: '0.75rem',
-                                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
-                                                        opacity: removeStaffLoading ? 0.5 : 1,
-                                                    }}
-                                                    onMouseEnter={e => { if (!removeStaffLoading) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
-                                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
-                                                >
-                                                    Remove
-                                                </button>
+                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); handleRemoveStaff(s.id, s.full_name); }}
+                                                        disabled={removeStaffLoading}
+                                                        title="Remove from department"
+                                                        style={{
+                                                            padding: '5px 12px', borderRadius: 8,
+                                                            border: '1px solid rgba(239,68,68,0.3)',
+                                                            background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+                                                            cursor: removeStaffLoading ? 'not-allowed' : 'pointer',
+                                                            fontWeight: 600, fontSize: '0.75rem',
+                                                            fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                            opacity: removeStaffLoading ? 0.5 : 1,
+                                                        }}
+                                                        onMouseEnter={e => { if (!removeStaffLoading) e.currentTarget.style.background = 'rgba(239,68,68,0.18)'; }}
+                                                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -1039,7 +1072,7 @@ export default function ManagerDashboard() {
                                 <div style={{
                                     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
                                     zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                }} onClick={() => setShowRegisterStaff(false)}>
+                                }} onClick={() => { setShowRegisterStaff(false); setStaffFormErrors({}); }}>
                                     <div style={{
                                         background: 'var(--bg-primary)', borderRadius: 20, padding: 32,
                                         width: 480, maxWidth: '90vw', border: '1px solid var(--border-color)',
@@ -1051,49 +1084,53 @@ export default function ManagerDashboard() {
                                                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Full Name *</label>
                                                 <input
                                                     type="text" placeholder="Enter full name"
-                                                    value={staffForm.full_name} onChange={e => setStaffForm({ ...staffForm, full_name: e.target.value })}
+                                                    value={staffForm.full_name} onChange={e => { setStaffForm({ ...staffForm, full_name: e.target.value }); setStaffFormErrors(prev => ({ ...prev, full_name: '' })); }}
                                                     style={{
                                                         width: '100%', padding: '10px 14px', borderRadius: 10,
-                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        background: 'var(--bg-card)', border: `1px solid ${staffFormErrors.full_name ? '#ef4444' : 'var(--border-color)'}`,
                                                         color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
                                                     }}
                                                 />
+                                                {staffFormErrors.full_name && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{staffFormErrors.full_name}</p>}
                                             </div>
                                             <div>
                                                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Email *</label>
                                                 <input
                                                     type="email" placeholder="Enter email"
-                                                    value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })}
+                                                    value={staffForm.email} onChange={e => { setStaffForm({ ...staffForm, email: e.target.value }); setStaffFormErrors(prev => ({ ...prev, email: '' })); }}
                                                     style={{
                                                         width: '100%', padding: '10px 14px', borderRadius: 10,
-                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        background: 'var(--bg-card)', border: `1px solid ${staffFormErrors.email ? '#ef4444' : 'var(--border-color)'}`,
                                                         color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
                                                     }}
                                                 />
+                                                {staffFormErrors.email && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{staffFormErrors.email}</p>}
                                             </div>
                                             <div>
                                                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Password *</label>
                                                 <input
-                                                    type="password" placeholder="Enter password"
-                                                    value={staffForm.password} onChange={e => setStaffForm({ ...staffForm, password: e.target.value })}
+                                                    type="password" placeholder="Enter password (min. 6 characters)"
+                                                    value={staffForm.password} onChange={e => { setStaffForm({ ...staffForm, password: e.target.value }); setStaffFormErrors(prev => ({ ...prev, password: '' })); }}
                                                     style={{
                                                         width: '100%', padding: '10px 14px', borderRadius: 10,
-                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        background: 'var(--bg-card)', border: `1px solid ${staffFormErrors.password ? '#ef4444' : 'var(--border-color)'}`,
                                                         color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
                                                     }}
                                                 />
+                                                {staffFormErrors.password && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{staffFormErrors.password}</p>}
                                             </div>
                                             <div>
                                                 <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>Contact Number</label>
                                                 <input
                                                     type="text" placeholder="Enter contact number"
-                                                    value={staffForm.contact_number} onChange={e => setStaffForm({ ...staffForm, contact_number: e.target.value })}
+                                                    value={staffForm.contact_number} onChange={e => { setStaffForm({ ...staffForm, contact_number: e.target.value }); setStaffFormErrors(prev => ({ ...prev, contact_number: '' })); }}
                                                     style={{
                                                         width: '100%', padding: '10px 14px', borderRadius: 10,
-                                                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                        background: 'var(--bg-card)', border: `1px solid ${staffFormErrors.contact_number ? '#ef4444' : 'var(--border-color)'}`,
                                                         color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
                                                     }}
                                                 />
+                                                {staffFormErrors.contact_number && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{staffFormErrors.contact_number}</p>}
                                             </div>
                                         </div>
                                         <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
@@ -1101,7 +1138,7 @@ export default function ManagerDashboard() {
                                                 style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
                                                 Register Staff
                                             </button>
-                                            <button className="btn btn-outline" onClick={() => setShowRegisterStaff(false)}
+                                            <button className="btn btn-outline" onClick={() => { setShowRegisterStaff(false); setStaffFormErrors({}); }}
                                                 style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
                                                 Cancel
                                             </button>
@@ -1168,16 +1205,33 @@ export default function ManagerDashboard() {
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>📦 Box — {group.buyer_name}</div>
                                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                        Store: {group.seller_name} · {group.items?.length || 0} item{group.items?.length !== 1 ? 's' : ''} · PHP {group.total_amount?.toFixed(2)}
+                                        {group.items?.length || 0} item{group.items?.length !== 1 ? 's' : ''} · PHP {group.total_amount?.toFixed(2)}
                                     </div>
+                                    {group.assigned_staff_name && (
+                                        <div style={{ fontSize: '0.72rem', color: '#10b981', marginTop: 2, fontWeight: 600 }}>
+                                            Approved by: {group.assigned_staff_name}
+                                        </div>
+                                    )}
                                     {group.delivery_address && (
                                         <div style={{ fontSize: '0.72rem', color: 'var(--accent-primary)', marginTop: 2 }}>📍 {group.delivery_address}</div>
                                     )}
                                 </div>
-                                <span style={{
-                                    padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
-                                    background: `${accentColor}22`, color: accentColor, flexShrink: 0,
-                                }}>{group.status === 'approved' ? 'Ready for Pickup' : 'Pending'}</span>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                                    {group.status === 'pending' && (
+                                        <button
+                                            className="btn btn-primary btn-sm"
+                                            disabled={deliveryOrderLoading}
+                                            onClick={() => handleMgrDeliveryStatusUpdate(group.group_id)}
+                                            style={{ fontWeight: 700, fontSize: '0.78rem', padding: '6px 14px' }}
+                                        >
+                                            {deliveryOrderLoading ? '...' : '✓ Approve'}
+                                        </button>
+                                    )}
+                                    <span style={{
+                                        padding: '3px 10px', borderRadius: 20, fontSize: '0.7rem', fontWeight: 600,
+                                        background: `${accentColor}22`, color: accentColor,
+                                    }}>{group.status === 'approved' ? 'Ready for Pickup' : 'Pending'}</span>
+                                </div>
                             </div>
                         );
                     };
@@ -1274,8 +1328,13 @@ export default function ManagerDashboard() {
                                                     <div>
                                                         <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: 4 }}><Package size={16} /> Delivery Box</div>
                                                         <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                                                            Buyer: <strong>{group.buyer_name}</strong> | Store: <strong>{group.seller_name}</strong>
+                                                            Buyer: <strong>{group.buyer_name}</strong>
                                                         </div>
+                                                        {group.assigned_staff_name && (
+                                                            <div style={{ fontSize: '0.8rem', color: '#10b981', marginTop: 3, fontWeight: 600 }}>
+                                                                Approved by: {group.assigned_staff_name}
+                                                            </div>
+                                                        )}
                                                         {group.delivery_address && (
                                                             <div style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: 3, fontWeight: 600 }}>
                                                                 <MapPin size={14} /> {group.delivery_address}
@@ -1305,7 +1364,7 @@ export default function ManagerDashboard() {
                                                                 )}
                                                                 <div style={{ flex: 1, minWidth: 0 }}>
                                                                     <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.product_title}</div>
-                                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} Ã— PHP {item.product_price?.toFixed(2)}</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Qty: {item.quantity} × PHP {item.product_price?.toFixed(2)}</div>
                                                                 </div>
                                                                 <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>PHP {item.amount?.toFixed(2)}</div>
                                                             </div>
@@ -1364,6 +1423,7 @@ export default function ManagerDashboard() {
                                 { key: 'pending_manager', label: 'Pending' },
                                 { key: 'approved_manager', label: 'Approved' },
                                 { key: 'rejected_manager', label: 'Rejected' },
+                                { key: 'cancelled', label: 'Cancelled' },
                                 { key: '', label: 'All' },
                             ].map(f => (
                                 <button
@@ -1411,13 +1471,15 @@ export default function ManagerDashboard() {
                                             padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
                                             background: r.status === 'pending_manager' ? 'rgba(251,191,36,0.15)' :
                                                 r.status === 'approved_manager' ? 'rgba(16,185,129,0.1)' :
-                                                    r.status === 'rejected' ? 'rgba(239,68,68,0.1)' : 'rgba(148,163,184,0.1)',
+                                                r.status === 'rejected_manager' ? 'rgba(239,68,68,0.1)' :
+                                                r.status === 'cancelled' ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.1)',
                                             color: r.status === 'pending_manager' ? '#fbbf24' :
                                                 r.status === 'approved_manager' ? '#10b981' :
-                                                    r.status === 'rejected' ? '#ef4444' : '#94a3b8',
+                                                r.status === 'rejected_manager' ? '#ef4444' :
+                                                r.status === 'cancelled' ? '#94a3b8' : '#94a3b8',
                                             textTransform: 'capitalize',
                                         }}>
-                                            {r.status.replace('_', ' ')}
+                                            {r.status.replace(/_/g, ' ')}
                                         </span>
                                     </div>
 
@@ -1463,11 +1525,52 @@ export default function ManagerDashboard() {
                                         </div>
                                     )}
 
-                                    {/* Actions for pending requests */}
-                                    {r.status === 'pending_manager' && (
+                                    {/* Actions for pending/approved requests */}
+                                    {(r.status === 'pending_manager' || r.status === 'approved_manager') && (
                                         <div>
+                                            {/* Cancel inline form */}
+                                            {cancelRestockId === r.id ? (
+                                                <div style={{
+                                                    padding: 14, borderRadius: 10, background: 'rgba(148,163,184,0.05)',
+                                                    border: '1px solid rgba(148,163,184,0.25)', marginBottom: 8,
+                                                }}>
+                                                    <p style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94a3b8', marginBottom: 10 }}>Cancel Restock Request</p>
+                                                    <div style={{ marginBottom: 10 }}>
+                                                        <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4 }}>Reason (optional)</label>
+                                                        <input
+                                                            type="text" placeholder="Reason for cancellation..."
+                                                            value={cancelRestockNotes}
+                                                            onChange={e => setCancelRestockNotes(e.target.value)}
+                                                            style={{
+                                                                width: '100%', padding: '8px 12px', borderRadius: 8,
+                                                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                                                                color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div style={{ display: 'flex', gap: 8 }}>
+                                                        <button
+                                                            style={{
+                                                                padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8,
+                                                                background: 'rgba(148,163,184,0.2)', border: '1px solid rgba(148,163,184,0.4)',
+                                                                color: '#94a3b8', cursor: restockActionLoading ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif',
+                                                            }}
+                                                            disabled={restockActionLoading}
+                                                            onClick={() => handleCancelRestock(r.id)}
+                                                        >
+                                                            {restockActionLoading ? '...' : 'Confirm Cancel'}
+                                                        </button>
+                                                        <button className="btn btn-outline btn-sm"
+                                                            onClick={() => { setCancelRestockId(null); setCancelRestockNotes(''); }}
+                                                            style={{ padding: '8px 16px', fontSize: '0.8rem', borderRadius: 8 }}>
+                                                            Back
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+
                                             {/* Approve inline form */}
-                                            {approveId === r.id ? (
+                                            {!cancelRestockId && approveId === r.id ? (
                                                 <div style={{
                                                     padding: 14, borderRadius: 10, background: 'rgba(16,185,129,0.05)',
                                                     border: '1px solid rgba(16,185,129,0.2)', marginBottom: 8,
@@ -1514,7 +1617,7 @@ export default function ManagerDashboard() {
                                                         </button>
                                                     </div>
                                                 </div>
-                                            ) : rejectId === r.id ? (
+                                            ) : !cancelRestockId && rejectId === r.id ? (
                                                 /* Reject inline form */
                                                 <div style={{
                                                     padding: 14, borderRadius: 10, background: 'rgba(239,68,68,0.05)',
@@ -1543,29 +1646,41 @@ export default function ManagerDashboard() {
                                                         <button className="btn btn-outline btn-sm"
                                                             onClick={() => { setRejectId(null); setRejectNotes(''); }}
                                                             style={{ padding: '8px 16px', fontSize: '0.8rem', borderRadius: 8 }}>
-                                                            Cancel
+                                                            Back
                                                         </button>
                                                     </div>
                                                 </div>
-                                            ) : (
+                                            ) : !cancelRestockId ? (
                                                 /* Action buttons */
                                                 <div style={{ display: 'flex', gap: 8 }}>
+                                                    {r.status === 'pending_manager' && <>
+                                                        <button
+                                                            className="btn btn-success btn-sm"
+                                                            onClick={() => { setApproveId(r.id); setRejectId(null); setCancelRestockId(null); setApproveData({ approved_quantity: '', manager_notes: '' }); }}
+                                                            style={{ padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8 }}
+                                                        >
+                                                            ✓ Approve
+                                                        </button>
+                                                        <button
+                                                            className="btn btn-danger btn-sm"
+                                                            onClick={() => { setRejectId(r.id); setApproveId(null); setCancelRestockId(null); setRejectNotes(''); }}
+                                                            style={{ padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8 }}
+                                                        >
+                                                            ✕ Reject
+                                                        </button>
+                                                    </>}
                                                     <button
-                                                        className="btn btn-success btn-sm"
-                                                        onClick={() => { setApproveId(r.id); setRejectId(null); setApproveData({ approved_quantity: '', manager_notes: '' }); }}
-                                                        style={{ padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8 }}
+                                                        onClick={() => { setCancelRestockId(r.id); setApproveId(null); setRejectId(null); setCancelRestockNotes(''); }}
+                                                        style={{
+                                                            padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8,
+                                                            background: 'rgba(148,163,184,0.15)', border: '1px solid rgba(148,163,184,0.3)',
+                                                            color: '#94a3b8', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                        }}
                                                     >
-                                                        ✓ Approve
-                                                    </button>
-                                                    <button
-                                                        className="btn btn-danger btn-sm"
-                                                        onClick={() => { setRejectId(r.id); setApproveId(null); setRejectNotes(''); }}
-                                                        style={{ padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8 }}
-                                                    >
-                                                        ✕ Reject
+                                                        ✕ Cancel Request
                                                     </button>
                                                 </div>
-                                            )}
+                                            ) : null}
                                         </div>
                                     )}
                                 </div>

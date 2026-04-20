@@ -46,6 +46,13 @@ class UpdateDepartmentRequest(BaseModel):
     department_id: Optional[str] = None  # None means remove from department
 
 
+class AdminStaffRegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    contact_number: Optional[str] = None
+
+
 class DashboardResponse(BaseModel):
     total_users: int
     total_products: int
@@ -76,6 +83,7 @@ class TransactionDetail(BaseModel):
     product_images: list = []
     created_at: str
     delivery_user_name: Optional[str] = None
+    assigned_staff_name: Optional[str] = None
 
 
 class DailyIncome(BaseModel):
@@ -103,6 +111,8 @@ class StoreReport(BaseModel):
     store_name: str
     expected_revenue: float
     current_revenue: float
+    daily_income: list[DailyIncome] = []
+    monthly_income: list[DailyIncome] = []
 
 class ProductReport(BaseModel):
     product_id: str
@@ -240,13 +250,22 @@ async def ban_user(user_id: str, req: BanRequest, admin: dict = Depends(require_
     """Ban or unban a user. Admins cannot be banned."""
     sb = get_supabase()
 
-    target = sb.table("users").select("role").eq("id", user_id).execute()
+    target = sb.table("users").select("role, department_id").eq("id", user_id).execute()
     if not target.data:
         raise HTTPException(status_code=404, detail="User not found")
     if target.data[0].get("role") == "admin":
         raise HTTPException(status_code=400, detail="Cannot ban an admin account")
 
-    sb.table("users").update({"is_banned": req.is_banned}).eq("id", user_id).execute()
+    update_payload = {"is_banned": req.is_banned}
+
+    # When banning a manager, remove their store assignment
+    if req.is_banned and target.data[0].get("role") == "manager":
+        dept_id = target.data[0].get("department_id")
+        update_payload["department_id"] = None
+        if dept_id:
+            sb.table("departments").update({"manager_id": None}).eq("id", dept_id).execute()
+
+    sb.table("users").update(update_payload).eq("id", user_id).execute()
     return {"message": f"User {'banned' if req.is_banned else 'unbanned'} successfully"}
 
 
@@ -285,6 +304,52 @@ async def update_user_department(user_id: str, req: UpdateDepartmentRequest, adm
     if req.department_id:
         return {"message": "User assigned to store successfully"}
     return {"message": "User removed from store successfully"}
+
+
+@router.post("/staff/register")
+async def admin_register_staff(req: AdminStaffRegisterRequest, admin: dict = Depends(require_admin)):
+    """Admin creates a new staff account without a department assignment."""
+    import bcrypt
+
+    sb = get_supabase()
+
+    existing_email = sb.table("users").select("id").eq("email", req.email).execute()
+    if existing_email.data:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    existing_name = sb.table("users").select("id").eq("full_name", req.full_name).execute()
+    if existing_name.data:
+        raise HTTPException(status_code=400, detail="Full name already taken")
+
+    if req.contact_number:
+        existing_contact = sb.table("user_contacts").select("user_id").eq("contact_number", req.contact_number).execute()
+        if existing_contact.data:
+            raise HTTPException(status_code=400, detail="Contact number already registered")
+
+    password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    result = sb.table("users").insert({
+        "email": req.email,
+        "password_hash": password_hash,
+        "full_name": req.full_name,
+        "role": "staff",
+        "is_banned": False,
+    }).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Failed to create staff user")
+
+    user = result.data[0]
+
+    if req.contact_number:
+        sb.table("user_contacts").insert({"user_id": user["id"], "contact_number": req.contact_number}).execute()
+
+    sb.table("user_balances").insert({"user_id": user["id"], "balance": 0.0}).execute()
+
+    return {
+        "message": "Staff registered successfully",
+        "user": {"id": user["id"], "email": user["email"], "full_name": user["full_name"], "role": "staff"},
+    }
 
 
 @router.delete("/users/{user_id}")
@@ -412,6 +477,8 @@ async def list_transactions(
         if t.get("delivery_user_id"):
             delivery_user_ids.add(t["delivery_user_id"])
             user_ids.add(t["delivery_user_id"])
+        if t.get("assigned_staff_id"):
+            user_ids.add(t["assigned_staff_id"])
 
     users_result = sb.table("users").select("id, full_name, department_id").in_("id", list(user_ids)).execute()
     user_map = {u["id"]: u for u in users_result.data} if users_result.data else {}
@@ -457,6 +524,8 @@ async def list_transactions(
 
         delivery_uid = t.get("delivery_user_id")
         delivery_user_name = user_map.get(delivery_uid, {}).get("full_name") if delivery_uid else None
+        staff_uid = t.get("assigned_staff_id")
+        assigned_staff_name = user_map.get(staff_uid, {}).get("full_name") if staff_uid else None
 
         results.append(TransactionDetail(
             id=t["id"],
@@ -473,6 +542,7 @@ async def list_transactions(
             product_images=product_images,
             created_at=t["created_at"],
             delivery_user_name=delivery_user_name,
+            assigned_staff_name=assigned_staff_name,
         ))
 
     return results
@@ -577,6 +647,8 @@ async def admin_reports(admin: dict = Depends(require_admin)):
     total_volume = 0
     seller_data = {}
     product_data = {}
+    store_daily_data = {}
+    store_monthly_data = {}
 
     for t in txns.data:
         amount = float(t["amount"])
@@ -587,6 +659,28 @@ async def admin_reports(admin: dict = Depends(require_admin)):
             seller_data[sid] = {"name": get_seller_display_name(sid), "total": 0, "count": 0}
         seller_data[sid]["total"] += amount
         seller_data[sid]["count"] += 1
+
+        try:
+            dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+            day_key = dt.strftime("%Y-%m-%d")
+            month_key = dt.strftime("%Y-%m")
+        except Exception:
+            day_key = t["created_at"][:10]
+            month_key = t["created_at"][:7]
+
+        if sid not in store_daily_data:
+            store_daily_data[sid] = {}
+        if day_key not in store_daily_data[sid]:
+            store_daily_data[sid][day_key] = {"income": 0, "count": 0}
+        store_daily_data[sid][day_key]["income"] += amount
+        store_daily_data[sid][day_key]["count"] += 1
+
+        if sid not in store_monthly_data:
+            store_monthly_data[sid] = {}
+        if month_key not in store_monthly_data[sid]:
+            store_monthly_data[sid][month_key] = {"income": 0, "count": 0}
+        store_monthly_data[sid][month_key]["income"] += amount
+        store_monthly_data[sid][month_key]["count"] += 1
 
         pid = t["product_id"]
         ptitle = ""
@@ -622,11 +716,21 @@ async def admin_reports(admin: dict = Depends(require_admin)):
     store_reports = []
     all_store_ids = set(seller_data.keys()).union(store_expected.keys())
     for sid in all_store_ids:
+        s_daily = sorted([
+            DailyIncome(date=k, income=round(v["income"], 2), transactions=v["count"])
+            for k, v in store_daily_data.get(sid, {}).items()
+        ], key=lambda x: x.date, reverse=True)[:30]
+        s_monthly = sorted([
+            DailyIncome(date=k, income=round(v["income"], 2), transactions=v["count"])
+            for k, v in store_monthly_data.get(sid, {}).items()
+        ], key=lambda x: x.date, reverse=True)[:12]
         store_reports.append(StoreReport(
             store_id=sid,
             store_name=get_seller_display_name(sid),
             expected_revenue=round(store_expected.get(sid, 0.0), 2),
-            current_revenue=round(seller_data.get(sid, {}).get("total", 0.0), 2)
+            current_revenue=round(seller_data.get(sid, {}).get("total", 0.0), 2),
+            daily_income=s_daily,
+            monthly_income=s_monthly,
         ))
         
     product_reports = []
@@ -671,13 +775,9 @@ async def list_admin_products(
     sb = get_supabase()
 
     if search:
-        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").eq(
-            "is_active", True
-        ).ilike("title", f"%{search}%").order("created_at", desc=True).limit(200).execute()
+        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").ilike("title", f"%{search}%").order("created_at", desc=True).limit(200).execute()
     else:
-        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").eq(
-            "is_active", True
-        ).order("created_at", desc=True).limit(200).execute()
+        products = sb.table("products").select("*, users!products_seller_id_fkey(full_name, department_id)").order("created_at", desc=True).limit(200).execute()
 
     # Batch-lookup department names
     dept_ids = set()
@@ -1418,12 +1518,15 @@ async def delete_department(dept_id: str, admin: dict = Depends(require_admin)):
 
 @router.delete("/products/{product_id}")
 async def admin_delete_product(product_id: str, admin: dict = Depends(require_admin)):
-    """Soft-delete a product (set is_active=False). Admin can delete any product regardless of ownership."""
+    """Hard-delete a product and all dependent rows."""
     sb = get_supabase()
-    existing = sb.table("products").select("id, title").eq("id", product_id).execute()
+    existing = sb.table("products").select("id").eq("id", product_id).execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="Product not found")
-    sb.table("products").update({"is_active": False}).eq("id", product_id).execute()
+    sb.table("restock_requests").delete().eq("product_id", product_id).execute()
+    sb.table("cart_items").delete().eq("product_id", product_id).execute()
+    sb.table("wishlist_items").delete().eq("product_id", product_id).execute()
+    sb.table("products").delete().eq("id", product_id).execute()
     return {"message": "Product deleted successfully"}
 
 
@@ -1461,10 +1564,11 @@ async def admin_create_product_for_dept(
     if len(req.images) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 images allowed")
 
-    # Use the department's manager as the seller_id so the product belongs to the store.
-    # Fall back to admin if the department has no manager assigned yet.
+    # Product must be owned by the department's manager, not the admin.
     manager_id = dept.data[0].get("manager_id")
-    seller_id = manager_id if manager_id else admin["sub"]
+    if not manager_id:
+        raise HTTPException(status_code=400, detail="This store has no manager assigned. Assign a manager before adding products.")
+    seller_id = manager_id
 
     result = sb.table("products").insert({
         "seller_id": seller_id,
@@ -1893,6 +1997,93 @@ async def admin_create_restock_request(req: AdminRestockRequestCreate, admin: di
     }
 
 
+class AdminRestockCancelRequest(BaseModel):
+    admin_notes: str = ""
+
+
+@router.put("/restock-requests/{request_id}/cancel")
+async def admin_cancel_restock(
+    request_id: str,
+    req: AdminRestockCancelRequest,
+    admin: dict = Depends(require_admin),
+):
+    """
+    Admin cancels any restock request regardless of status (except already delivered).
+    If a delivery person had already accepted the request, they still receive the ₱90 fee
+    deducted from admin balance, since they started the job.
+    """
+    sb = get_supabase()
+    RESTOCK_DELIVERY_FEE = 90.00
+
+    restock = sb.table("restock_requests").select("*").eq("id", request_id).execute()
+    if not restock.data:
+        raise HTTPException(status_code=404, detail="Restock request not found")
+
+    r = restock.data[0]
+    if r["status"] == "delivered":
+        raise HTTPException(status_code=400, detail="Cannot cancel a restock that has already been delivered")
+    if r["status"] == "cancelled":
+        raise HTTPException(status_code=400, detail="Restock request is already cancelled")
+
+    delivery_user_id = r.get("delivery_user_id")
+    was_picked_up = r["status"] in ("accepted_delivery", "in_transit") and delivery_user_id
+
+    # Get product info for SVF metadata
+    product = sb.table("products").select("title").eq("id", r["product_id"]).execute()
+    product_title = product.data[0].get("title", "Product") if product.data else "Product"
+    qty = r.get("approved_quantity") or r["requested_quantity"]
+
+    if was_picked_up:
+        # Pay delivery fee to deliveryman, deduct from admin
+        admin_user = sb.table("users").select("id").eq("role", "admin").limit(1).execute()
+        if admin_user.data:
+            admin_id = admin_user.data[0]["id"]
+            admin_bal = sb.table("user_balances").select("balance").eq("user_id", admin_id).execute()
+            if admin_bal.data:
+                new_admin_bal = float(admin_bal.data[0]["balance"]) - RESTOCK_DELIVERY_FEE
+                sb.table("user_balances").update({"balance": new_admin_bal}).eq("user_id", admin_id).execute()
+            sb.table("stored_value").insert({
+                "user_id": admin_id,
+                "transaction_type": "restock_payment",
+                "amount": RESTOCK_DELIVERY_FEE,
+                "metadata": {
+                    "restock_request_id": request_id,
+                    "product_title": product_title,
+                    "quantity": qty,
+                    "delivery_user_id": delivery_user_id,
+                    "reason": "cancelled_mid_delivery",
+                },
+            }).execute()
+
+        # Credit deliveryman
+        del_bal = sb.table("user_balances").select("balance").eq("user_id", delivery_user_id).execute()
+        if del_bal.data:
+            new_del_bal = float(del_bal.data[0]["balance"]) + RESTOCK_DELIVERY_FEE
+            sb.table("user_balances").update({"balance": new_del_bal}).eq("user_id", delivery_user_id).execute()
+        sb.table("stored_value").insert({
+            "user_id": delivery_user_id,
+            "transaction_type": "restock_earning",
+            "amount": RESTOCK_DELIVERY_FEE,
+            "metadata": {
+                "restock_request_id": request_id,
+                "product_title": product_title,
+                "quantity": qty,
+                "reason": "cancelled_mid_delivery",
+            },
+        }).execute()
+
+    notes_text = req.admin_notes if req.admin_notes else ("Cancelled by admin during delivery" if was_picked_up else "Cancelled by admin")
+    sb.table("restock_requests").update({
+        "status": "cancelled",
+        "manager_notes": notes_text,
+    }).eq("id", request_id).execute()
+
+    msg = f"Restock request cancelled."
+    if was_picked_up:
+        msg += f" ₱{RESTOCK_DELIVERY_FEE:.2f} delivery fee paid to deliveryman."
+    return {"message": msg, "delivery_fee_paid": was_picked_up}
+
+
 @router.get("/restock-requests")
 async def admin_get_restock_requests(
     department_id: str = Query("", description="Filter by department ID"),
@@ -1913,18 +2104,22 @@ async def admin_get_restock_requests(
 
     requests = query.execute()
 
-    # Get staff names
+    # Collect all user IDs needed (staff + delivery)
     staff_ids = set()
+    delivery_ids = set()
     dept_ids = set()
     for r in (requests.data or []):
         staff_ids.add(r["staff_id"])
+        if r.get("delivery_user_id"):
+            delivery_ids.add(r["delivery_user_id"])
         if r.get("department_id"):
             dept_ids.add(r["department_id"])
 
-    staff_names = {}
-    if staff_ids:
-        users_result = sb.table("users").select("id, full_name, role").in_("id", list(staff_ids)).execute()
-        staff_names = {u["id"]: {"name": u["full_name"], "role": u.get("role", "")} for u in (users_result.data or [])}
+    all_user_ids = staff_ids | delivery_ids
+    user_map = {}
+    if all_user_ids:
+        users_result = sb.table("users").select("id, full_name, role").in_("id", list(all_user_ids)).execute()
+        user_map = {u["id"]: {"name": u["full_name"], "role": u.get("role", "")} for u in (users_result.data or [])}
 
     dept_names = {}
     if dept_ids:
@@ -1934,7 +2129,9 @@ async def admin_get_restock_requests(
     results = []
     for r in (requests.data or []):
         prod = r.get("products") or {}
-        staff_info = staff_names.get(r["staff_id"], {"name": "Unknown", "role": ""})
+        staff_info = user_map.get(r["staff_id"], {"name": "Unknown", "role": ""})
+        delivery_uid = r.get("delivery_user_id")
+        delivery_name = user_map.get(delivery_uid, {}).get("name") if delivery_uid else None
         results.append({
             "id": r["id"],
             "product_id": r["product_id"],
@@ -1949,6 +2146,7 @@ async def admin_get_restock_requests(
             "department_name": dept_names.get(r.get("department_id", ""), "—"),
             "status": r["status"],
             "created_at": r["created_at"],
+            "delivery_user_name": delivery_name,
         })
 
     return results

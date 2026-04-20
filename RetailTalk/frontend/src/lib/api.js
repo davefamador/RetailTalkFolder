@@ -62,6 +62,14 @@ async function apiFetch(path, options = {}) {
     }
 
     if (!res.ok) {
+        if (res.status === 401) {
+            localStorage.removeItem('retailtalk_token');
+            localStorage.removeItem('retailtalk_user');
+            if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+            }
+            throw new Error('Session expired. Please log in again.');
+        }
         let detail = `API error ${res.status}`;
         try {
             const error = await res.json();
@@ -549,6 +557,13 @@ export async function managerGetStaff(search = '') {
     return apiFetch(`/manager/staff?search=${encodeURIComponent(search)}`);
 }
 
+export async function adminRegisterStaff(data) {
+    return apiFetch('/admin/staff/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
 export async function managerRegisterStaff(data) {
     return apiFetch('/manager/staff/register', {
         method: 'POST',
@@ -578,6 +593,20 @@ export async function managerApproveRestock(requestId, data = {}) {
 
 export async function managerRejectRestock(requestId, data = {}) {
     return apiFetch(`/manager/restock-requests/${requestId}/reject`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function managerCancelRestock(requestId, data = {}) {
+    return apiFetch(`/manager/restock-requests/${requestId}/cancel`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+    });
+}
+
+export async function adminCancelRestock(requestId, data = {}) {
+    return apiFetch(`/admin/restock-requests/${requestId}/cancel`, {
         method: 'PUT',
         body: JSON.stringify(data),
     });

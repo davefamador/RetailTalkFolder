@@ -4,7 +4,7 @@ import {
     LayoutDashboard, Users, Store, Truck, Clock, CreditCard,
     Box, ClipboardList, TrendingUp, Search, LogOut, Timer, CalendarDays,
     ShoppingCart, DollarSign, ShoppingBag, Briefcase, UserCheck,
-    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download, Heart, ChevronDown
+    Package, Ruler, Sun, Moon, X, Receipt, AlertTriangle, Send, Download, Heart, ChevronDown, UserPlus
 } from 'lucide-react';
 import {
     getStoredAdmin, adminLogout, adminGetDashboard, adminGetUsers,
@@ -13,12 +13,13 @@ import {
     adminGetPendingProducts, adminApproveProduct, adminUnapproveProduct,
     adminGetDepartments, adminGetDepartmentDetail, adminCreateDepartment, adminUpdateDepartment, adminDeleteDepartment, adminRegisterManager,
     adminGetPendingRemovals, adminApproveRemoval, adminRejectRemoval,
-    adminGetDeliveriesStats, adminGetRestockRequests,
+    adminGetDeliveriesStats, adminGetRestockRequests, adminCancelRestock,
     getBalance, withdraw, deposit, getSVFHistory, searchProducts,
     getAdminWishlistReport,
     adminCreateProductForDept, uploadProductImage,
     adminGetSalaries, adminSetSalary, adminPayAll, adminPayStore, adminPayIndividual,
     adminChangeUserPassword,
+    adminRegisterStaff,
 } from '../../../lib/api';
 import Toast from '../../components/Toast';
 
@@ -639,12 +640,20 @@ export default function AdminDashboard() {
     const [restockModal, setRestockModal] = useState(null);
     const [restockQty, setRestockQty] = useState('');
     const [restockMessage, setRestockMessage] = useState('');
+    // Restock cancel state
+    const [cancelRestockId, setCancelRestockId] = useState(null);
+    const [cancelRestockNotes, setCancelRestockNotes] = useState('');
+    const [cancelRestockLoading, setCancelRestockLoading] = useState(false);
     // User detail panel state
     const [selectedUserId, setSelectedUserId] = useState(null);
     const [userDetail, setUserDetail] = useState(null);
     const [userDetailLoading, setUserDetailLoading] = useState(false);
     const [userNewPassword, setUserNewPassword] = useState('');
     const [userPwLoading, setUserPwLoading] = useState(false);
+    // Register staff modal state
+    const [showAdminRegisterStaff, setShowAdminRegisterStaff] = useState(false);
+    const [adminStaffForm, setAdminStaffForm] = useState({ full_name: '', email: '', password: '', contact_number: '' });
+    const [adminStaffFormErrors, setAdminStaffFormErrors] = useState({});
     // Pending products state
     const [pendingProducts, setPendingProducts] = useState([]);
     const [selectedPendingProduct, setSelectedPendingProduct] = useState(null);
@@ -655,6 +664,10 @@ export default function AdminDashboard() {
     const [deptSearch, setDeptSearch] = useState('');
     const [selectedDeptDetail, setSelectedDeptDetail] = useState(null);
     const [deptDetailLoading, setDeptDetailLoading] = useState(false);
+    // Department inline editing
+    const [editingDeptId, setEditingDeptId] = useState(null);
+    const [editDeptForm, setEditDeptForm] = useState({ name: '', description: '' });
+    const [editDeptSaving, setEditDeptSaving] = useState(false);
     // Department creation
     const [showCreateDept, setShowCreateDept] = useState(false);
 
@@ -680,7 +693,7 @@ export default function AdminDashboard() {
     const [selectedStaffDetail, setSelectedStaffDetail] = useState(null);
     const [staffDetailLoading, setStaffDetailLoading] = useState(false);
     // Transactions filter state
-    const [txnTypeFilter, setTxnTypeFilter] = useState('all');
+    const [txnTypeFilter, setTxnTypeFilter] = useState('delivery');
     const [txnStatusFilter, setTxnStatusFilter] = useState('all');
     // Admin balance & withdraw state
     const [adminBalance, setAdminBalance] = useState(0);
@@ -892,6 +905,20 @@ export default function AdminDashboard() {
     const loadDepartments = async () => {
         try { setDepartments(await adminGetDepartments()); } catch (e) { console.error(e); }
     };
+    const handleDeptClickAddProduct = async (deptId) => {
+        setDeptDetailLoading(true);
+        setSelectedDeptDetail(null);
+        setShowDeptCreateProduct(false);
+        try {
+            const detail = await adminGetDepartmentDetail(deptId);
+            setSelectedDeptDetail(detail);
+            setShowDeptCreateProduct(true);
+        } catch (e) {
+            setMessage({ type: 'error', text: 'Failed to load department: ' + e.message });
+        } finally {
+            setDeptDetailLoading(false);
+        }
+    };
     const handleDeptClick = async (deptId) => {
         setDeptDetailLoading(true);
         setSelectedDeptDetail(null);
@@ -962,6 +989,17 @@ export default function AdminDashboard() {
             loadDashboard();
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
     };
+    const handleSaveDeptEdit = async (deptId) => {
+        if (!editDeptForm.name.trim()) { setMessage({ type: 'error', text: 'Store name is required.' }); return; }
+        setEditDeptSaving(true);
+        try {
+            await adminUpdateDepartment(deptId, { name: editDeptForm.name.trim(), description: editDeptForm.description.trim() });
+            setMessage({ type: 'success', text: 'Store updated!' });
+            setEditingDeptId(null);
+            loadDepartments();
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setEditDeptSaving(false); }
+    };
     const handleRegisterManager = async () => {
         try {
             await adminRegisterManager(managerForm);
@@ -991,6 +1029,27 @@ export default function AdminDashboard() {
         } catch (e) { setMessage({ type: 'error', text: e.message }); }
         finally { setPendingActionLoading(false); }
     };
+    const handleAdminRegisterStaff = async () => {
+        const errors = {};
+        if (!adminStaffForm.full_name.trim()) errors.full_name = 'Full name is required.';
+        else if (adminStaffForm.full_name.trim().length < 2) errors.full_name = 'Name must be at least 2 characters.';
+        if (!adminStaffForm.email.trim()) errors.email = 'Email is required.';
+        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminStaffForm.email.trim())) errors.email = 'Enter a valid email address.';
+        if (!adminStaffForm.password) errors.password = 'Password is required.';
+        else if (adminStaffForm.password.length < 6) errors.password = 'Password must be at least 6 characters.';
+        if (adminStaffForm.contact_number && !/^\+?[\d\s\-()]{7,15}$/.test(adminStaffForm.contact_number.trim()))
+            errors.contact_number = 'Enter a valid contact number.';
+        if (Object.keys(errors).length) { setAdminStaffFormErrors(errors); return; }
+        try {
+            await adminRegisterStaff(adminStaffForm);
+            setMessage({ type: 'success', text: 'Staff registered successfully' });
+            setShowAdminRegisterStaff(false);
+            setAdminStaffForm({ full_name: '', email: '', password: '', contact_number: '' });
+            setAdminStaffFormErrors({});
+            loadUsers(userSearch, userRoleFilter);
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+    };
+
     const handleBan = async (userId, ban) => {
         try {
             await adminBanUser(userId, ban);
@@ -1076,6 +1135,18 @@ export default function AdminDashboard() {
             setMessage({ type: 'error', text: 'Failed to submit restock: ' + e.message });
         }
     };
+    const handleAdminCancelRestock = async (requestId) => {
+        setCancelRestockLoading(true);
+        try {
+            const res = await adminCancelRestock(requestId, { admin_notes: cancelRestockNotes });
+            setMessage({ type: 'success', text: res.message });
+            setCancelRestockId(null);
+            setCancelRestockNotes('');
+            setRestockOrders(await adminGetRestockRequests());
+        } catch (e) { setMessage({ type: 'error', text: e.message }); }
+        finally { setCancelRestockLoading(false); }
+    };
+
     const handleUpdateProduct = async () => {
         if (!productModal.title || !productModal.title.trim()) {
             setMessage({ type: 'error', text: 'Product title is required' });
@@ -1225,7 +1296,6 @@ export default function AdminDashboard() {
         },
         {
             label: 'Operations', items: [
-                { id: 'pending', icon: Clock, label: 'Pending' },
                 { id: 'transactions', icon: CreditCard, label: 'Transactions' },
             ]
         },
@@ -1589,21 +1659,90 @@ export default function AdminDashboard() {
                                     }}>Reset Filters</button>
                                 )}
                             </div>
-                            {/* Add Deliveryman Button */}
-                            <button
-                                onClick={() => window.location.href = '/admin/delivery-register'}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20,
-                                    padding: '10px 20px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.3)',
-                                    background: 'rgba(16,185,129,0.1)', color: '#10b981',
-                                    cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
-                                    fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
-                                }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.2)'}
-                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(16,185,129,0.1)'}
-                            >
-                                <Truck size={16} style={{ marginRight: 4 }} /> + Add Deliveryman
-                            </button>
+                            {/* Action Buttons Row */}
+                            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+                                <button
+                                    onClick={() => window.location.href = '/admin/delivery-register'}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 8,
+                                        padding: '10px 20px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.3)',
+                                        background: 'rgba(16,185,129,0.1)', color: '#10b981',
+                                        cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
+                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(16,185,129,0.2)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(16,185,129,0.1)'}
+                                >
+                                    <Truck size={16} /> + Add Deliveryman
+                                </button>
+                                <button
+                                    onClick={() => { setShowAdminRegisterStaff(true); setAdminStaffFormErrors({}); }}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 8,
+                                        padding: '10px 20px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.3)',
+                                        background: 'rgba(99,102,241,0.1)', color: '#6366f1',
+                                        cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem',
+                                        fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.2)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(99,102,241,0.1)'}
+                                >
+                                    <UserPlus size={16} /> + Register Staff
+                                </button>
+                            </div>
+                            {/* Register Staff Modal */}
+                            {showAdminRegisterStaff && (
+                                <div style={{
+                                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                                    zIndex: 400, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }} onClick={() => { setShowAdminRegisterStaff(false); setAdminStaffFormErrors({}); }}>
+                                    <div style={{
+                                        background: 'var(--admin-card-bg)', borderRadius: 20, padding: 32,
+                                        width: 480, maxWidth: '90vw', border: '1px solid var(--admin-border)',
+                                        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+                                    }} onClick={e => e.stopPropagation()}>
+                                        <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 4 }}>Register Staff</h2>
+                                        <p style={{ fontSize: '0.82rem', color: 'var(--admin-text-muted)', marginBottom: 20 }}>
+                                            Staff will have no store assigned — assign one later from the user table.
+                                        </p>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                                            {[
+                                                { label: 'Full Name *', key: 'full_name', type: 'text', placeholder: 'Enter full name' },
+                                                { label: 'Email *', key: 'email', type: 'email', placeholder: 'Enter email' },
+                                                { label: 'Password *', key: 'password', type: 'password', placeholder: 'Min. 6 characters' },
+                                                { label: 'Contact Number', key: 'contact_number', type: 'text', placeholder: 'Enter contact number' },
+                                            ].map(({ label, key, type, placeholder }) => (
+                                                <div key={key}>
+                                                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-secondary)', marginBottom: 6 }}>{label}</label>
+                                                    <input
+                                                        type={type} placeholder={placeholder}
+                                                        value={adminStaffForm[key]}
+                                                        onChange={e => { setAdminStaffForm({ ...adminStaffForm, [key]: e.target.value }); setAdminStaffFormErrors(prev => ({ ...prev, [key]: '' })); }}
+                                                        style={{
+                                                            width: '100%', padding: '10px 14px', borderRadius: 10,
+                                                            background: 'var(--admin-input-bg, var(--admin-card-bg))',
+                                                            border: `1px solid ${adminStaffFormErrors[key] ? '#ef4444' : 'var(--admin-border)'}`,
+                                                            color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem',
+                                                            boxSizing: 'border-box',
+                                                        }}
+                                                    />
+                                                    {adminStaffFormErrors[key] && <p style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: 4 }}>{adminStaffFormErrors[key]}</p>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                                            <button className="btn btn-primary" onClick={handleAdminRegisterStaff}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Register Staff
+                                            </button>
+                                            <button className="btn btn-outline" onClick={() => { setShowAdminRegisterStaff(false); setAdminStaffFormErrors({}); }}
+                                                style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem', fontWeight: 700, borderRadius: 10 }}>
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                                 <table className="data-table">
                                     <thead>
@@ -1767,24 +1906,47 @@ export default function AdminDashboard() {
                             }}>
                                 {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map(dept => (
                                     <div key={dept.id}
-                                        onClick={() => handleDeptClick(dept.id)}
+                                        onClick={() => { if (editingDeptId !== dept.id) handleDeptClick(dept.id); }}
                                         style={{
-                                            background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
-                                            borderRadius: 16, padding: 20, cursor: 'pointer',
+                                            background: 'var(--admin-card-bg)', border: `1px solid ${editingDeptId === dept.id ? '#8b5cf6' : 'var(--admin-border)'}`,
+                                            borderRadius: 16, padding: 20, cursor: editingDeptId === dept.id ? 'default' : 'pointer',
                                             transition: 'all 0.2s',
                                         }}
-                                        onMouseEnter={e => { e.currentTarget.style.borderColor = '#8b5cf6'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                                        onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--admin-border)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                                        onMouseEnter={e => { if (editingDeptId !== dept.id) { e.currentTarget.style.borderColor = '#8b5cf6'; e.currentTarget.style.transform = 'translateY(-2px)'; } }}
+                                        onMouseLeave={e => { if (editingDeptId !== dept.id) { e.currentTarget.style.borderColor = 'var(--admin-border)'; e.currentTarget.style.transform = 'translateY(0)'; } }}
                                     >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                                            <div>
-                                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>{dept.name}</h3>
-                                                {dept.description && (
-                                                    <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{dept.description}</p>
+                                            <div style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                                                {editingDeptId === dept.id ? (
+                                                    <>
+                                                        <input
+                                                            type="text"
+                                                            value={editDeptForm.name}
+                                                            onChange={e => setEditDeptForm(f => ({ ...f, name: e.target.value }))}
+                                                            onClick={e => e.stopPropagation()}
+                                                            placeholder="Store name"
+                                                            style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #8b5cf6', background: 'var(--admin-bg)', color: 'var(--admin-text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.9rem', fontWeight: 700, marginBottom: 6 }}
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            value={editDeptForm.description}
+                                                            onChange={e => setEditDeptForm(f => ({ ...f, description: e.target.value }))}
+                                                            onClick={e => e.stopPropagation()}
+                                                            placeholder="Description (optional)"
+                                                            style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--admin-border)', background: 'var(--admin-bg)', color: 'var(--admin-text-secondary)', fontFamily: 'Inter, sans-serif', fontSize: '0.8rem' }}
+                                                        />
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>{dept.name}</h3>
+                                                        {dept.description && (
+                                                            <p style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{dept.description}</p>
+                                                        )}
+                                                    </>
                                                 )}
                                             </div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                {dept.low_stock_count > 0 && (
+                                                {dept.low_stock_count > 0 && editingDeptId !== dept.id && (
                                                     <span style={{
                                                         display: 'inline-flex', alignItems: 'center', gap: 4,
                                                         padding: '4px 10px', borderRadius: 12, fontSize: '0.7rem', fontWeight: 700,
@@ -1794,7 +1956,7 @@ export default function AdminDashboard() {
                                                 <div style={{
                                                     width: 40, height: 40, borderRadius: 10,
                                                     background: 'rgba(139,92,246,0.15)', display: 'flex',
-                                                    alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem',
+                                                    alignItems: 'center', justifyContent: 'center',
                                                 }}><Store size={14} /></div>
                                             </div>
                                         </div>
@@ -1816,19 +1978,65 @@ export default function AdminDashboard() {
                                                 <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#f59e0b' }}>PHP {(dept.total_revenue || 0).toFixed(2)}</p>
                                             </div>
                                         </div>
-                                        <button
-                                            onClick={e => { e.stopPropagation(); handleDeleteDepartment(dept.id, dept.name); }}
-                                            style={{
-                                                width: '100%', padding: '8px 0', borderRadius: 8,
-                                                background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)',
-                                                color: '#ef4444', fontWeight: 600, fontSize: '0.78rem',
-                                                cursor: 'pointer', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
-                                            }}
-                                            onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; }}
-                                            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)'; }}
-                                        >
-                                            Delete Store
-                                        </button>
+                                        <div style={{ display: 'flex', gap: 8 }}>
+                                            {editingDeptId === dept.id ? (
+                                                <>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); handleSaveDeptEdit(dept.id); }}
+                                                        disabled={editDeptSaving}
+                                                        style={{
+                                                            flex: 1, padding: '8px 0', borderRadius: 8,
+                                                            background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.35)',
+                                                            color: '#8b5cf6', fontWeight: 600, fontSize: '0.78rem',
+                                                            cursor: editDeptSaving ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif',
+                                                            opacity: editDeptSaving ? 0.6 : 1,
+                                                        }}
+                                                    >
+                                                        {editDeptSaving ? 'Saving...' : 'Save'}
+                                                    </button>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); setEditingDeptId(null); }}
+                                                        style={{
+                                                            flex: 1, padding: '8px 0', borderRadius: 8,
+                                                            background: 'transparent', border: '1px solid var(--admin-border)',
+                                                            color: 'var(--admin-text-secondary)', fontWeight: 600, fontSize: '0.78rem',
+                                                            cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                        }}
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); setEditingDeptId(dept.id); setEditDeptForm({ name: dept.name, description: dept.description || '' }); }}
+                                                        style={{
+                                                            flex: 1, padding: '8px 0', borderRadius: 8,
+                                                            background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)',
+                                                            color: '#8b5cf6', fontWeight: 600, fontSize: '0.78rem',
+                                                            cursor: 'pointer', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                        }}
+                                                        onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.background = 'rgba(139,92,246,0.12)'; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(139,92,246,0.06)'; }}
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); handleDeleteDepartment(dept.id, dept.name); }}
+                                                        style={{
+                                                            flex: 1, padding: '8px 0', borderRadius: 8,
+                                                            background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)',
+                                                            color: '#ef4444', fontWeight: 600, fontSize: '0.78rem',
+                                                            cursor: 'pointer', fontFamily: 'Inter, sans-serif', transition: 'all 0.2s',
+                                                        }}
+                                                        onMouseEnter={e => { e.stopPropagation(); e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; }}
+                                                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)'; }}
+                                                    >
+                                                        Delete Store
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -2886,20 +3094,7 @@ export default function AdminDashboard() {
                     )}
                     {/* ===== TRANSACTIONS TAB ===== */}
                     {activeTab === 'transactions' && (() => {
-                        const filteredTxns = transactions.filter(t => {
-                            if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
-                            if (txnTypeFilter !== 'all') {
-                                const tType = t.purchase_type || 'delivery';
-                                if (tType !== txnTypeFilter) return false;
-                            }
-                            return true;
-                        });
-
-                        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-                        const recentTxns = filteredTxns.filter(t => new Date(t.created_at).getTime() >= oneDayAgo);
-                        const otherTxns = filteredTxns.filter(t => new Date(t.created_at).getTime() < oneDayAgo);
-
-                        const statusColors = {
+                        const deliveryStatusColors = {
                             pending: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
                             approved: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
                             ondeliver: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
@@ -2908,18 +3103,60 @@ export default function AdminDashboard() {
                             undelivered: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
                             cancelled: { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
                         };
-                        const statusLabels = {
+                        const deliveryStatusLabels = {
                             pending: 'Pending', approved: 'Approved', ondeliver: 'On Deliver',
                             delivered: 'Delivered', completed: 'Completed',
                             undelivered: 'Undelivered', cancelled: 'Cancelled',
                         };
-                        const availableStatuses = ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'];
+                        const restockStatusColors = {
+                            pending_manager: { bg: 'rgba(251,191,36,0.15)', color: '#fbbf24' },
+                            approved_manager: { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6' },
+                            accepted_delivery: { bg: 'rgba(139,92,246,0.15)', color: '#8b5cf6' },
+                            delivered: { bg: 'rgba(16,185,129,0.15)', color: '#10b981' },
+                            rejected_manager: { bg: 'rgba(239,68,68,0.15)', color: '#ef4444' },
+                            cancelled: { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' },
+                        };
+                        const restockStatusLabels = {
+                            pending_manager: 'Pending Approval', approved_manager: 'To Be Delivered',
+                            accepted_delivery: 'In Delivery',
+                            delivered: 'Delivered', rejected_manager: 'Rejected', cancelled: 'Cancelled',
+                        };
+
+                        const deliveryStatuses = ['pending', 'approved', 'ondeliver', 'delivered', 'undelivered', 'completed', 'cancelled'];
+                        const restockStatuses = ['pending_manager', 'approved_manager', 'accepted_delivery', 'delivered', 'rejected_manager', 'cancelled'];
+
+                        const filteredDeliveryTxns = transactions.filter(t => {
+                            const tType = t.purchase_type || 'delivery';
+                            if (tType !== 'delivery') return false;
+                            if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
+                            return true;
+                        });
+                        const filteredRestockOrders = (restockOrders || []).filter(t => {
+                            if (txnStatusFilter !== 'all' && t.status !== txnStatusFilter) return false;
+                            return true;
+                        });
+
+                        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+                        const recentDeliveryTxns = filteredDeliveryTxns.filter(t => new Date(t.created_at).getTime() >= oneDayAgo);
+                        const olderDeliveryTxns = filteredDeliveryTxns.filter(t => new Date(t.created_at).getTime() < oneDayAgo);
+                        const recentRestockOrders = filteredRestockOrders.filter(t => new Date(t.created_at).getTime() >= oneDayAgo);
+
+                        const activeStatuses = txnTypeFilter === 'restock' ? restockStatuses : deliveryStatuses;
+                        const activeStatusLabels = txnTypeFilter === 'restock' ? restockStatusLabels : deliveryStatusLabels;
+                        const activeStatusColors = txnTypeFilter === 'restock' ? restockStatusColors : deliveryStatusColors;
+
+                        const btnBase = { padding: '7px 20px', borderRadius: 8, fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', border: '1px solid', transition: 'all 0.15s', fontFamily: 'Inter, sans-serif' };
+                        const btnActive = { ...btnBase, background: 'var(--accent-primary, #6366f1)', borderColor: 'var(--accent-primary, #6366f1)', color: '#fff' };
+                        const btnInactive = { ...btnBase, background: 'transparent', borderColor: 'var(--admin-border)', color: 'var(--admin-text-secondary)' };
+
                         return (
                             <div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                                     <div>
                                         <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Transactions</h1>
-                                        <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>All platform transactions</p>
+                                        <p style={{ color: 'var(--admin-text-secondary)', fontSize: '0.9rem' }}>
+                                            {txnTypeFilter === 'delivery' ? 'Delivery orders' : 'Restock requests'}
+                                        </p>
                                     </div>
                                     <div style={{ display: 'flex', gap: 8 }}>
                                         <input
@@ -2935,24 +3172,18 @@ export default function AdminDashboard() {
                                         <button className="btn btn-primary btn-sm" onClick={() => loadTransactions(txnSearch)}>Search</button>
                                     </div>
                                 </div>
-                                {/* Filter Buttons */}
+
+                                {/* Type toggle + Status filter */}
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4 }}>Filter Type:</span>
-                                    <select
-                                        value={txnTypeFilter}
-                                        onChange={e => setTxnTypeFilter(e.target.value)}
-                                        style={{
-                                            padding: '6px 12px', borderRadius: 8,
-                                            border: '1px solid var(--admin-border)',
-                                            background: 'var(--admin-card-bg)', color: 'var(--admin-text)',
-                                            fontSize: '0.78rem', fontFamily: 'Inter, sans-serif', cursor: 'pointer',
-                                        }}
-                                    >
-                                        <option value="all">All Types</option>
-                                        <option value="delivery">Delivery</option>
-                                        <option value="restock">Restock</option>
-                                    </select>
-                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginRight: 4, marginLeft: 8 }}>Filter Status:</span>
+                                    <button style={txnTypeFilter === 'delivery' ? btnActive : btnInactive}
+                                        onClick={() => { setTxnTypeFilter('delivery'); setTxnStatusFilter('all'); }}>
+                                        Delivery
+                                    </button>
+                                    <button style={txnTypeFilter === 'restock' ? btnActive : btnInactive}
+                                        onClick={() => { setTxnTypeFilter('restock'); setTxnStatusFilter('all'); }}>
+                                        Restock
+                                    </button>
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--admin-text-muted)', marginLeft: 8 }}>Status:</span>
                                     <select
                                         value={txnStatusFilter}
                                         onChange={e => setTxnStatusFilter(e.target.value)}
@@ -2964,169 +3195,265 @@ export default function AdminDashboard() {
                                         }}
                                     >
                                         <option value="all">All Statuses</option>
-                                        {availableStatuses.map(s => (
-                                            <option key={s} value={s}>{statusLabels[s] || s}</option>
+                                        {activeStatuses.map(s => (
+                                            <option key={s} value={s}>{activeStatusLabels[s] || s}</option>
                                         ))}
                                     </select>
                                 </div>
 
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '24px 0 12px' }}>Recent Transactions (Last 24 Hours)</h3>
-                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                    <div style={{ maxHeight: 450, overflowY: 'auto' }}>
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {recentTxns.map(t => {
-                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
-                                                    const sLabel = statusLabels[t.status] || t.status;
-                                                    const typeLabel = t.purchase_type ? t.purchase_type.charAt(0).toUpperCase() + t.purchase_type.slice(1) : 'Delivery';
-                                                    return (
-                                                        <tr key={t.id}>
-                                                            <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                            <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
-                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
-                                                            <td>{t.quantity || 1}</td>
-                                                            <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
-                                                            <td>
-                                                                <span style={{
-                                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                                    background: typeLabel === 'Restock' ? 'rgba(139,92,246,0.15)' : 'rgba(14,165,233,0.15)',
-                                                                    color: typeLabel === 'Restock' ? '#8b5cf6' : '#0ea5e9'
-                                                                }}>
-                                                                    {typeLabel}
-                                                                </span>
-                                                            </td>
-                                                            <td>
-                                                                <span style={{
-                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
-                                                                }}>{sLabel}</span>
-                                                            </td>
-                                                            <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>
-                                                                {t.delivery_user_name || '—'}
-                                                            </td>
-                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                                {new Date(t.created_at).toLocaleString()}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                                {/* ===== DELIVERY VIEW ===== */}
+                                {txnTypeFilter === 'delivery' && <>
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '24px 0 12px' }}>Recent Delivery Orders (Last 24 Hours)</h3>
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Assigned Staff</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {recentDeliveryTxns.map(t => {
+                                                        const sColor = activeStatusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                        const sLabel = activeStatusLabels[t.status] || t.status;
+                                                        return (
+                                                            <tr key={t.id}>
+                                                                <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                                <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
+                                                                <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
+                                                                <td>{t.quantity || 1}</td>
+                                                                <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
+                                                                <td><span style={{ padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600, background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap' }}>{sLabel}</span></td>
+                                                                <td style={{ fontSize: '0.8rem', color: t.assigned_staff_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.assigned_staff_name || '—'}</td>
+                                                                <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.delivery_user_name || '—'}</td>
+                                                                <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>{new Date(t.created_at).toLocaleString()}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {recentDeliveryTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No recent delivery orders</p></div>}
                                     </div>
-                                    {recentTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No recent transactions</p></div>}
-                                </div>
 
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>All Transactions</h3>
-                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                    <div style={{ maxHeight: 450, overflowY: 'auto' }}>
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Type</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {otherTxns.map(t => {
-                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
-                                                    const sLabel = statusLabels[t.status] || t.status;
-                                                    const typeLabel = t.purchase_type ? t.purchase_type.charAt(0).toUpperCase() + t.purchase_type.slice(1) : 'Delivery';
-                                                    return (
-                                                        <tr key={t.id}>
-                                                            <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
-                                                            <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
-                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
-                                                            <td>{t.quantity || 1}</td>
-                                                            <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
-                                                            <td>
-                                                                <span style={{
-                                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                                    background: typeLabel === 'Restock' ? 'rgba(139,92,246,0.15)' : 'rgba(14,165,233,0.15)',
-                                                                    color: typeLabel === 'Restock' ? '#8b5cf6' : '#0ea5e9'
-                                                                }}>
-                                                                    {typeLabel}
-                                                                </span>
-                                                            </td>
-                                                            <td>
-                                                                <span style={{
-                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap',
-                                                                }}>{sLabel}</span>
-                                                            </td>
-                                                            <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>
-                                                                {t.delivery_user_name || '—'}
-                                                            </td>
-                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                                {new Date(t.created_at).toLocaleString()}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>All Delivery Orders</h3>
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Buyer</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Seller</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Amount</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Assigned Staff</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivered By</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {olderDeliveryTxns.map(t => {
+                                                        const sColor = activeStatusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                        const sLabel = activeStatusLabels[t.status] || t.status;
+                                                        return (
+                                                            <tr key={t.id}>
+                                                                <td style={{ fontWeight: 500 }}>{t.buyer_name}</td>
+                                                                <td style={{ fontWeight: 500 }}>{t.seller_name}</td>
+                                                                <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title}</td>
+                                                                <td>{t.quantity || 1}</td>
+                                                                <td style={{ fontWeight: 600 }}>PHP {t.amount.toFixed(2)}</td>
+                                                                <td><span style={{ padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600, background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap' }}>{sLabel}</span></td>
+                                                                <td style={{ fontSize: '0.8rem', color: t.assigned_staff_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.assigned_staff_name || '—'}</td>
+                                                                <td style={{ fontSize: '0.8rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.delivery_user_name || '—'}</td>
+                                                                <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>{new Date(t.created_at).toLocaleString()}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {olderDeliveryTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No past delivery orders found</p></div>}
                                     </div>
-                                    {otherTxns.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No past transactions found</p></div>}
-                                </div>
+                                </>}
 
-                                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>Restock Request Orders</h3>
-                                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                    <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty Requested</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
-                                                    <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {restockOrders && restockOrders.map(t => {
-                                                    const sColor = statusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
-                                                    const sLabel = statusLabels[t.status] || (t.status ? t.status.replace(/_/g, ' ') : '');
-                                                    return (
-                                                        <tr key={t.id}>
-                                                            <td style={{ fontWeight: 500 }}>{t.department_name || 'N/A'}</td>
-                                                            <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title || 'N/A'}</td>
-                                                            <td>{t.requested_quantity}</td>
-                                                            <td>
-                                                                <span style={{
-                                                                    padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600,
-                                                                    background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap', textTransform: 'capitalize'
-                                                                }}>{sLabel}</span>
-                                                            </td>
-                                                            <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>
-                                                                {new Date(t.created_at).toLocaleString()}
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                                {/* ===== RESTOCK VIEW ===== */}
+                                {txnTypeFilter === 'restock' && <>
+                                    {/* Cancel restock inline panel */}
+                                    {cancelRestockId && (
+                                        <div style={{
+                                            padding: 16, borderRadius: 12, background: 'rgba(148,163,184,0.07)',
+                                            border: '1px solid rgba(148,163,184,0.25)', marginBottom: 16,
+                                        }}>
+                                            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94a3b8', marginBottom: 10 }}>Cancel Restock Request</p>
+                                            <p style={{ fontSize: '0.75rem', color: 'var(--admin-text-muted)', marginBottom: 10 }}>
+                                                If the deliveryman already picked this up, ₱90 delivery fee will be paid to them.
+                                            </p>
+                                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                                                <input
+                                                    type="text" placeholder="Reason (optional)"
+                                                    value={cancelRestockNotes}
+                                                    onChange={e => setCancelRestockNotes(e.target.value)}
+                                                    style={{
+                                                        flex: 1, padding: '8px 12px', borderRadius: 8,
+                                                        background: 'var(--admin-card-bg)', border: '1px solid var(--admin-border)',
+                                                        color: 'var(--admin-text)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
+                                                    }}
+                                                />
+                                                <button
+                                                    disabled={cancelRestockLoading}
+                                                    onClick={() => handleAdminCancelRestock(cancelRestockId)}
+                                                    style={{
+                                                        padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700, borderRadius: 8,
+                                                        background: 'rgba(148,163,184,0.2)', border: '1px solid rgba(148,163,184,0.4)',
+                                                        color: '#94a3b8', cursor: cancelRestockLoading ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap',
+                                                    }}
+                                                >
+                                                    {cancelRestockLoading ? '...' : 'Confirm Cancel'}
+                                                </button>
+                                                <button
+                                                    onClick={() => { setCancelRestockId(null); setCancelRestockNotes(''); }}
+                                                    style={{
+                                                        padding: '8px 16px', fontSize: '0.8rem', borderRadius: 8,
+                                                        background: 'transparent', border: '1px solid var(--admin-border)',
+                                                        color: 'var(--admin-text-secondary)', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                                                    }}
+                                                >
+                                                    Back
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '24px 0 12px' }}>Recent Restock Orders (Last 24 Hours)</h3>
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Requested By</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivery</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {recentRestockOrders.map(t => {
+                                                        const sColor = activeStatusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                        const sLabel = activeStatusLabels[t.status] || (t.status ? t.status.replace(/_/g, ' ') : '');
+                                                        const requester = t.requested_by_role === 'manager' ? t.requested_by : (t.requested_by || '—');
+                                                        const requesterRole = t.requested_by_role;
+                                                        const cancellable = t.status !== 'delivered' && t.status !== 'cancelled';
+                                                        return (
+                                                            <tr key={t.id}>
+                                                                <td style={{ fontWeight: 500 }}>{t.department_name || 'N/A'}</td>
+                                                                <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title || 'N/A'}</td>
+                                                                <td>{t.requested_quantity}</td>
+                                                                <td>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                                        <span style={{ fontWeight: 500, fontSize: '0.82rem' }}>{requester}</span>
+                                                                        {requesterRole && <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, fontWeight: 600, width: 'fit-content', background: requesterRole === 'manager' ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.15)', color: requesterRole === 'manager' ? '#f59e0b' : '#6366f1', textTransform: 'capitalize' }}>{requesterRole}</span>}
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ fontSize: '0.82rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.delivery_user_name || '—'}</td>
+                                                                <td><span style={{ padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600, background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{sLabel}</span></td>
+                                                                <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>{new Date(t.created_at).toLocaleString()}</td>
+                                                                <td>
+                                                                    {cancellable && (
+                                                                        <button
+                                                                            onClick={() => { setCancelRestockId(t.id); setCancelRestockNotes(''); }}
+                                                                            style={{
+                                                                                padding: '4px 12px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6,
+                                                                                background: 'rgba(148,163,184,0.15)', border: '1px solid rgba(148,163,184,0.3)',
+                                                                                color: '#94a3b8', cursor: 'pointer', fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap',
+                                                                            }}
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {recentRestockOrders.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No recent restock orders</p></div>}
                                     </div>
-                                    {(!restockOrders || restockOrders.length === 0) && <div className="empty-state" style={{ padding: 40 }}><p>No restock requests found</p></div>}
-                                </div>
+
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, margin: '32px 0 12px' }}>All Restock History</h3>
+                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                        <div style={{ maxHeight: 450, overflowY: 'auto' }}>
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Store</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Product</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Qty</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Requested By</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Delivery</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Status</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Date</th>
+                                                        <th style={{ position: 'sticky', top: 0, background: 'var(--admin-card-bg)', zIndex: 1 }}>Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {filteredRestockOrders.map(t => {
+                                                        const sColor = activeStatusColors[t.status] || { bg: 'rgba(148,163,184,0.15)', color: '#94a3b8' };
+                                                        const sLabel = activeStatusLabels[t.status] || (t.status ? t.status.replace(/_/g, ' ') : '');
+                                                        const requester = t.requested_by_role === 'manager' ? t.requested_by : (t.requested_by || '—');
+                                                        const requesterRole = t.requested_by_role;
+                                                        const cancellable = t.status !== 'delivered' && t.status !== 'cancelled';
+                                                        return (
+                                                            <tr key={t.id}>
+                                                                <td style={{ fontWeight: 500 }}>{t.department_name || 'N/A'}</td>
+                                                                <td style={{ color: 'var(--admin-text-secondary)' }}>{t.product_title || 'N/A'}</td>
+                                                                <td>{t.requested_quantity}</td>
+                                                                <td>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                                                        <span style={{ fontWeight: 500, fontSize: '0.82rem' }}>{requester}</span>
+                                                                        {requesterRole && <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: 4, fontWeight: 600, width: 'fit-content', background: requesterRole === 'manager' ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.15)', color: requesterRole === 'manager' ? '#f59e0b' : '#6366f1', textTransform: 'capitalize' }}>{requesterRole}</span>}
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ fontSize: '0.82rem', color: t.delivery_user_name ? 'var(--admin-text)' : 'var(--admin-text-muted)' }}>{t.delivery_user_name || '—'}</td>
+                                                                <td><span style={{ padding: '3px 10px', borderRadius: 12, fontSize: '0.72rem', fontWeight: 600, background: sColor.bg, color: sColor.color, whiteSpace: 'nowrap', textTransform: 'capitalize' }}>{sLabel}</span></td>
+                                                                <td style={{ color: 'var(--admin-text-muted)', fontSize: '0.8rem' }}>{new Date(t.created_at).toLocaleString()}</td>
+                                                                <td>
+                                                                    {cancellable && (
+                                                                        <button
+                                                                            onClick={() => { setCancelRestockId(t.id); setCancelRestockNotes(''); }}
+                                                                            style={{
+                                                                                padding: '4px 12px', fontSize: '0.72rem', fontWeight: 700, borderRadius: 6,
+                                                                                background: 'rgba(148,163,184,0.15)', border: '1px solid rgba(148,163,184,0.3)',
+                                                                                color: '#94a3b8', cursor: 'pointer', fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap',
+                                                                            }}
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {filteredRestockOrders.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No restock history found</p></div>}
+                                    </div>
+                                </>}
                             </div>
                         );
                     })()}
@@ -3182,10 +3509,10 @@ export default function AdminDashboard() {
                                                         <tr key={p.id} onClick={(e) => {
                                                             if (e.target.closest('button')) return;
                                                             setProductModal({ ...p });
-                                                        }} style={{ cursor: 'pointer' }} className="hover-row">
+                                                        }} style={{ cursor: 'pointer', opacity: p.is_active === false ? 0.6 : 1 }} className="hover-row">
                                                             <td>
                                                                 {p.images && p.images.length > 0 ? (
-                                                                    <img src={p.images[0]} alt="product" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+                                                                    <img src={p.images[0]} alt="product" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6, filter: p.is_active === false ? 'grayscale(1)' : 'none' }} />
                                                                 ) : (
                                                                     <div style={{ width: 40, height: 40, background: 'var(--admin-hover)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                                                         <Box size={16} color="var(--admin-text-muted)" />
@@ -3193,7 +3520,12 @@ export default function AdminDashboard() {
                                                                 )}
                                                             </td>
                                                             <td style={{ fontWeight: 700, color: 'var(--admin-text)' }}>
-                                                                {p.title}
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                                                    {p.title}
+                                                                    {p.is_active === false && (
+                                                                        <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px', borderRadius: 4, background: 'rgba(148,163,184,0.2)', color: '#94a3b8', letterSpacing: '0.3px' }}>INACTIVE</span>
+                                                                    )}
+                                                                </div>
                                                             </td>
                                                             <td>
                                                                 <span style={{ fontWeight: 600 }}>PHP {p.price.toFixed(2)}</span>
@@ -3542,22 +3874,38 @@ export default function AdminDashboard() {
                                         </div>
                                     </div>
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 32 }}>
-                                        <div className="card" style={{ padding: 24 }}>
-                                            <LineChart
-                                                data={[...reports.daily_income].reverse().slice(-14)}
-                                                labelKey="date" valueKey="income"
-                                                title="Daily Revenue (14 Days)" color="#f59e0b"
-                                            />
-                                        </div>
-                                        <div className="card" style={{ padding: 24 }}>
-                                            <VerticalBarChart
-                                                data={[...(reports.monthly_income || [])].reverse()}
-                                                labelKey="date" valueKey="income"
-                                                title="Monthly Revenue" color="#6366f1"
-                                            />
-                                        </div>
-                                    </div>
+                                    {(() => {
+                                        const selectedStore = selectedReportStore
+                                            ? reports.store_reports?.find(s => s.store_id === selectedReportStore)
+                                            : null;
+                                        const dailyData = selectedStore
+                                            ? [...(selectedStore.daily_income || [])].reverse().slice(-14)
+                                            : [...reports.daily_income].reverse().slice(-14);
+                                        const monthlyData = selectedStore
+                                            ? [...(selectedStore.monthly_income || [])].reverse()
+                                            : [...(reports.monthly_income || [])].reverse();
+                                        const storeLabel = selectedStore ? ` — ${selectedStore.store_name}` : '';
+                                        return (
+                                            <div className="card" style={{ padding: 24, marginBottom: 32 }}>
+                                                <h4 style={{ marginBottom: 20, fontWeight: 700, fontSize: '1rem' }}>
+                                                    Revenue Charts{storeLabel}
+                                                    {selectedStore && <span style={{ fontSize: '0.72rem', fontWeight: 500, color: 'var(--admin-text-muted)', marginLeft: 8 }}>filtered by selected store</span>}
+                                                </h4>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                                                    <LineChart
+                                                        data={dailyData}
+                                                        labelKey="date" valueKey="income"
+                                                        title="Daily Revenue (14 Days)" color="#f59e0b"
+                                                    />
+                                                    <VerticalBarChart
+                                                        data={monthlyData}
+                                                        labelKey="date" valueKey="income"
+                                                        title="Monthly Revenue" color="#6366f1"
+                                                    />
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                                         <div className="card" style={{ padding: 24 }}>
                                             <h4 style={{ marginBottom: 16, fontWeight: 700 }}>Top Sellers</h4>
@@ -4995,7 +5343,14 @@ export default function AdminDashboard() {
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                                 <input type="checkbox" id="isActiveProduct" checked={productModal.is_active !== false}
-                                    onChange={e => setProductModal({ ...productModal, is_active: e.target.checked })} />
+                                    onChange={async e => {
+                                        const newActive = e.target.checked;
+                                        setProductModal({ ...productModal, is_active: newActive });
+                                        try {
+                                            await adminUpdateProduct(productModal.id, { is_active: newActive });
+                                            loadProducts(productSearch);
+                                        } catch (err) { setMessage({ type: 'error', text: 'Failed to update: ' + err.message }); }
+                                    }} />
                                 <label htmlFor="isActiveProduct" style={{ fontSize: '0.85rem', fontWeight: 500 }}>Product is active</label>
                             </div>
                             <button className="btn btn-primary" onClick={handleUpdateProduct} style={{ width: '100%', padding: '12px', marginTop: 10 }}>
