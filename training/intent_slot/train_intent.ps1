@@ -19,16 +19,18 @@ $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $scriptDir "venv\Scripts\python.exe"
 if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
 
-$dataFile  = Join-Path $scriptDir "shopping_queries_dataset\IntentDataset_cleaned.xlsx"
-$modelDir  = Join-Path $scriptDir "models\intent_classifier"
-$ckptFile  = Join-Path $modelDir "checkpoint.pt"
+$dataFile   = Join-Path $scriptDir "shopping_queries_dataset\IntentDataset_cleaned.xlsx"
+$modelDir   = Join-Path $scriptDir "models\intent_classifier"
+$ckptFile   = Join-Path $modelDir "checkpoint.pt"
+$timestamp  = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$runDir     = Join-Path $scriptDir "results\intent_classifier\run_$timestamp"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 if ($Resume) {
-    Write-Host "  Intent Classifier — Resuming Training" -ForegroundColor Cyan
+    Write-Host "  Intent Classifier - Resuming Training" -ForegroundColor Cyan
 } else {
-    Write-Host "  Intent Classifier — Fresh Training" -ForegroundColor Cyan
+    Write-Host "  Intent Classifier - Fresh Training" -ForegroundColor Cyan
 }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
@@ -58,11 +60,13 @@ Write-Host "    Epochs     : $Epochs" -ForegroundColor White
 Write-Host "    Batch size : $BatchSize" -ForegroundColor White
 Write-Host "    LR         : $LR" -ForegroundColor White
 Write-Host "    Model dir  : $modelDir" -ForegroundColor White
+Write-Host "    Results dir: $runDir" -ForegroundColor White
 Write-Host ""
 
 New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+New-Item -ItemType Directory -Force -Path $runDir   | Out-Null
 
-$args = @(
+$trainArgs = @(
     (Join-Path $scriptDir "train_intent_classifier.py"),
     "--data",       $dataFile,
     "--save_dir",   $modelDir,
@@ -70,23 +74,32 @@ $args = @(
     "--batch_size", $BatchSize,
     "--lr",         $LR
 )
-if ($Resume) { $args += "--resume" }
+if ($Resume) { $trainArgs += "--resume" }
 
-& $pythonPath @args
+& $pythonPath @trainArgs
 
 if ($LASTEXITCODE -eq 0) {
+    # Copy result files to timestamped results folder
+    foreach ($f in @("evaluation_results.json", "training_history.json", "config.json", "confusion_matrix.png")) {
+        $src = Join-Path $modelDir $f
+        if (Test-Path $src) { Copy-Item $src -Destination $runDir }
+    }
+
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "  Training Complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Output files in: $modelDir" -ForegroundColor Cyan
-    Write-Host "    model.pt               - Best trained model" -ForegroundColor White
-    Write-Host "    checkpoint.pt          - Resume checkpoint (last epoch)" -ForegroundColor White
-    Write-Host "    label_map.json         - Intent label mappings" -ForegroundColor White
-    Write-Host "    config.json            - Training configuration" -ForegroundColor White
+    Write-Host "  Model files in: $modelDir" -ForegroundColor Cyan
+    Write-Host "    model.pt                - Best trained model" -ForegroundColor White
+    Write-Host "    checkpoint.pt           - Resume checkpoint (last epoch)" -ForegroundColor White
+    Write-Host "    label_map.json          - Intent label mappings" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  Results saved in: $runDir" -ForegroundColor Cyan
+    Write-Host "    config.json             - Training configuration" -ForegroundColor White
     Write-Host "    evaluation_results.json - Metrics (F1, accuracy, etc.)" -ForegroundColor White
-    Write-Host "    training_history.json  - Per-epoch loss & F1" -ForegroundColor White
+    Write-Host "    training_history.json   - Per-epoch loss & F1" -ForegroundColor White
+    Write-Host "    confusion_matrix.png    - Confusion matrix plot" -ForegroundColor White
     Write-Host ""
     Write-Host "  To deploy: copy model.pt to:" -ForegroundColor Yellow
     Write-Host "    RetailTalk\backend\models\intent_classifier\model.pt" -ForegroundColor Yellow
