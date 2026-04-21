@@ -838,6 +838,11 @@ export default function SellPage() {
                     )}
 
                     {/* Products List */}
+                    {user.department_id && (
+                        <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+                            Click a product to request a restock from your manager.
+                        </p>
+                    )}
                     {products.length === 0 ? (
                         <div className="empty-state">
                             <h3>No products yet</h3>
@@ -852,11 +857,23 @@ export default function SellPage() {
                                         <th>Title</th>
                                         <th>Price</th>
                                         <th>Stock</th>
+                                        {user.department_id && <th>Action</th>}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {products.map((p) => (
-                                        <tr key={p.id}>
+                                        <tr key={p.id}
+                                            style={{ cursor: user.department_id ? 'pointer' : 'default', transition: 'background 0.15s' }}
+                                            onClick={() => {
+                                                if (!user.department_id) return;
+                                                setRestockProductId(p.id);
+                                                setRestockQuantity('');
+                                                setRestockNotes('');
+                                                setShowRestockModal(true);
+                                            }}
+                                            onMouseEnter={e => { if (user.department_id) e.currentTarget.style.background = 'rgba(99,102,241,0.06)'; }}
+                                            onMouseLeave={e => { if (user.department_id) e.currentTarget.style.background = 'transparent'; }}
+                                        >
                                             <td>
                                                 {p.images && p.images.length > 0 ? (
                                                     <img
@@ -898,6 +915,16 @@ export default function SellPage() {
                                                     );
                                                 })()}
                                             </td>
+                                            {user.department_id && (
+                                                <td>
+                                                    <span style={{
+                                                        fontSize: '0.75rem', fontWeight: 600, padding: '4px 10px', borderRadius: 6,
+                                                        background: 'rgba(99,102,241,0.1)', color: '#6366f1', whiteSpace: 'nowrap',
+                                                    }}>
+                                                        Request Restock
+                                                    </span>
+                                                </td>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>
@@ -1306,16 +1333,43 @@ export default function SellPage() {
                         alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20,
                     }} onClick={() => setShowRestockModal(false)}>
                         <div className="card" style={{ maxWidth: 420, width: '100%', padding: 32 }} onClick={e => e.stopPropagation()}>
-                            <h3 style={{ marginBottom: 16 }}>Request Restock</h3>
+                            <h3 style={{ marginBottom: 4 }}>Request Restock</h3>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+                                This request will be sent to your manager for approval.
+                            </p>
                             <div className="form-group">
                                 <label>Product</label>
-                                <select value={restockProductId} onChange={e => setRestockProductId(e.target.value)}
-                                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
-                                    <option value="">Select a product...</option>
-                                    {products.filter(p => p.is_active).map(p => (
-                                        <option key={p.id} value={p.id}>{p.title} (Stock: {p.stock || 0})</option>
-                                    ))}
-                                </select>
+                                {restockProductId ? (
+                                    (() => {
+                                        const sel = products.find(p => p.id === restockProductId);
+                                        return sel ? (
+                                            <div style={{
+                                                display: 'flex', alignItems: 'center', gap: 12,
+                                                padding: '10px 14px', borderRadius: 10,
+                                                background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                            }}>
+                                                {sel.images?.[0] && (
+                                                    <img src={sel.images[0]} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                                                        onError={e => e.target.style.display = 'none'} />
+                                                )}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <p style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sel.title}</p>
+                                                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Current stock: {sel.stock || 0}</p>
+                                                </div>
+                                                <button type="button" onClick={() => setRestockProductId('')}
+                                                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', padding: 4 }}>✕</button>
+                                            </div>
+                                        ) : null;
+                                    })()
+                                ) : (
+                                    <select value={restockProductId} onChange={e => setRestockProductId(e.target.value)}
+                                        style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>
+                                        <option value="">Select a product...</option>
+                                        {products.filter(p => p.is_active).map(p => (
+                                            <option key={p.id} value={p.id}>{p.title} (Stock: {p.stock || 0})</option>
+                                        ))}
+                                    </select>
+                                )}
                             </div>
                             <div className="form-group">
                                 <label>Quantity</label>

@@ -284,11 +284,16 @@ export default function ManagerDashboard() {
     const [mgrTxnSearch, setMgrTxnSearch] = useState('');
     const [mgrTxnTypeFilter, setMgrTxnTypeFilter] = useState('all');
     const [mgrTxnStatusFilter, setMgrTxnStatusFilter] = useState('all');
+    const [mgrTxnDateFrom, setMgrTxnDateFrom] = useState('');
+    const [mgrTxnDateTo, setMgrTxnDateTo] = useState('');
 
     // Transactions sub-tab
     const [txnSubTab, setTxnSubTab] = useState('orders');
     const [restockHistory, setRestockHistory] = useState([]);
     const [restockHistoryLoading, setRestockHistoryLoading] = useState(false);
+    const [restockHistoryStatusFilter, setRestockHistoryStatusFilter] = useState('all');
+    const [restockHistoryDateFrom, setRestockHistoryDateFrom] = useState('');
+    const [restockHistoryDateTo, setRestockHistoryDateTo] = useState('');
 
     // Direct restock popup
     const [restockPopupProduct, setRestockPopupProduct] = useState(null);
@@ -2028,10 +2033,6 @@ export default function ManagerDashboard() {
                 )}
 
                 {activeTab === 'transactions' && (() => {
-                    const filteredTxns = mgrTransactions.filter(t => {
-                        if (mgrTxnStatusFilter !== 'all' && t.status !== mgrTxnStatusFilter) return false;
-                        return true;
-                    });
                     const statusClr = {
                         ondeliver: '#3b82f6', delivered: '#10b981', completed: '#10b981',
                         undelivered: '#ef4444', cancelled: '#ef4444',
@@ -2040,8 +2041,58 @@ export default function ManagerDashboard() {
                     const allStatuses = [...new Set(mgrTransactions.map(t => t.status))].sort();
                     const restockStatusClr = {
                         pending_manager: '#f59e0b', approved_manager: '#3b82f6',
-                        rejected_manager: '#ef4444', delivered: '#10b981',
+                        rejected_manager: '#ef4444', cancelled: '#94a3b8',
+                        accepted_delivery: '#8b5cf6', in_transit: '#06b6d4',
+                        delivered: '#10b981',
                     };
+                    const restockStatusLabel = {
+                        pending_manager: 'Pending Manager', approved_manager: 'Admin Request',
+                        rejected_manager: 'Rejected', cancelled: 'Cancelled',
+                        accepted_delivery: 'Accepted Delivery', in_transit: 'In Transit',
+                        delivered: 'Delivered',
+                    };
+                    const allRestockStatuses = [...new Set(restockHistory.map(r => r.status))].sort();
+
+                    const filteredTxns = mgrTransactions.filter(t => {
+                        if (mgrTxnStatusFilter !== 'all' && t.status !== mgrTxnStatusFilter) return false;
+                        if (mgrTxnDateFrom) {
+                            const d = new Date(t.created_at); d.setHours(0,0,0,0);
+                            if (d < new Date(mgrTxnDateFrom)) return false;
+                        }
+                        if (mgrTxnDateTo) {
+                            const d = new Date(t.created_at); d.setHours(0,0,0,0);
+                            if (d > new Date(mgrTxnDateTo)) return false;
+                        }
+                        return true;
+                    });
+
+                    const filteredRestock = restockHistory.filter(r => {
+                        if (restockHistoryStatusFilter !== 'all' && r.status !== restockHistoryStatusFilter) return false;
+                        if (restockHistoryDateFrom) {
+                            const d = new Date(r.created_at); d.setHours(0,0,0,0);
+                            if (d < new Date(restockHistoryDateFrom)) return false;
+                        }
+                        if (restockHistoryDateTo) {
+                            const d = new Date(r.created_at); d.setHours(0,0,0,0);
+                            if (d > new Date(restockHistoryDateTo)) return false;
+                        }
+                        return true;
+                    });
+
+                    const filterLabelStyle = {
+                        fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap',
+                    };
+                    const filterSelectStyle = {
+                        padding: '8px 12px', borderRadius: 8,
+                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.82rem',
+                    };
+                    const filterInputStyle = {
+                        padding: '8px 10px', borderRadius: 8,
+                        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+                        color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.82rem',
+                    };
+
                     return (
                         <div>
                             <div style={{ marginBottom: 24 }}>
@@ -2068,20 +2119,29 @@ export default function ManagerDashboard() {
                             {/* ORDER HISTORY sub-tab */}
                             {txnSubTab === 'orders' && (
                                 <>
-                                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-                                        <select
-                                            value={mgrTxnStatusFilter} onChange={e => setMgrTxnStatusFilter(e.target.value)}
-                                            style={{
-                                                padding: '10px 14px', borderRadius: 10,
-                                                background: 'var(--bg-card)', border: '1px solid var(--border-color)',
-                                                color: 'var(--text-primary)', fontFamily: 'Inter, sans-serif', fontSize: '0.85rem',
-                                            }}
-                                        >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                                        <select value={mgrTxnStatusFilter} onChange={e => setMgrTxnStatusFilter(e.target.value)} style={filterSelectStyle}>
                                             <option value="all">All Statuses</option>
                                             {allStatuses.map(s => (
-                                                <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                                                <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
                                             ))}
                                         </select>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={filterLabelStyle}>From</span>
+                                            <input type="date" value={mgrTxnDateFrom} onChange={e => setMgrTxnDateFrom(e.target.value)} style={filterInputStyle} />
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <span style={filterLabelStyle}>To</span>
+                                            <input type="date" value={mgrTxnDateTo} onChange={e => setMgrTxnDateTo(e.target.value)} style={filterInputStyle} />
+                                        </div>
+                                        {(mgrTxnStatusFilter !== 'all' || mgrTxnDateFrom || mgrTxnDateTo) && (
+                                            <button onClick={() => { setMgrTxnStatusFilter('all'); setMgrTxnDateFrom(''); setMgrTxnDateTo(''); }} style={{
+                                                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border-color)',
+                                                background: 'transparent', color: 'var(--text-secondary)',
+                                                fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                                fontFamily: 'Inter, sans-serif',
+                                            }}>Clear</button>
+                                        )}
                                     </div>
                                     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                                         <table className="data-table">
@@ -2103,7 +2163,7 @@ export default function ManagerDashboard() {
                                                                 padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
                                                                 background: `${statusClr[t.status] || '#94a3b8'}15`,
                                                                 color: statusClr[t.status] || '#94a3b8',
-                                                            }}>{t.status.replace('_', ' ')}</span>
+                                                            }}>{t.status.replace(/_/g, ' ')}</span>
                                                         </td>
                                                         <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                                                             {new Date(t.created_at).toLocaleDateString()}
@@ -2124,47 +2184,72 @@ export default function ManagerDashboard() {
                                         <div className="spinner" style={{ width: 36, height: 36 }} />
                                     </div>
                                 ) : (
-                                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                                        <table className="data-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Product</th><th>Requested By</th><th>Qty Requested</th><th>Qty Approved</th><th>Status</th><th>Notes</th><th>Date</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {restockHistory.map(r => (
-                                                    <tr key={r.id}>
-                                                        <td>
-                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                                {r.product_images?.[0] && (
-                                                                    <img src={r.product_images[0]} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} onError={e => e.target.style.display = 'none'} />
-                                                                )}
-                                                                <span style={{ fontWeight: 500 }}>{r.product_title || 'Unknown'}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{r.staff_name || 'Manager'}</td>
-                                                        <td style={{ fontWeight: 600 }}>{r.requested_quantity}</td>
-                                                        <td style={{ color: '#10b981', fontWeight: 600 }}>{r.approved_quantity ?? '—'}</td>
-                                                        <td>
-                                                            <span style={{
-                                                                padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
-                                                                background: `${restockStatusClr[r.status] || '#94a3b8'}15`,
-                                                                color: restockStatusClr[r.status] || '#94a3b8',
-                                                                textTransform: 'capitalize',
-                                                            }}>{r.status.replace(/_/g, ' ')}</span>
-                                                        </td>
-                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: 160 }}>
-                                                            {r.notes || r.manager_notes || '—'}
-                                                        </td>
-                                                        <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                                            {new Date(r.created_at).toLocaleDateString()}
-                                                        </td>
-                                                    </tr>
+                                    <>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+                                            <select value={restockHistoryStatusFilter} onChange={e => setRestockHistoryStatusFilter(e.target.value)} style={filterSelectStyle}>
+                                                <option value="all">All Statuses</option>
+                                                {allRestockStatuses.map(s => (
+                                                    <option key={s} value={s}>{restockStatusLabel[s] || s.replace(/_/g, ' ')}</option>
                                                 ))}
-                                            </tbody>
-                                        </table>
-                                        {restockHistory.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No restock history found</p></div>}
-                                    </div>
+                                            </select>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <span style={filterLabelStyle}>From</span>
+                                                <input type="date" value={restockHistoryDateFrom} onChange={e => setRestockHistoryDateFrom(e.target.value)} style={filterInputStyle} />
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <span style={filterLabelStyle}>To</span>
+                                                <input type="date" value={restockHistoryDateTo} onChange={e => setRestockHistoryDateTo(e.target.value)} style={filterInputStyle} />
+                                            </div>
+                                            {(restockHistoryStatusFilter !== 'all' || restockHistoryDateFrom || restockHistoryDateTo) && (
+                                                <button onClick={() => { setRestockHistoryStatusFilter('all'); setRestockHistoryDateFrom(''); setRestockHistoryDateTo(''); }} style={{
+                                                    padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border-color)',
+                                                    background: 'transparent', color: 'var(--text-secondary)',
+                                                    fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer',
+                                                    fontFamily: 'Inter, sans-serif',
+                                                }}>Clear</button>
+                                            )}
+                                        </div>
+                                        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Product</th><th>Requested By</th><th>Qty Requested</th><th>Qty Approved</th><th>Status</th><th>Notes</th><th>Date</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {filteredRestock.map(r => (
+                                                        <tr key={r.id}>
+                                                            <td>
+                                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                                    {r.product_images?.[0] && (
+                                                                        <img src={r.product_images[0]} alt="" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} onError={e => e.target.style.display = 'none'} />
+                                                                    )}
+                                                                    <span style={{ fontWeight: 500 }}>{r.product_title || 'Unknown'}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{r.staff_name || 'Manager'}</td>
+                                                            <td style={{ fontWeight: 600 }}>{r.requested_quantity}</td>
+                                                            <td style={{ color: '#10b981', fontWeight: 600 }}>{r.approved_quantity ?? '—'}</td>
+                                                            <td>
+                                                                <span style={{
+                                                                    padding: '3px 8px', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
+                                                                    background: `${restockStatusClr[r.status] || '#94a3b8'}15`,
+                                                                    color: restockStatusClr[r.status] || '#94a3b8',
+                                                                }}>{restockStatusLabel[r.status] || r.status.replace(/_/g, ' ')}</span>
+                                                            </td>
+                                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem', maxWidth: 160 }}>
+                                                                {r.notes || r.manager_notes || '—'}
+                                                            </td>
+                                                            <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                                                                {new Date(r.created_at).toLocaleDateString()}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                            {filteredRestock.length === 0 && <div className="empty-state" style={{ padding: 40 }}><p>No restock history found</p></div>}
+                                        </div>
+                                    </>
                                 )
                             )}
                         </div>

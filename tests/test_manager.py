@@ -253,7 +253,9 @@ class TestUT_M06:
         if pwd_btn is None:
             pytest.skip("Change password button not found")
 
-        pwd_btn.click()
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", pwd_btn)
+        time.sleep(0.5)
+        driver.execute_script("arguments[0].click();", pwd_btn)
         time.sleep(2)
 
         # Fill password fields
@@ -265,7 +267,9 @@ class TestUT_M06:
         submit_btns = [b for b in driver.find_elements(By.TAG_NAME, "button")
                        if "save" in b.text.lower() or "change" in b.text.lower() or "update" in b.text.lower()]
         if submit_btns:
-            submit_btns[0].click()
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", submit_btns[0])
+            time.sleep(0.3)
+            driver.execute_script("arguments[0].click();", submit_btns[0])
             time.sleep(3)
 
         page_text = body_text(driver).lower()

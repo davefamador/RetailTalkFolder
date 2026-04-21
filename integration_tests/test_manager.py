@@ -205,7 +205,7 @@ class TestIT_M00008:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("product" in page_text.lower() or "listing" in page_text.lower()
@@ -225,7 +225,7 @@ class TestIT_M00009:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         edit_btn = None
@@ -255,7 +255,7 @@ class TestIT_M00010:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         remove_btn = None
@@ -390,7 +390,7 @@ class TestIT_M00015:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Order")
+        navigate_sidebar(driver, "Delivery Orders")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("order" in page_text.lower() or "delivery" in page_text.lower()
@@ -410,7 +410,7 @@ class TestIT_M00016:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Order")
+        navigate_sidebar(driver, "Delivery Orders")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         status_btn = None
@@ -438,7 +438,7 @@ class TestIT_M00017:
         login_as(driver, "manager")
         driver.get(f"{BASE_URL}/manager/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Order")
+        navigate_sidebar(driver, "Delivery Orders")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         reassign_btn = None

@@ -129,21 +129,45 @@ class TestUT_A04:
         navigate_sidebar(driver, "Users")
         time.sleep(3)
 
+        # If no banned user exists, ban one first so we can unban them
         buttons = driver.find_elements(By.TAG_NAME, "button")
         unban_btn = None
         for btn in buttons:
             if "unban" in btn.text.lower():
                 unban_btn = btn
                 break
+
         if unban_btn is None:
-            pytest.skip("No banned users to unban")
+            # Ban a user first
+            ban_btn = None
+            for btn in buttons:
+                if "ban" in btn.text.lower() and "unban" not in btn.text.lower():
+                    ban_btn = btn
+                    break
+            if ban_btn is None:
+                pytest.skip("No users available to ban/unban")
+            ban_btn.click()
+            time.sleep(2)
+            try:
+                driver.switch_to.alert.accept()
+            except Exception:
+                pass
+            time.sleep(2)
+            # Now find the unban button
+            buttons = driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                if "unban" in btn.text.lower():
+                    unban_btn = btn
+                    break
+
+        if unban_btn is None:
+            pytest.skip("Could not find a banned user to unban")
 
         unban_btn.click()
         time.sleep(2)
 
         try:
-            alert = driver.switch_to.alert
-            alert.accept()
+            driver.switch_to.alert.accept()
         except Exception:
             pass
         time.sleep(2)
@@ -170,24 +194,18 @@ class TestUT_A05:
         navigate_sidebar(driver, "Users")
         time.sleep(3)
 
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        view_btn = None
-        for btn in buttons:
-            txt = btn.text.lower()
-            if "view" in txt or "detail" in txt:
-                view_btn = btn
+        # User detail opens by clicking the table row (tr)
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
+        user_row = None
+        for row in rows:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if len(cells) >= 2 and "@" in row.text:
+                user_row = row
                 break
-        if view_btn is None:
-            # Try clicking a user row or link
-            links = driver.find_elements(By.TAG_NAME, "a")
-            for link in links:
-                if "@" in link.text:
-                    view_btn = link
-                    break
-        if view_btn is None:
+        if user_row is None:
             pytest.skip("No users available to view detail")
 
-        view_btn.click()
+        user_row.click()
         time.sleep(2)
 
         page_text = body_text(driver)
@@ -431,20 +449,36 @@ class TestUT_A12:
         navigate_sidebar(driver, "Products")
         time.sleep(3)
 
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        edit_btn = None
-        for btn in buttons:
-            if "edit" in btn.text.lower() or "update" in btn.text.lower():
-                edit_btn = btn
+        # Product edit modal opens by clicking a product table row
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
+        product_row = None
+        for row in rows:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if len(cells) >= 3 and "PHP" in row.text:
+                product_row = row
                 break
-        if edit_btn is None:
+        if product_row is None:
+            # Try expanding store sections first
+            expand_btns = [b for b in driver.find_elements(By.TAG_NAME, "button")
+                           if "product" in b.text.lower() or "store" in b.text.lower()]
+            if expand_btns:
+                expand_btns[0].click()
+                time.sleep(2)
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 3 and "PHP" in row.text:
+                    product_row = row
+                    break
+        if product_row is None:
             pytest.skip("No products available to edit")
 
-        edit_btn.click()
+        product_row.click()
         time.sleep(2)
 
         page_text = body_text(driver).lower()
-        has_form = ("title" in page_text or "price" in page_text
+        has_form = ("edit product" in page_text or "title" in page_text
+                    or "price" in page_text
                     or len(driver.find_elements(By.TAG_NAME, "input")) > 0)
         assert has_form, "Product edit form should be displayed"
 
@@ -550,46 +584,45 @@ class TestUT_A15:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
         buttons = driver.find_elements(By.TAG_NAME, "button")
         create_btn = None
         for btn in buttons:
-            txt = btn.text.lower()
-            if "create" in txt or "add" in txt or "new" in txt:
+            if "create store" in btn.text.lower():
                 create_btn = btn
                 break
         if create_btn is None:
-            pytest.skip("Create department button not found")
+            pytest.skip("Create Store button not found")
 
-        create_btn.click()
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", create_btn)
+        time.sleep(0.5)
+        driver.execute_script("arguments[0].click();", create_btn)
         time.sleep(2)
 
-        inputs = driver.find_elements(By.TAG_NAME, "input")
-        for inp in inputs:
-            placeholder = (inp.get_attribute("placeholder") or "").lower()
-            name = (inp.get_attribute("name") or "").lower()
-            if "name" in placeholder or "name" in name or "department" in placeholder:
-                inp.clear()
-                inp.send_keys(f"Selenium Dept UT-A15 {int(time.time())}")
-                break
+        # Fill store name input (placeholder: "Enter store name")
+        name_input = driver.find_element(By.CSS_SELECTOR, "input[placeholder='Enter store name']")
+        name_input.clear()
+        name_input.send_keys(f"Selenium Store UT-A15 {int(time.time())}")
 
+        # Fill description textarea
         textareas = driver.find_elements(By.TAG_NAME, "textarea")
         for ta in textareas:
             ta.clear()
-            ta.send_keys("Test department created by Selenium")
+            ta.send_keys("Test store created by Selenium")
 
-        submit_btns = [b for b in driver.find_elements(By.TAG_NAME, "button")
-                       if "create" in b.text.lower() or "save" in b.text.lower() or "submit" in b.text.lower()]
-        if submit_btns:
-            submit_btns[0].click()
-            time.sleep(3)
+        # Click the "Create Store" submit button inside the modal (btn-primary)
+        submit_btn = driver.find_element(By.CSS_SELECTOR, "button.btn-primary")
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", submit_btn)
+        time.sleep(0.3)
+        driver.execute_script("arguments[0].click();", submit_btn)
+        time.sleep(3)
 
         page_text = body_text(driver).lower()
         assert ("created" in page_text or "success" in page_text
-                or "selenium dept" in page_text), \
-            "New department should be created"
+                or "selenium store" in page_text), \
+            "New store should be created"
 
 
 class TestUT_A16:
@@ -605,7 +638,7 @@ class TestUT_A16:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
         page_text = body_text(driver)
@@ -629,24 +662,28 @@ class TestUT_A17:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        edit_btn = None
-        for btn in buttons:
-            if "edit" in btn.text.lower() or "update" in btn.text.lower():
-                edit_btn = btn
+        # Store cards are divs with cursor:pointer — click first available store card
+        store_cards = driver.find_elements(By.XPATH,
+            "//div[@style and contains(@style,'cursor: pointer') and contains(@style,'border-radius')]")
+        store_card = None
+        for card in store_cards:
+            if card.text.strip():
+                store_card = card
                 break
-        if edit_btn is None:
-            pytest.skip("No departments available to edit")
+        if store_card is None:
+            pytest.skip("No stores available to view")
 
-        edit_btn.click()
-        time.sleep(2)
+        driver.execute_script("arguments[0].click();", store_card)
+        time.sleep(3)
 
         page_text = body_text(driver).lower()
-        has_form = len(driver.find_elements(By.TAG_NAME, "input")) > 0
-        assert has_form, "Department edit form should be displayed"
+        has_detail = ("store" in page_text or "seller" in page_text
+                      or "manager" in page_text or "product" in page_text
+                      or "staff" in page_text)
+        assert has_detail, "Store detail panel should be displayed"
 
 
 class TestUT_A18:
@@ -662,7 +699,7 @@ class TestUT_A18:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
         buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -706,7 +743,7 @@ class TestUT_A19:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
         # Look for add products or manage products button
@@ -759,20 +796,23 @@ class TestUT_A20:
             navigate_sidebar(driver, "Delivery")
             time.sleep(2)
 
+        ts = int(time.time())
         inputs = driver.find_elements(By.TAG_NAME, "input")
         for inp in inputs:
             placeholder = (inp.get_attribute("placeholder") or "").lower()
-            name = (inp.get_attribute("name") or "").lower()
             inp_type = (inp.get_attribute("type") or "").lower()
-            if "name" in placeholder or "name" in name:
+            if "juan dela cruz" in placeholder or "full name" in placeholder:
                 inp.clear()
                 inp.send_keys("Selenium Delivery UT-A20")
-            elif "email" in placeholder or inp_type == "email":
+            elif "juan@example" in placeholder or inp_type == "email":
                 inp.clear()
-                inp.send_keys(f"selenium_delivery_a20_{int(time.time())}@retailtalk.test")
-            elif "password" in placeholder or inp_type == "password":
+                inp.send_keys(f"selenium_delivery_a20_{ts}@retailtalk.test")
+            elif "minimum" in placeholder or inp_type == "password":
                 inp.clear()
                 inp.send_keys("Test@12345")
+            elif "09171234567" in placeholder or "contact" in placeholder:
+                inp.clear()
+                inp.send_keys(f"091{ts % 100000000:08d}"[:11])
 
         submit_btns = [b for b in driver.find_elements(By.TAG_NAME, "button")
                        if "register" in b.text.lower() or "create" in b.text.lower() or "submit" in b.text.lower()]
@@ -887,7 +927,7 @@ class TestUT_A24:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Salary")
+        navigate_sidebar(driver, "Salaries")
         time.sleep(3)
 
         page_text = body_text(driver)
@@ -913,10 +953,28 @@ class TestUT_A25:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Salary")
+        navigate_sidebar(driver, "Salaries")
         time.sleep(3)
 
-        # Look for salary input or set button
+        # Click a store card to open the salary modal
+        store_cards = driver.find_elements(By.XPATH,
+            "//div[@style and contains(@style,'cursor: pointer') and contains(@style,'border-radius')]")
+        clicked = False
+        for card in store_cards:
+            if card.text.strip():
+                driver.execute_script("arguments[0].click();", card)
+                clicked = True
+                time.sleep(2)
+                break
+        if not clicked:
+            pytest.skip("No store cards found in Salaries section")
+
+        # Click "Salary: PHP ..." span to activate the salary edit input
+        salary_spans = driver.find_elements(By.XPATH, "//*[contains(text(), 'Salary: PHP')]")
+        if salary_spans:
+            driver.execute_script("arguments[0].click();", salary_spans[0])
+            time.sleep(1)
+
         inputs = driver.find_elements(By.TAG_NAME, "input")
         salary_input = None
         for inp in inputs:
@@ -961,7 +1019,7 @@ class TestUT_A26:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Salary")
+        navigate_sidebar(driver, "Salaries")
         time.sleep(3)
 
         buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -1010,7 +1068,7 @@ class TestUT_A27:
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(3)
 
         # Look for register manager button

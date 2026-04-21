@@ -233,10 +233,15 @@ class TestIT_B00009:
         login_as(driver, "buyer")
         driver.get(f"{BASE_URL}/products")
         time.sleep(3)
-        product_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/products/']")
-        if not product_links:
+        # Products page uses clickable div cards (no anchor tags)
+        product_cards = driver.find_elements(By.CSS_SELECTOR, ".product-card")
+        if not product_cards:
+            # fallback: any div with cursor:pointer containing a price
+            product_cards = driver.find_elements(By.XPATH,
+                "//div[contains(@style,'cursor: pointer') or contains(@style,'cursor:pointer')]")
+        if not product_cards:
             pytest.skip("No products available")
-        product_links[0].click()
+        product_cards[0].click()
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         cart_btn = None
@@ -302,7 +307,8 @@ class TestIT_B00011:
         remove_btn = None
         for btn in buttons:
             txt = btn.text.lower()
-            if "remove" in txt or "delete" in txt or "×" in txt or "trash" in txt:
+            # Cart remove button uses ✕ character
+            if "remove" in txt or "delete" in txt or "×" in txt or "✕" in txt or "trash" in txt:
                 remove_btn = btn
                 break
         if remove_btn is None:
@@ -418,17 +424,23 @@ class TestIT_B00016:
         login_as(driver, "buyer")
         driver.get(f"{BASE_URL}/products")
         time.sleep(3)
-        product_links = driver.find_elements(By.CSS_SELECTOR, "a[href*='/products/']")
-        if not product_links:
+        product_cards = driver.find_elements(By.CSS_SELECTOR, ".product-card")
+        if not product_cards:
+            product_cards = driver.find_elements(By.XPATH,
+                "//div[contains(@style,'cursor: pointer') or contains(@style,'cursor:pointer')]")
+        if not product_cards:
             pytest.skip("No products available")
-        product_links[0].click()
+        product_cards[0].click()
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         wishlist_btn = None
         for btn in buttons:
             txt = btn.text.lower()
-            attr = (btn.get_attribute("aria-label") or "").lower()
-            if "wishlist" in txt or "wish" in txt or "heart" in txt or "wishlist" in attr:
+            aria = (btn.get_attribute("aria-label") or "").lower()
+            title = (btn.get_attribute("title") or "").lower()
+            if ("wishlist" in txt or "wish" in txt or "heart" in txt
+                    or "wishlist" in aria or "wishlist" in title
+                    or "❤" in btn.text or "🤍" in btn.text):
                 wishlist_btn = btn
                 break
         if wishlist_btn is None:

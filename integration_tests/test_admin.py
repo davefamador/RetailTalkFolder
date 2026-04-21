@@ -85,20 +85,32 @@ class TestIT_A00004:
     def test_ban_user(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
+        time.sleep(3)
         navigate_sidebar(driver, "User")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        ban_btn = None
-        for btn in buttons:
-            if "ban" in btn.text.lower():
-                ban_btn = btn
+        time.sleep(4)
+        # Click first non-admin user row to open the slide-in detail panel
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        clicked = False
+        for row in rows:
+            if "admin" not in row.text.lower():
+                row.click()
+                time.sleep(4)  # wait for async panel + user detail to load
+                clicked = True
                 break
-        if ban_btn is None:
-            pytest.skip("No ban button found")
-        page_text = body_text(driver)
-        assert "user" in page_text.lower(), \
-            "Users section should be loaded to test ban"
+        if not clicked:
+            pytest.skip("No non-admin user rows found")
+        # Ban button is inside the fixed aside panel
+        try:
+            ban_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//aside//button[normalize-space(text())='Ban']"))
+            )
+        except Exception:
+            pytest.skip("No ban button found in user detail panel")
+        ban_btn.click()
+        time.sleep(2)
+        page_text = body_text(driver).lower()
+        assert "ban" in page_text or "user" in page_text, \
+            "Ban action should complete successfully"
 
 
 class TestIT_A00005:
@@ -112,19 +124,36 @@ class TestIT_A00005:
     def test_unban_user(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
+        time.sleep(3)
         navigate_sidebar(driver, "User")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        unban_btn = None
-        for btn in buttons:
-            if "unban" in btn.text.lower():
-                unban_btn = btn
+        time.sleep(4)
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        found = False
+        for row in rows:
+            if "admin" in row.text.lower():
+                continue
+            row.click()
+            time.sleep(4)
+            try:
+                unban_btn = WebDriverWait(driver, 6).until(
+                    EC.element_to_be_clickable((By.XPATH, "//aside//button[normalize-space(text())='Unban']"))
+                )
+                unban_btn.click()
+                time.sleep(2)
+                found = True
                 break
-        if unban_btn is None:
+            except Exception:
+                # Close panel and try next row
+                try:
+                    close_btn = driver.find_element(By.XPATH, "//aside//button[last()]")
+                    close_btn.click()
+                    time.sleep(1)
+                except Exception:
+                    pass
+        if not found:
             pytest.skip("No banned users to unban")
-        page_text = body_text(driver)
-        assert "user" in page_text.lower(), \
+        page_text = body_text(driver).lower()
+        assert "user" in page_text, \
             "Users section should be loaded to test unban"
 
 
@@ -196,7 +225,7 @@ class TestIT_A00008:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("department" in page_text.lower() or "assign" in page_text.lower()
@@ -246,7 +275,7 @@ class TestIT_A00010:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("product" in page_text.lower() or "listing" in page_text.lower()
@@ -266,7 +295,7 @@ class TestIT_A00011:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         approve_btn = None
@@ -295,7 +324,7 @@ class TestIT_A00012:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         unapprove_btn = None
@@ -323,23 +352,20 @@ class TestIT_A00013:
     def test_update_product_info(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
-        navigate_sidebar(driver, "Product")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        edit_btn = None
-        for btn in buttons:
-            if "edit" in btn.text.lower() or "update" in btn.text.lower():
-                edit_btn = btn
-                break
-        if edit_btn is None:
+        time.sleep(3)
+        navigate_sidebar(driver, "Products")
+        time.sleep(4)
+        # Product edit opens by clicking a product row (opens a modal)
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        if not rows:
             pytest.skip("No products to edit")
-        edit_btn.click()
-        time.sleep(2)
+        rows[0].click()
+        time.sleep(3)
         page_text = body_text(driver)
         assert ("edit" in page_text.lower() or "update" in page_text.lower()
+                or "price" in page_text.lower() or "title" in page_text.lower()
                 or "product" in page_text.lower()), \
-            "Product update form should be accessible"
+            "Product update modal should be accessible after clicking row"
 
 
 class TestIT_A00014:
@@ -353,20 +379,20 @@ class TestIT_A00014:
     def test_delete_product(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
-        navigate_sidebar(driver, "Product")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        delete_btn = None
-        for btn in buttons:
-            if "delete" in btn.text.lower():
-                delete_btn = btn
-                break
-        if delete_btn is None:
+        time.sleep(3)
+        navigate_sidebar(driver, "Products")
+        time.sleep(4)
+        try:
+            delete_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//table//button[normalize-space(text())='Delete']"))
+            )
+        except Exception:
             pytest.skip("No products to delete")
-        page_text = body_text(driver)
-        assert "product" in page_text.lower(), \
-            "Products section should be loaded to test delete"
+        delete_btn.click()
+        time.sleep(2)
+        page_text = body_text(driver).lower()
+        assert ("delete" in page_text or "confirm" in page_text or "product" in page_text), \
+            "Delete confirmation or products section should be visible"
 
 
 class TestIT_A00015:
@@ -381,7 +407,7 @@ class TestIT_A00015:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         removal_btn = None
@@ -408,7 +434,7 @@ class TestIT_A00016:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Product")
+        navigate_sidebar(driver, "Products")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         reject_btn = None
@@ -435,7 +461,7 @@ class TestIT_A00017:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         create_btn = None
@@ -465,7 +491,7 @@ class TestIT_A00018:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("department" in page_text.lower() or "no department" in page_text.lower()
@@ -485,7 +511,7 @@ class TestIT_A00019:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         edit_btn = None
@@ -515,7 +541,7 @@ class TestIT_A00020:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
+        navigate_sidebar(driver, "Stores")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         delete_btn = None
@@ -541,20 +567,28 @@ class TestIT_A00021:
     def test_add_products_to_department(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
+        time.sleep(3)
+        navigate_sidebar(driver, "Stores")
+        time.sleep(4)
+        # Dept cards are plain divs — find by the h3 store name inside them
+        dept_headings = driver.find_elements(By.XPATH, "//main//h3")
+        if not dept_headings:
+            pytest.skip("No department cards found")
+        # Click the parent card div of the first h3
+        driver.execute_script("arguments[0].closest('div[style]').click()", dept_headings[0])
+        time.sleep(3)
+        # Click "+ Create Product" button inside the modal
+        try:
+            create_btn = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Create Product')]"))
+            )
+        except Exception:
+            pytest.skip("Create Product button not found in department modal")
+        create_btn.click()
         time.sleep(2)
-        navigate_sidebar(driver, "Department")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        add_btn = None
-        for btn in buttons:
-            if ("product" in btn.text.lower() and "add" in btn.text.lower()) or "add product" in btn.text.lower():
-                add_btn = btn
-                break
-        if add_btn is None:
-            pytest.skip("Add products to department button not found")
-        page_text = body_text(driver)
-        assert "department" in page_text.lower(), \
-            "Department section should be loaded to test product assignment"
+        page_text = body_text(driver).lower()
+        assert ("product" in page_text or "create" in page_text or "name" in page_text), \
+            "Create product form inside department should be accessible"
 
 
 class TestIT_A00022:
@@ -608,7 +642,7 @@ class TestIT_A00024:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Transaction")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("transaction" in page_text.lower() or "order" in page_text.lower()
@@ -628,7 +662,7 @@ class TestIT_A00025:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Report")
+        navigate_sidebar(driver, "Reports")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("report" in page_text.lower() or "revenue" in page_text.lower()
@@ -649,10 +683,10 @@ class TestIT_A00026:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Salary")
+        navigate_sidebar(driver, "Salaries")
         time.sleep(2)
         page_text = body_text(driver)
-        assert ("salary" in page_text.lower() or "staff" in page_text.lower()
+        assert ("salar" in page_text.lower() or "staff" in page_text.lower()
                 or "PHP" in page_text or "no salary" in page_text.lower()
                 or "payment" in page_text.lower()), \
             "All staff salaries should be visible to admin"
@@ -669,23 +703,33 @@ class TestIT_A00027:
     def test_set_staff_salary(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
-        navigate_sidebar(driver, "Salary")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        set_btn = None
-        for btn in buttons:
-            if "set" in btn.text.lower() or "assign" in btn.text.lower() or "update" in btn.text.lower():
-                set_btn = btn
-                break
-        if set_btn is None:
+        time.sleep(3)
+        navigate_sidebar(driver, "Salaries")
+        time.sleep(4)
+        # Store cards contain "members" and "MANAGER" text — find the smallest div that has both
+        clicked = driver.execute_script("""
+            var divs = document.querySelectorAll('main div');
+            for (var i = 0; i < divs.length; i++) {
+                var t = divs[i].innerText || '';
+                if (t.includes('members') && t.includes('MANAGER') && t.length < 300) {
+                    divs[i].click();
+                    return true;
+                }
+            }
+            return false;
+        """)
+        if not clicked:
+            pytest.skip("No store cards found in Salaries section")
+        time.sleep(3)
+        # Click "Click to edit salary" span inside the modal
+        salary_spans = driver.find_elements(By.XPATH, "//*[@title='Click to edit salary']")
+        if not salary_spans:
             pytest.skip("No set salary button found")
-        set_btn.click()
+        salary_spans[0].click()
         time.sleep(2)
-        page_text = body_text(driver)
-        assert ("salary" in page_text.lower() or "amount" in page_text.lower()
-                or "set" in page_text.lower()), \
-            "Salary assignment form should be accessible"
+        page_text = body_text(driver).lower()
+        assert ("salary" in page_text or "save" in page_text or "php" in page_text), \
+            "Salary edit input should appear after clicking salary span"
 
 
 class TestIT_A00028:
@@ -699,20 +743,21 @@ class TestIT_A00028:
     def test_pay_all_salaries(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
-        navigate_sidebar(driver, "Salary")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        pay_all_btn = None
-        for btn in buttons:
-            txt = btn.text.lower()
-            if ("pay all" in txt) or ("pay" in txt and "all" in txt):
-                pay_all_btn = btn
-                break
+        time.sleep(3)
+        navigate_sidebar(driver, "Salaries")
+        time.sleep(4)
+        # "Pay All Salaries" button may be disabled when remaining=0, use innerText via JS
+        pay_all_btn = driver.execute_script("""
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].innerText.toLowerCase().includes('pay all')) return btns[i];
+            }
+            return null;
+        """)
         if pay_all_btn is None:
             pytest.skip("No pay all salaries button found")
-        page_text = body_text(driver)
-        assert "salary" in page_text.lower(), \
+        page_text = body_text(driver).lower()
+        assert "salar" in page_text or "pay all" in page_text, \
             "Salary section should be loaded to test pay all"
 
 
@@ -727,21 +772,37 @@ class TestIT_A00029:
     def test_pay_salaries_by_department(self, driver):
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
-        time.sleep(2)
-        navigate_sidebar(driver, "Salary")
-        time.sleep(2)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        pay_dept_btn = None
-        for btn in buttons:
-            txt = btn.text.lower()
-            if "department" in txt and "pay" in txt:
-                pay_dept_btn = btn
-                break
-        if pay_dept_btn is None:
+        time.sleep(3)
+        navigate_sidebar(driver, "Salaries")
+        time.sleep(4)
+        # Click first store card (contains "members" and "MANAGER")
+        clicked = driver.execute_script("""
+            var divs = document.querySelectorAll('main div');
+            for (var i = 0; i < divs.length; i++) {
+                var t = divs[i].innerText || '';
+                if (t.includes('members') && t.includes('MANAGER') && t.length < 300) {
+                    divs[i].click();
+                    return true;
+                }
+            }
+            return false;
+        """)
+        if not clicked:
+            pytest.skip("No store cards found in Salaries section")
+        time.sleep(3)
+        # Button text is "Pay All in <StoreName>"
+        pay_btn = driver.execute_script("""
+            var btns = document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].innerText.toLowerCase().includes('pay all in')) return btns[i];
+            }
+            return null;
+        """)
+        if pay_btn is None:
             pytest.skip("No pay by department button found")
-        page_text = body_text(driver)
-        assert "salary" in page_text.lower(), \
-            "Salary section should be loaded to test pay by department"
+        page_text = body_text(driver).lower()
+        assert "salar" in page_text or "pay all in" in page_text, \
+            "Salary store modal should be open with pay button visible"
 
 
 class TestIT_A00030:
@@ -756,7 +817,7 @@ class TestIT_A00030:
         login_as(driver, "admin")
         driver.get(f"{BASE_URL}/admin/dashboard")
         time.sleep(2)
-        navigate_sidebar(driver, "Manager")
+        navigate_sidebar(driver, "Users")
         time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         register_btn = None

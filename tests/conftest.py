@@ -95,7 +95,7 @@ def driver():
     d = make_driver(headless=False)  # set True for CI
     d.implicitly_wait(4)
     yield d
-    input("\n[Browser paused] Press Enter to close the browser...")
+    time.sleep(5)  # browser stays open for 5s after tests finish
     d.quit()
 
 
@@ -192,10 +192,30 @@ def navigate_seller_tab(driver, tab_label: str):
     raise AssertionError(f"Seller sidebar tab '{tab_label}' not found")
 
 def navigate_sidebar(driver, tab_label: str):
-    """Click a sidebar button by label text (works for any dashboard)."""
+    """Click a sidebar button by label text or title attribute (works for collapsed sidebars too)."""
+    # Try expanding collapsed admin sidebar via logo click first
+    logos = driver.find_elements(By.CSS_SELECTOR, "img[alt='RetailTalk']")
+    if logos:
+        # Check if sidebar is collapsed (buttons have title attr but no visible text)
+        buttons = driver.find_elements(By.TAG_NAME, "button")
+        has_text = any(tab_label.lower() in btn.text.lower() for btn in buttons)
+        if not has_text:
+            try:
+                logos[0].click()
+                time.sleep(1)
+            except Exception:
+                pass
+
     buttons = driver.find_elements(By.TAG_NAME, "button")
     for btn in buttons:
         if tab_label.lower() in btn.text.lower():
+            btn.click()
+            time.sleep(2)
+            return
+    # Fallback: match by title attribute (collapsed sidebar)
+    for btn in buttons:
+        title = (btn.get_attribute("title") or "").lower()
+        if tab_label.lower() in title:
             btn.click()
             time.sleep(2)
             return

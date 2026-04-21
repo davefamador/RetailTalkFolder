@@ -209,8 +209,25 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
     """ Step 3: experiments """
     global_step = 0
     step_start_time = time.time()
+    start_epoch = 0
 
-    for idx_epoch in range(0, num_train_epochs):
+    # Resume from latest epoch checkpoint if any exist
+    existing_ckpts = sorted(
+        [f for f in os.listdir(path_model) if f.startswith("checkpoint_epoch_") and f.endswith(".pt")]
+        if os.path.exists(path_model) else []
+    )
+    if existing_ckpts:
+        latest_ckpt = os.path.join(path_model, existing_ckpts[-1])
+        ckpt = torch.load(latest_ckpt, map_location=device)
+        model.load_state_dict(ckpt["model_state"])
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+        scheduler.load_state_dict(ckpt["scheduler_state"])
+        start_epoch = ckpt["epoch"] + 1
+        global_step = ckpt["global_step"]
+        best_metric_value = ckpt["best_metric_value"]
+        print(f"Resumed from checkpoint: {latest_ckpt} (epoch {start_epoch}, step {global_step}, best metric {best_metric_value:.4f}")
+
+    for idx_epoch in range(start_epoch, num_train_epochs):
         
         """ Step 3.1: Training """
         for (idx_train_batch, train_batch) in enumerate(train_dataloader):
@@ -281,3 +298,23 @@ def train(model, train_inputs, validation_inputs, path_model, device='cpu', batc
                     """ Step 4: store model """
                     pathlib.Path(path_model).mkdir(parents=True, exist_ok=True)
                     torch.save(best_model.state_dict(), os.path.join(path_model, "pytorch_model.bin"))
+
+        # Save per-epoch checkpoint (resume + deployable)
+        pathlib.Path(path_model).mkdir(parents=True, exist_ok=True)
+        new_ckpt_path = os.path.join(path_model, f"checkpoint_epoch_{idx_epoch+1}.pt")
+        torch.save({
+            "epoch": idx_epoch,
+            "global_step": global_step,
+            "best_metric_value": best_metric_value,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(),
+        }, new_ckpt_path)
+
+        # Remove previous epoch checkpoint to save disk space
+        if idx_epoch > start_epoch:
+            prev_ckpt = os.path.join(path_model, f"checkpoint_epoch_{idx_epoch}.pt")
+            if os.path.exists(prev_ckpt):
+                os.remove(prev_ckpt)
+
+        print(f"Epoch {idx_epoch+1} checkpoint saved: {new_ckpt_path}")

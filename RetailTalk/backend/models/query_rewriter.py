@@ -151,6 +151,11 @@ def _merge_rewritten_queries(
                         product_idx += 1
                 elif key not in merged_slots:
                     merged_slots[key] = value
+        # Multiple distinct search groups always means a multi-search, regardless
+        # of what the classifier predicted for each individual sub-sentence.
+        if "multi_search" not in merged_intents:
+            merged_intents.insert(0, "multi_search")
+        merged_intents = [i for i in merged_intents if i != "single_search"]
         search_text = " | ".join(g.search_text for g in search_groups)
         return RewrittenQuery(
             search_text=search_text,

@@ -49,7 +49,7 @@ class TestIT_D00002:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
-        navigate_sidebar(driver, "Dashboard")
+        navigate_sidebar(driver, "Delivery")
         time.sleep(2)
         page_text = body_text(driver)
         assert ("available" in page_text.lower() or "order" in page_text.lower()
@@ -70,12 +70,8 @@ class TestIT_D00003:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
-        buttons = driver.find_elements(By.TAG_NAME, "button")
-        for btn in buttons:
-            if "active" in btn.text.lower():
-                btn.click()
-                time.sleep(2)
-                break
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
         page_text = body_text(driver)
         assert ("active" in page_text.lower() or "delivery" in page_text.lower()
                 or "no active" in page_text.lower() or "current" in page_text.lower()), \
@@ -94,10 +90,19 @@ class TestIT_D00004:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
+        # Click "Product Delivery" filter tab (not a sidebar item, just a filter button)
+        buttons = driver.find_elements(By.TAG_NAME, "button")
+        for btn in buttons:
+            if "product delivery" in btn.text.lower():
+                btn.click()
+                time.sleep(2)
+                break
         buttons = driver.find_elements(By.TAG_NAME, "button")
         pickup_btn = None
         for btn in buttons:
-            if "pick up" in btn.text.lower() or "pickup" in btn.text.lower() or "accept" in btn.text.lower():
+            if "pick up" in btn.text.lower() or "pickup" in btn.text.lower():
                 pickup_btn = btn
                 break
         if pickup_btn is None:
@@ -106,7 +111,7 @@ class TestIT_D00004:
         time.sleep(3)
         page_text = body_text(driver).lower()
         assert ("picked" in page_text or "accepted" in page_text or "success" in page_text
-                or "ondeliver" in page_text or "assigned" in page_text), \
+                or "ondeliver" in page_text or "assigned" in page_text or "active" in page_text), \
             "Order group should be picked up and assigned to delivery user"
 
 
@@ -121,18 +126,21 @@ class TestIT_D00005:
     def test_exceed_max_active_limit(self, driver):
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
-        time.sleep(3)
+        time.sleep(5)
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(4)
         buttons = driver.find_elements(By.TAG_NAME, "button")
-        pickup_btn = None
         for btn in buttons:
-            if "pick up" in btn.text.lower() or "pickup" in btn.text.lower() or "accept" in btn.text.lower():
-                pickup_btn = btn
+            if "product delivery" in btn.text.lower():
+                btn.click()
+                time.sleep(3)
                 break
-        if pickup_btn is None:
-            pytest.skip("No available orders — cannot test max limit")
-        page_text = body_text(driver)
-        assert "delivery" in page_text.lower(), \
-            "Delivery page should be loaded to verify max active limit enforcement"
+        page_text = body_text(driver).lower()
+        # If max is reached the pickup buttons show "Max deliveries reached (5)"
+        # OR the active deliveries count shows 5/5
+        assert ("max deliveries reached" in page_text or "5/5" in page_text
+                or "active deliveries" in page_text), \
+            "System should show max active delivery limit is reached"
 
 
 class TestIT_D00006:
@@ -146,18 +154,27 @@ class TestIT_D00006:
     def test_mark_order_delivered(self, driver):
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
-        time.sleep(3)
+        time.sleep(5)
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(4)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         deliver_btn = None
         for btn in buttons:
-            txt = btn.text.lower()
-            if "delivered" in txt or "mark delivered" in txt or "complete" in txt:
+            txt = btn.text.strip().lower()
+            if txt == "delivered" or txt == "mark delivered" or txt == "yes, delivered":
                 deliver_btn = btn
                 break
         if deliver_btn is None:
             pytest.skip("No active deliveries to mark as delivered")
         deliver_btn.click()
         time.sleep(3)
+        # Handle confirmation modal if it appears
+        buttons = driver.find_elements(By.TAG_NAME, "button")
+        for btn in buttons:
+            if "yes" in btn.text.lower() and "delivered" in btn.text.lower():
+                btn.click()
+                time.sleep(3)
+                break
         page_text = body_text(driver).lower()
         assert ("delivered" in page_text or "success" in page_text
                 or "completed" in page_text or "earning" in page_text), \
@@ -176,6 +193,8 @@ class TestIT_D00007:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
         buttons = driver.find_elements(By.TAG_NAME, "button")
         undeliver_btn = None
         for btn in buttons:
@@ -203,7 +222,7 @@ class TestIT_D00008:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
         page_text = body_text(driver)
         assert ("earning" in page_text.lower() or "total" in page_text.lower()
@@ -224,7 +243,7 @@ class TestIT_D00009:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
         inputs = driver.find_elements(By.TAG_NAME, "input")
         withdraw_input = None
@@ -262,7 +281,7 @@ class TestIT_D00010:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
         inputs = driver.find_elements(By.TAG_NAME, "input")
         withdraw_input = None

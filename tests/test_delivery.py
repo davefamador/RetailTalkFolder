@@ -98,6 +98,9 @@ class TestUT_D03:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
+
         buttons = driver.find_elements(By.TAG_NAME, "button")
         pickup_btn = None
         for btn in buttons:
@@ -131,6 +134,9 @@ class TestUT_D04:
         login_as(driver, "delivery")
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
+
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
 
         # Try to pick up an order — if already at max, should show error
         buttons = driver.find_elements(By.TAG_NAME, "button")
@@ -168,11 +174,14 @@ class TestUT_D05:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
+
         buttons = driver.find_elements(By.TAG_NAME, "button")
         deliver_btn = None
         for btn in buttons:
-            txt = btn.text.lower()
-            if "delivered" in txt or "mark delivered" in txt or "complete" in txt:
+            txt = btn.text.strip().lower()
+            if txt == "delivered":
                 deliver_btn = btn
                 break
 
@@ -201,11 +210,14 @@ class TestUT_D06:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
+        navigate_sidebar(driver, "Delivery")
+        time.sleep(2)
+
         buttons = driver.find_elements(By.TAG_NAME, "button")
         undeliver_btn = None
         for btn in buttons:
-            txt = btn.text.lower()
-            if "undelivered" in txt or "failed" in txt:
+            txt = btn.text.strip().lower()
+            if txt == "undelivered":
                 undeliver_btn = btn
                 break
 
@@ -238,7 +250,7 @@ class TestUT_D07:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
 
         page_text = body_text(driver)
@@ -264,7 +276,7 @@ class TestUT_D08:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
 
         # Look for daily/graph toggle
@@ -296,7 +308,7 @@ class TestUT_D09:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
 
         # Find withdrawal input
@@ -344,7 +356,7 @@ class TestUT_D10:
         driver.get(f"{BASE_URL}/delivery")
         time.sleep(3)
 
-        navigate_sidebar(driver, "Earning")
+        navigate_sidebar(driver, "Transactions")
         time.sleep(3)
 
         inputs = driver.find_elements(By.TAG_NAME, "input")
