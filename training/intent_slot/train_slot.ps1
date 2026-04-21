@@ -19,7 +19,7 @@ $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $scriptDir "venv\Scripts\python.exe"
 if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
 
-$dataFile   = Join-Path $scriptDir "shopping_queries_dataset\slotannotationdataset_cleaned.xlsx"
+$dataFile   = Join-Path $scriptDir "datasets\slotdataset.xlsx"
 $modelDir   = Join-Path $scriptDir "models\slot_extractor"
 $ckptFile   = Join-Path $modelDir "checkpoint.pt"
 $timestamp  = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
@@ -39,7 +39,7 @@ Write-Host ""
 if (-not (Test-Path $dataFile)) {
     Write-Host "  ERROR: Dataset not found:" -ForegroundColor Red
     Write-Host "    $dataFile" -ForegroundColor Red
-    Write-Host "  Please place slotannotationdataset_cleaned.xlsx in shopping_queries_dataset\" -ForegroundColor Yellow
+    Write-Host "  Please place slotdataset.xlsx in datasets\" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"; exit 1
 }
 

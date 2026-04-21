@@ -19,7 +19,7 @@ $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $scriptDir "venv\Scripts\python.exe"
 if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
 
-$dataFile   = Join-Path $scriptDir "shopping_queries_dataset\IntentDataset_cleaned.xlsx"
+$dataFile   = Join-Path $scriptDir "datasets\intentdataset.xlsx"
 $modelDir   = Join-Path $scriptDir "models\intent_classifier"
 $ckptFile   = Join-Path $modelDir "checkpoint.pt"
 $timestamp  = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
@@ -39,7 +39,7 @@ Write-Host ""
 if (-not (Test-Path $dataFile)) {
     Write-Host "  ERROR: Dataset not found:" -ForegroundColor Red
     Write-Host "    $dataFile" -ForegroundColor Red
-    Write-Host "  Please place IntentDataset_cleaned.xlsx in shopping_queries_dataset\" -ForegroundColor Yellow
+    Write-Host "  Please place intentdataset.xlsx in datasets\" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"; exit 1
 }
 

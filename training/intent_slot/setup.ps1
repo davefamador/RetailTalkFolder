@@ -31,8 +31,7 @@ catch {
 # ------ Create Virtual Environment ------
 Write-Host "[2/5] Setting up virtual environment..." -ForegroundColor Yellow
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$rootDir = Split-Path -Parent $scriptDir
-$venvPath = Join-Path $scriptDir "venv"
+$venvPath  = Join-Path $scriptDir "venv"
 
 if (Test-Path $venvPath) {
     Write-Host "  OK: Virtual environment already exists" -ForegroundColor Green
@@ -69,15 +68,16 @@ Write-Host "[4/5] Downloading NLTK data..." -ForegroundColor Yellow
 
 # ------ Verify Dataset Files ------
 Write-Host "[5/5] Checking dataset files..." -ForegroundColor Yellow
-$datasetDir = Join-Path $rootDir "shopping_queries_dataset"
-$intentFile = Join-Path $datasetDir "IntentDataset_cleaned.xlsx"
-$slotFile = Join-Path $datasetDir "slotannotationdataset.xlsx"
+$datasetDir = Join-Path $scriptDir "datasets"
+$intentFile = Join-Path $datasetDir "intentdataset.xlsx"
+$slotFile   = Join-Path $datasetDir "slotdataset.xlsx"
 
 $allGood = $true
 
 if (Test-Path $intentFile) {
     Write-Host "  OK: Intent dataset found" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "  WARNING: Intent dataset not found at:" -ForegroundColor Yellow
     Write-Host "    $intentFile" -ForegroundColor Yellow
     Write-Host "    You need this file to train the Intent Classifier." -ForegroundColor Yellow
@@ -86,7 +86,8 @@ if (Test-Path $intentFile) {
 
 if (Test-Path $slotFile) {
     Write-Host "  OK: Slot dataset found" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "  WARNING: Slot dataset not found at:" -ForegroundColor Yellow
     Write-Host "    $slotFile" -ForegroundColor Yellow
     Write-Host "    You need this file to train the Slot Extractor." -ForegroundColor Yellow

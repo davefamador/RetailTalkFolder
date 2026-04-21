@@ -19,23 +19,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$rootDir = Split-Path -Parent $scriptDir
+$scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $scriptDir "venv\Scripts\python.exe"
-$datasetDir = Join-Path $rootDir "shopping_queries_dataset"
+$datasetDir = Join-Path $scriptDir "datasets"
 
-# Fallback to system python if venv doesn't exist
-if (-not (Test-Path $pythonPath)) {
-    $pythonPath = "python"
-}
+if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
 
-# Model output directories
 $intentModelDir = Join-Path $scriptDir "models\intent_classifier"
-$slotModelDir = Join-Path $rootDir "models\slot_extractor"
+$slotModelDir   = Join-Path $scriptDir "models\slot_extractor"
 New-Item -ItemType Directory -Force -Path $intentModelDir | Out-Null
-New-Item -ItemType Directory -Force -Path $slotModelDir | Out-Null
+New-Item -ItemType Directory -Force -Path $slotModelDir   | Out-Null
 
-function Train-IntentClassifier {
+function Start-IntentTraining {
     param([switch]$WithResume)
 
     Write-Host ""
@@ -48,24 +43,23 @@ function Train-IntentClassifier {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
-    $intentData = Join-Path $datasetDir "IntentDataset_cleaned.xlsx"
+    $intentData = Join-Path $datasetDir "intentdataset.xlsx"
     if (-not (Test-Path $intentData)) {
         Write-Host "  ERROR: Dataset not found: $intentData" -ForegroundColor Red
         return $false
     }
 
-    $trainScript = Join-Path $scriptDir "train_intent_classifier.py"
-    $args = @(
-        $trainScript,
-        "--data", $intentData,
-        "--save_dir", $intentModelDir,
-        "--epochs", "5",
+    $trainArgs = @(
+        (Join-Path $scriptDir "train_intent_classifier.py"),
+        "--data",       $intentData,
+        "--save_dir",   $intentModelDir,
+        "--epochs",     "10",
         "--batch_size", "16",
-        "--lr", "2e-5"
+        "--lr",         "2e-5"
     )
-    if ($WithResume) { $args += "--resume" }
+    if ($WithResume) { $trainArgs += "--resume" }
 
-    & $pythonPath @args
+    & $pythonPath @trainArgs
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
@@ -78,7 +72,7 @@ function Train-IntentClassifier {
     }
 }
 
-function Train-SlotExtractor {
+function Start-SlotTraining {
     param([switch]$WithResume)
 
     Write-Host ""
@@ -91,24 +85,23 @@ function Train-SlotExtractor {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
-    $slotData = Join-Path $datasetDir "slotannotationdataset_cleaned.xlsx"
+    $slotData = Join-Path $datasetDir "slotdataset.xlsx"
     if (-not (Test-Path $slotData)) {
         Write-Host "  ERROR: Dataset not found: $slotData" -ForegroundColor Red
         return $false
     }
 
-    $trainScript = Join-Path $scriptDir "train_slot_extractor.py"
-    $args = @(
-        $trainScript,
-        "--data", $slotData,
-        "--save_dir", $slotModelDir,
-        "--epochs", "8",
+    $trainArgs = @(
+        (Join-Path $scriptDir "train_slot_extractor.py"),
+        "--data",       $slotData,
+        "--save_dir",   $slotModelDir,
+        "--epochs",     "8",
         "--batch_size", "16",
-        "--lr", "3e-5"
+        "--lr",         "3e-5"
     )
-    if ($WithResume) { $args += "--resume" }
+    if ($WithResume) { $trainArgs += "--resume" }
 
-    & $pythonPath @args
+    & $pythonPath @trainArgs
 
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
@@ -132,29 +125,29 @@ function Show-Summary {
     Write-Host "    Slot:   $slotModelDir" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Output files per model:" -ForegroundColor White
-    Write-Host "    model.pt               - Trained model weights" -ForegroundColor White
-    Write-Host "    checkpoint.pt          - Resume checkpoint" -ForegroundColor White
-    Write-Host "    label_map.json         - Label/tag mappings" -ForegroundColor White
-    Write-Host "    config.json            - Training configuration" -ForegroundColor White
+    Write-Host "    model.pt                - Trained model weights" -ForegroundColor White
+    Write-Host "    checkpoint.pt           - Resume checkpoint" -ForegroundColor White
+    Write-Host "    label_map.json          - Label/tag mappings" -ForegroundColor White
+    Write-Host "    config.json             - Training configuration" -ForegroundColor White
     Write-Host "    evaluation_results.json - All evaluation metrics" -ForegroundColor White
     Write-Host "    training_history.json   - Per-epoch training history" -ForegroundColor White
 }
 
-# --- Non-interactive mode (command-line args) ---
+# --- Non-interactive mode ---
 if ($Mode -ne "") {
     switch ($Mode) {
-        "intent" { Train-IntentClassifier -WithResume:$Resume }
-        "slot"   { Train-SlotExtractor -WithResume:$Resume }
+        "intent" { Start-IntentTraining -WithResume:$Resume }
+        "slot"   { Start-SlotTraining   -WithResume:$Resume }
         "both"   {
-            Train-IntentClassifier -WithResume:$Resume
-            Train-SlotExtractor -WithResume:$Resume
+            Start-IntentTraining -WithResume:$Resume
+            Start-SlotTraining   -WithResume:$Resume
             Show-Summary
         }
     }
     exit 0
 }
 
-# --- Interactive mode ---
+# --- Interactive menu ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Intent & Slot Model Training" -ForegroundColor Cyan
@@ -173,24 +166,14 @@ Write-Host ""
 $choice = Read-Host "  Enter your choice (1-7)"
 
 switch ($choice) {
-    "1" { Train-IntentClassifier }
-    "2" { Train-SlotExtractor }
-    "3" {
-        Train-IntentClassifier
-        Train-SlotExtractor
-        Show-Summary
-    }
-    "4" { Train-IntentClassifier -WithResume }
-    "5" { Train-SlotExtractor -WithResume }
-    "6" {
-        Train-IntentClassifier -WithResume
-        Train-SlotExtractor -WithResume
-        Show-Summary
-    }
+    "1" { Start-IntentTraining }
+    "2" { Start-SlotTraining }
+    "3" { Start-IntentTraining; Start-SlotTraining; Show-Summary }
+    "4" { Start-IntentTraining -WithResume }
+    "5" { Start-SlotTraining   -WithResume }
+    "6" { Start-IntentTraining -WithResume; Start-SlotTraining -WithResume; Show-Summary }
     "7" { Write-Host "  Goodbye!" -ForegroundColor Cyan; exit 0 }
-    default {
-        Write-Host "  Invalid choice." -ForegroundColor Red
-    }
+    default { Write-Host "  Invalid choice." -ForegroundColor Red }
 }
 
 Write-Host ""
