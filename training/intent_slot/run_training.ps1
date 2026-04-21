@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pythonPath = Join-Path $scriptDir "venv\Scripts\python.exe"
-$datasetDir = Join-Path $scriptDir "datasets"
+$datasetDir = Join-Path $scriptDir "trainingdataset"
 
 if (-not (Test-Path $pythonPath)) { $pythonPath = "python" }
 

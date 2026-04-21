@@ -68,7 +68,7 @@ Write-Host "[4/5] Downloading NLTK data..." -ForegroundColor Yellow
 
 # ------ Verify Dataset Files ------
 Write-Host "[5/5] Checking dataset files..." -ForegroundColor Yellow
-$datasetDir = Join-Path $scriptDir "datasets"
+$datasetDir = Join-Path $scriptDir "trainingdataset"
 $intentFile = Join-Path $datasetDir "intentdataset.xlsx"
 $slotFile   = Join-Path $datasetDir "slotdataset.xlsx"
 
